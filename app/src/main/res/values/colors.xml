@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Gruvbox Dark Palette -->
+    <color name="gruvbox_bg">#282828</color>
+    <color name="gruvbox_bg_soft">#3c3836</color>
+    <color name="gruvbox_fg">#ebdbb2</color>
+    <color name="gruvbox_fg_dim">#a89984</color>
+    <color name="gruvbox_green">#b8bb26</color>
+    <color name="gruvbox_yellow">#fabd2f</color>
+    <color name="gruvbox_blue">#83a598</color>
+    <color name="gruvbox_purple">#d3869b</color>
+    <color name="gruvbox_aqua">#8ec07c</color>
+    <color name="gruvbox_red">#fb4934</color>
+    <color name="gruvbox_orange">#fe8019</color>
+    <color name="gruvbox_selection">#458588</color>
+
+    <!-- Gruvbox Light Palette -->
+    <color name="gruvbox_light_bg">#fbf1c7</color>
+    <color name="gruvbox_light_bg_soft">#ebdbb2</color>
+    <color name="gruvbox_light_fg">#3c3836</color>
+    <color name="gruvbox_light_fg_dim">#7c6f64</color>
+    <color name="gruvbox_light_green">#79740e</color>
+    <color name="gruvbox_light_yellow">#b57614</color>
+    <color name="gruvbox_light_blue">#076678</color>
+    <color name="gruvbox_light_purple">#8f3f71</color>
+    <color name="gruvbox_light_aqua">#427b58</color>
+    <color name="gruvbox_light_red">#9d0006</color>
+    <color name="gruvbox_light_orange">#af3a03</color>
+</resources>

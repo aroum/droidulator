@@ -1,0 +1,6 @@
+[submodule "app/src/main/cpp/gnu-units"]
+	path = app/src/main/cpp/gnu-units
+	url = https://github.com/ryantenney/gnu-units.git
+[submodule "app/src/main/cpp/tinyexpr-plusplus"]
+	path = app/src/main/cpp/tinyexpr-plusplus
+	url = https://github.com/Blake-Madden/tinyexpr-plusplus.git

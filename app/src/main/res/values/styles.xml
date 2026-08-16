@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.Droidulator" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="colorPrimary">@color/gruvbox_green</item>
+        <item name="colorPrimaryVariant">@color/gruvbox_aqua</item>
+        <item name="colorOnPrimary">@color/gruvbox_bg</item>
+        <item name="android:statusBarColor">@color/gruvbox_bg</item>
+        <item name="android:windowBackground">@color/gruvbox_bg</item>
+        <item name="alertDialogTheme">@style/GruvboxAlertDialogTheme</item>
+        <item name="android:alertDialogTheme">@style/GruvboxAlertDialogTheme</item>
+    </style>
+
+    <style name="GruvboxAlertDialogTheme" parent="Theme.MaterialComponents.DayNight.Dialog.Alert">
+        <item name="android:windowBackground">@color/gruvbox_bg</item>
+        <item name="android:colorBackground">@color/gruvbox_bg</item>
+        <item name="colorSurface">@color/gruvbox_bg</item>
+        <item name="colorOnSurface">@color/gruvbox_fg</item>
+        <item name="android:textColorPrimary">@color/gruvbox_fg</item>
+        <item name="android:textColorSecondary">@color/gruvbox_fg_dim</item>
+        <item name="colorAccent">@color/gruvbox_aqua</item>
+    </style>
+
+    <style name="GruvboxFullscreenDialog" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="android:windowIsFloating">false</item>
+        <item name="android:windowBackground">@color/gruvbox_bg</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:statusBarColor">@color/gruvbox_bg_soft</item>
+    </style>
+</resources>

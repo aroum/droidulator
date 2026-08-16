@@ -1,0 +1,482 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/main_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/gruvbox_bg"
+    android:padding="8dp">
+
+    <!-- Top Status Header Bar & Mode Selector -->
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:background="@color/gruvbox_bg_soft"
+        android:gravity="center_vertical"
+        android:padding="4dp">
+
+        <!-- Top Dropdown Spinner Mode Switcher -->
+        <Spinner
+            android:id="@+id/spinner_tabs"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@null"
+            android:spinnerMode="dropdown"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp" />
+
+        <!-- Run Script Button (Visible in Scripts mode) -->
+        <Button
+            android:id="@+id/btn_run_script"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:text="Run"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_aqua"
+            android:fontFamily="monospace"
+            android:textSize="12sp"
+            android:textStyle="bold"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp"
+            android:visibility="gone"
+            android:layout_marginEnd="2dp" />
+
+        <!-- Add Item Button (+) -->
+        <Button
+            android:id="@+id/btn_add_item"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:text="+"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_yellow"
+            android:fontFamily="monospace"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:visibility="gone"
+            android:layout_marginEnd="2dp" />
+
+        <!-- Delete All Items Button (Red ✕) -->
+        <Button
+            android:id="@+id/btn_delete_all"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:text="✕"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_red"
+            android:fontFamily="monospace"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:visibility="gone"
+            android:layout_marginEnd="2dp" />
+
+        <!-- Toggle e-history variables (#) -->
+        <Button
+            android:id="@+id/btn_toggle_evars"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:text="#"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_aqua"
+            android:fontFamily="monospace"
+            android:textSize="16sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:visibility="gone"
+            android:layout_marginEnd="2dp" />
+
+        <!-- Spacer View to push formatting options to the right -->
+        <View
+            android:layout_width="0dp"
+            android:layout_height="0dp"
+            android:layout_weight="1" />
+
+        <!-- Format Mode Spinner (NORM, FLT, FIX, SCI, ENG) -->
+        <Spinner
+            android:id="@+id/spinner_fmt_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@null"
+            android:spinnerMode="dropdown"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:layout_marginEnd="2dp" />
+
+        <!-- Precision Spinner (0dp .. 12dp) -->
+        <Spinner
+            android:id="@+id/spinner_fmt_prec"
+            android:layout_width="wrap_content"
+            android:layout_height="36dp"
+            android:background="@null"
+            android:spinnerMode="dropdown"
+            android:paddingStart="4dp"
+            android:paddingEnd="4dp"
+            android:layout_marginEnd="4dp" />
+
+        <TextView
+            android:id="@+id/tv_mode"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="DEG"
+            android:textColor="@color/gruvbox_yellow"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingStart="6dp"
+            android:paddingEnd="6dp" />
+    </LinearLayout>
+
+    <!-- Main Output / Terminal Log Area -->
+    <ScrollView
+        android:id="@+id/scroll_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/gruvbox_bg"
+        android:padding="4dp"
+        android:fillViewport="true">
+
+        <TextView
+            android:id="@+id/tv_output"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="@color/gruvbox_fg"
+            android:textSize="14sp"
+            android:lineSpacingExtra="4dp"
+            android:textIsSelectable="true"
+            android:text="Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n" />
+    </ScrollView>
+
+    <!-- Dedicated Plot View Container -->
+    <com.cardputer.cardulator.PlotView
+        android:id="@+id/plot_view"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/gruvbox_bg"
+        android:visibility="gone" />
+
+    <!-- Settings Menu UI Container -->
+    <ScrollView
+        android:id="@+id/scroll_settings"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/gruvbox_bg"
+        android:padding="12dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical">
+
+
+
+            <TextView
+                android:id="@+id/tv_settings_section_theme"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Theme Mode:"
+                android:textColor="@color/gruvbox_fg"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:layout_marginBottom="4dp" />
+
+            <RadioGroup
+                android:id="@+id/rg_theme_mode"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="vertical"
+                android:layout_marginBottom="16dp">
+
+                <RadioButton
+                    android:id="@+id/rb_theme_auto"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Auto"
+                    android:textColor="@color/gruvbox_fg"
+                    android:buttonTint="@color/gruvbox_aqua"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/rb_theme_dark"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Dark"
+                    android:textColor="@color/gruvbox_fg"
+                    android:buttonTint="@color/gruvbox_aqua"
+                    android:fontFamily="monospace" />
+
+                <RadioButton
+                    android:id="@+id/rb_theme_light"
+                    android:layout_width="wrap_content"
+                    android:layout_height="wrap_content"
+                    android:text="Light"
+                    android:textColor="@color/gruvbox_fg"
+                    android:buttonTint="@color/gruvbox_aqua"
+                    android:fontFamily="monospace" />
+            </RadioGroup>
+
+            <TextView
+                android:id="@+id/tv_settings_section_custom_theme"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Custom Theme Source:"
+                android:textColor="@color/gruvbox_fg"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:layout_marginBottom="4dp" />
+
+            <LinearLayout
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:orientation="horizontal"
+                android:layout_marginBottom="16dp">
+
+                <Button
+                    android:id="@+id/btn_load_custom_theme"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Load JSON Theme"
+                    android:textColor="@color/gruvbox_bg"
+                    android:backgroundTint="@color/gruvbox_aqua"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp"
+                    android:textStyle="bold"
+                    android:layout_marginEnd="6dp" />
+
+                <Button
+                    android:id="@+id/btn_reset_custom_theme"
+                    android:layout_width="0dp"
+                    android:layout_height="40dp"
+                    android:layout_weight="1"
+                    android:text="Reset to Built-in"
+                    android:textColor="@color/gruvbox_fg"
+                    android:backgroundTint="@color/gruvbox_bg_soft"
+                    android:fontFamily="monospace"
+                    android:textSize="12sp"
+                    android:textStyle="bold" />
+            </LinearLayout>
+
+            <TextView
+                android:id="@+id/tv_settings_section_display"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Display &amp; Input Preferences:"
+                android:textColor="@color/gruvbox_fg"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cb_hide_welcome"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Hide Welcome Message on Start"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cb_auto_pair"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Auto-Pair Brackets &amp; Quotes (( ), [ ], { }, &quot; &quot;)"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cb_digit_grouping"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Digit Grouping (Spaces for 1 234 and 0.000 001)"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="16dp" />
+
+            <TextView
+                android:id="@+id/tv_settings_section_enter_action"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="Enter Key Action in REPL:"
+                android:textColor="@color/gruvbox_fg"
+                android:fontFamily="monospace"
+                android:textSize="14sp"
+                android:layout_marginBottom="4dp" />
+
+            <Button
+                android:id="@+id/btn_settings_enter_action"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Enter Key: Send Command"
+                android:textColor="@color/gruvbox_bg"
+                android:backgroundTint="@color/gruvbox_blue"
+                android:fontFamily="monospace"
+                android:textStyle="bold"
+                android:layout_marginBottom="16dp" />
+
+            <Button
+                android:id="@+id/btn_settings_clear_history"
+                android:layout_width="match_parent"
+                android:layout_height="wrap_content"
+                android:text="Clear History &amp; Reset Engine Session"
+                android:textColor="@color/gruvbox_bg"
+                android:backgroundTint="@color/gruvbox_red"
+                android:fontFamily="monospace"
+                android:textStyle="bold" />
+
+        </LinearLayout>
+    </ScrollView>
+
+    <!-- Dedicated List Menu Container (Variables, Formulas, Constants, Scripts) -->
+    <ScrollView
+        android:id="@+id/scroll_items"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:background="@color/gruvbox_bg"
+        android:padding="8dp"
+        android:visibility="gone">
+
+        <LinearLayout
+            android:id="@+id/items_container"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:orientation="vertical" />
+    </ScrollView>
+
+    <!-- Input Box & Error Overlay Container -->
+    <FrameLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content">
+
+        <EditText
+            android:id="@+id/et_input"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:hint="@string/hint_input"
+            android:textColorHint="@color/gruvbox_fg_dim"
+            android:textColor="@color/gruvbox_fg"
+            android:background="@color/gruvbox_bg_soft"
+            android:fontFamily="monospace"
+            android:textSize="15sp"
+            android:padding="10dp"
+            android:minLines="1"
+            android:maxLines="6"
+            android:scrollbars="vertical"
+            android:imeOptions="actionDone"
+            android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword" />
+
+        <TextView
+            android:id="@+id/tv_error_overlay"
+            android:layout_width="match_parent"
+            android:layout_height="match_parent"
+            android:background="#E6FB4934"
+            android:textColor="#FFFFFF"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:gravity="center_vertical"
+            android:padding="10dp"
+            android:visibility="gone"
+            android:clickable="true"
+            android:focusable="true" />
+    </FrameLayout>
+
+    <!-- Sticky Keyboard Toolbar (Navigation & Controls Bar) -->
+    <LinearLayout
+        android:id="@+id/toolbar_keyboard"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:background="@color/gruvbox_bg_soft"
+        android:gravity="center_vertical"
+        android:layout_marginTop="4dp">
+
+        <!-- Navigation Arrow Buttons -->
+        <Button
+            android:id="@+id/btn_nav_left"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="◀"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_blue"
+            android:textSize="12sp"
+            android:padding="0dp" />
+
+        <Button
+            android:id="@+id/btn_nav_right"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="▶"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_blue"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:layout_marginStart="2dp" />
+
+        <Button
+            android:id="@+id/btn_nav_up"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="▲"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_purple"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:layout_marginStart="2dp" />
+
+        <Button
+            android:id="@+id/btn_nav_down"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="▼"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_purple"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:layout_marginStart="2dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Tab Autocomplete Button -->
+        <Button
+            android:id="@+id/btn_tab"
+            android:layout_width="wrap_content"
+            android:layout_height="match_parent"
+            android:text="@string/btn_tab"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_yellow"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginStart="2dp"
+            android:layout_marginEnd="12dp" />
+
+        <!-- Clear Input / History Button -->
+        <Button
+            android:id="@+id/btn_clear"
+            android:layout_width="40dp"
+            android:layout_height="match_parent"
+            android:text="@string/btn_clear"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_red"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:padding="0dp" />
+    </LinearLayout>
+
+</LinearLayout>

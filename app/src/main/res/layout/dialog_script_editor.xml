@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="utf-8"?>
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/script_editor_root"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:orientation="vertical"
+    android:background="@color/gruvbox_bg"
+    android:padding="16dp">
+
+    <!-- Top Toolbar -->
+    <LinearLayout
+        android:id="@+id/script_editor_topbar"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:layout_marginBottom="12dp">
+
+        <Button
+            android:id="@+id/btn_script_cancel"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Cancel"
+            android:textColor="@color/gruvbox_fg"
+            android:backgroundTint="@android:color/transparent"
+            android:fontFamily="monospace"
+            android:textSize="13sp" />
+
+        <Button
+            android:id="@+id/btn_script_tab"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="TAB"
+            android:textColor="@color/gruvbox_fg"
+            android:backgroundTint="@android:color/transparent"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:layout_marginStart="4dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <Button
+            android:id="@+id/btn_script_run"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="▶ RUN"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_yellow"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:textStyle="bold"
+            android:layout_marginEnd="6dp" />
+
+        <Button
+            android:id="@+id/btn_script_save"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="SAVE"
+            android:textColor="@color/gruvbox_light_bg"
+            android:backgroundTint="@color/gruvbox_aqua"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:textStyle="bold" />
+    </LinearLayout>
+
+    <!-- Script Name Field -->
+    <EditText
+        android:id="@+id/et_script_name"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:hint="Script Name (e.g. my_script)"
+        android:textColorHint="@color/gruvbox_fg_dim"
+        android:textColor="@color/gruvbox_fg"
+        android:background="@color/gruvbox_bg_soft"
+        android:fontFamily="monospace"
+        android:textSize="14sp"
+        android:padding="12dp"
+        android:singleLine="true"
+        android:layout_marginBottom="12dp" />
+
+    <!-- Script Code Multi-Line Editor -->
+    <EditText
+        android:id="@+id/et_script_code"
+        android:layout_width="match_parent"
+        android:layout_height="0dp"
+        android:layout_weight="1"
+        android:hint="// Enter your script code here..."
+        android:textColorHint="@color/gruvbox_fg_dim"
+        android:textColor="@color/gruvbox_fg"
+        android:background="@color/gruvbox_bg_soft"
+        android:fontFamily="monospace"
+        android:textSize="14sp"
+        android:padding="12dp"
+        android:gravity="top|start"
+        android:inputType="textMultiLine|textNoSuggestions"
+        android:scrollbars="vertical" />
+
+</LinearLayout>
