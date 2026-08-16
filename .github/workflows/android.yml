@@ -74,16 +74,29 @@ jobs:
         name: droidulator-ci-apk
         path: ${{ env.APK_PATH }}
 
+    - name: Set Release Tag & Title
+      id: rel_info
+      run: |
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          TAG_NAME="${GITHUB_REF#refs/tags/}"
+          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "release_name=${TAG_NAME}" >> $GITHUB_OUTPUT
+          echo "prerelease=false" >> $GITHUB_OUTPUT
+        else
+          echo "tag_name=nightly" >> $GITHUB_OUTPUT
+          echo "release_name=Nightly Build" >> $GITHUB_OUTPUT
+          echo "prerelease=true" >> $GITHUB_OUTPUT
+        fi
+
     - name: Upload APK to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: nightly
-        name: Nightly Build
+        tag_name: ${{ steps.rel_info.outputs.tag_name }}
+        name: ${{ steps.rel_info.outputs.release_name }}
         body: |
-          Automatic Nightly Build
+          Droidulator Release ${{ steps.rel_info.outputs.release_name }}
           Commit: ${{ github.sha }}
-          Updated: ${{ github.event.head_commit.timestamp || github.sha }}
-        prerelease: true
+        prerelease: ${{ steps.rel_info.outputs.prerelease }}
         make_latest: true
         files: ${{ env.APK_PATH }}
       env:
