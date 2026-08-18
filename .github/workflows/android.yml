@@ -63,41 +63,51 @@ jobs:
         RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
         RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
-    - name: Set APK Path & Name
+    - name: Prepare Artifact & Release Names
+      id: prep
       run: |
-        APK_FILE=$(find app/build/outputs/apk/ci/ -name "*.apk" | head -n 1)
-        echo "APK_PATH=$APK_FILE" >> $GITHUB_ENV
+        DATE_TAG=$(date +"%y.%m.%d")
+        RAW_APK=$(find app/build/outputs/apk/ci/ -name "*.apk" | head -n 1)
+        
+        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+          VERSION="${GITHUB_REF_NAME}"
+          APK_NAME="droidulator-${VERSION}.apk"
+          RELEASE_TITLE="Droidulator ${VERSION}"
+          IS_PRERELEASE=false
+        else
+          VERSION="${DATE_TAG}-nightly"
+          APK_NAME="droidulator-${DATE_TAG}-nightly.apk"
+          RELEASE_TITLE="Droidulator Nightly (${DATE_TAG})"
+          IS_PRERELEASE=true
+        fi
+        
+        cp "$RAW_APK" "$APK_NAME"
+        echo "apk_path=${APK_NAME}" >> $GITHUB_OUTPUT
+        echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
+        echo "version=${VERSION}" >> $GITHUB_OUTPUT
+        echo "release_title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
+        echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
 
     - name: Upload Build Artifact
       uses: actions/upload-artifact@v4
       with:
-        name: droidulator-ci-apk
-        path: ${{ env.APK_PATH }}
-
-    - name: Set Release Tag & Title
-      id: rel_info
-      run: |
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          TAG_NAME="${GITHUB_REF#refs/tags/}"
-          echo "tag_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "release_name=${TAG_NAME}" >> $GITHUB_OUTPUT
-          echo "prerelease=false" >> $GITHUB_OUTPUT
-        else
-          echo "tag_name=nightly" >> $GITHUB_OUTPUT
-          echo "release_name=Nightly Build" >> $GITHUB_OUTPUT
-          echo "prerelease=true" >> $GITHUB_OUTPUT
-        fi
+        name: ${{ steps.prep.outputs.apk_name }}
+        path: ${{ steps.prep.outputs.apk_path }}
 
     - name: Upload APK to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
-        tag_name: ${{ steps.rel_info.outputs.tag_name }}
-        name: ${{ steps.rel_info.outputs.release_name }}
+        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly' }}
+        name: ${{ steps.prep.outputs.release_title }}
         body: |
-          Droidulator Release ${{ steps.rel_info.outputs.release_name }}
-          Commit: ${{ github.sha }}
-        prerelease: ${{ steps.rel_info.outputs.prerelease }}
-        make_latest: true
-        files: ${{ env.APK_PATH }}
+          ${{ steps.prep.outputs.is_prerelease == 'true' && '### 🌙 Droidulator Nightly Build (Ночная сборка)' || '### Droidulator Release' }}
+          
+          - **Application:** Droidulator
+          - **Version:** `${{ steps.prep.outputs.version }}`
+          - **Commit:** `${{ github.sha }}`
+          - **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+        prerelease: ${{ steps.prep.outputs.is_prerelease }}
+        make_latest: ${{ steps.prep.outputs.is_prerelease == 'false' }}
+        files: ${{ steps.prep.outputs.apk_path }}
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
