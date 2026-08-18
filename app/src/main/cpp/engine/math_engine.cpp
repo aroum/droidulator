@@ -521,16 +521,17 @@ inline std::string preprocessFactorial(const std::string& s) {
 }
 
 inline std::string replaceLogicalWords(const std::string& s) {
+    // Fast path: check if any of the logical keywords could be present
     if (s.find("and") == std::string::npos &&
         s.find("or") == std::string::npos &&
         s.find("not") == std::string::npos &&
         s.find("xor") == std::string::npos) {
         return s;
     }
-    std::string res = "";
-    res.reserve(s.size());
-    int n = s.size();
-    for (int i = 0; i < n; ) {
+    std::string res;
+    res.reserve(s.size() + 8);
+    const size_t n = s.size();
+    for (size_t i = 0; i < n; ) {
         if (s[i] == '"' || s[i] == '\'') {
             char q = s[i];
             res += s[i++];

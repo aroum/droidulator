@@ -201,11 +201,8 @@ class MainActivity : AppCompatActivity() {
             tvOutput.text = WELCOME_MSG
         }
 
-        when (themeMode) {
-            1 -> rbThemeDark.isChecked = true
-            2 -> rbThemeLight.isChecked = true
-            else -> rbThemeAuto.isChecked = true
-        }
+        listOf(rbThemeAuto, rbThemeDark, rbThemeLight).getOrNull(themeMode)?.isChecked = true
+        if (themeMode !in 0..2) rbThemeAuto.isChecked = true
 
         val savedThemeJson = prefs.getString("custom_theme_json", null)
         if (!savedThemeJson.isNullOrEmpty()) {

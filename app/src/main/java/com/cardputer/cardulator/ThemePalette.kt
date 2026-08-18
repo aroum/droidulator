@@ -104,14 +104,10 @@ object ThemePalette {
     private var cachedCustomRainbow: List<Int>? = null
 
     private inline fun getColor(key: String, defaultDark: Int, defaultLight: Int): Int {
-        val primaryMap = if (isDark) customDarkColors else customLightColors
-        val fallbackMap = if (isDark) customLightColors else customDarkColors
-
-        if (primaryMap != null && primaryMap.containsKey(key)) {
-            return primaryMap[key]!!
-        }
-        if (fallbackMap != null && fallbackMap.containsKey(key)) {
-            return fallbackMap[key]!!
+        val map = if (isDark) customDarkColors else customLightColors
+        if (map != null) {
+            val color = map[key]
+            if (color != null) return color
         }
         return if (isDark) defaultDark else defaultLight
     }
@@ -142,24 +138,16 @@ object ThemePalette {
     // Rainbow Brackets Palette (7 stages) — Zero allocation for built-in themes
     val rainbowColors: List<Int>
         get() {
-            if (isCustomThemeLoaded) {
-                val primaryMap = if (isDark) customDarkColors else customLightColors
-                val fallbackMap = if (isDark) customLightColors else customDarkColors
-                val customMap = if (primaryMap != null && primaryMap.containsKey("rainbow_0")) primaryMap else fallbackMap
-
-                if (customMap != null && customMap.containsKey("rainbow_0")) {
-                    cachedCustomRainbow?.let { return it }
-                    val list = mutableListOf<Int>()
-                    for (i in 0..6) {
-                        val key = "rainbow_$i"
-                        if (customMap.containsKey(key)) {
-                            list.add(customMap[key]!!)
-                        }
-                    }
-                    if (list.isNotEmpty()) {
-                        cachedCustomRainbow = list
-                        return list
-                    }
+            if (!isCustomThemeLoaded) {
+                return if (isDark) DEFAULT_DARK_RAINBOW else DEFAULT_LIGHT_RAINBOW
+            }
+            val map = if (isDark) customDarkColors else customLightColors
+            if (map != null && map.containsKey("rainbow_0")) {
+                cachedCustomRainbow?.let { return it }
+                val list = (0..6).mapNotNull { map["rainbow_$it"] }
+                if (list.isNotEmpty()) {
+                    cachedCustomRainbow = list
+                    return list
                 }
             }
             return if (isDark) DEFAULT_DARK_RAINBOW else DEFAULT_LIGHT_RAINBOW

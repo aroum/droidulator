@@ -100,23 +100,13 @@ class PlotView @JvmOverloads constructor(
     }
 
     private fun updateThemeColors() {
-        if (isLightTheme) {
-            bgPaint.color = Color.parseColor("#FBF1C7")        // Gruvbox Light BG
-            gridPaint.color = Color.parseColor("#D5C4A1")      // Gruvbox Light Gray
-            textPaint.color = Color.parseColor("#3C3836")      // Gruvbox Dark FG
-            cursorLinePaint.color = Color.parseColor("#928374") // Gruvbox Gray
-            cursorPointPaint.color = Color.parseColor("#9D0006")// Gruvbox Red
-            cursorTextBgPaint.color = Color.parseColor("#EBDBB2")// Gruvbox Light Soft BG
-            cursorTextPaint.color = Color.parseColor("#282828") // Gruvbox Dark
-        } else {
-            bgPaint.color = Color.parseColor("#1D2021")        // Gruvbox Dark BG
-            gridPaint.color = Color.parseColor("#504945")      // Gruvbox Dark Gray
-            textPaint.color = Color.parseColor("#EBDBB2")      // Gruvbox FG
-            cursorLinePaint.color = Color.parseColor("#A89984") // Gruvbox Gray
-            cursorPointPaint.color = Color.parseColor("#FB4934")// Gruvbox Red
-            cursorTextBgPaint.color = Color.parseColor("#3C3836")// Gruvbox Soft BG
-            cursorTextPaint.color = Color.parseColor("#FBF1C7") // Gruvbox Light
-        }
+        bgPaint.color = ThemePalette.bg
+        gridPaint.color = ThemePalette.borderColor
+        textPaint.color = ThemePalette.fgText
+        cursorLinePaint.color = ThemePalette.fgDim
+        cursorPointPaint.color = ThemePalette.red
+        cursorTextBgPaint.color = ThemePalette.bgSoft
+        cursorTextPaint.color = ThemePalette.fgText
     }
 
     fun updatePlotData(rawPlotData: String) {

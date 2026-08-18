@@ -100,28 +100,28 @@ inline ConvResult handleConv(double value,
         return false;
     };
 
-    auto parseEIA96 = [](const std::string& code, double& ohms) -> bool {
+    constexpr static const int EIA96_TABLE[97] = {
+        0,
+        100, 102, 105, 107, 110, 113, 115, 118, 121, 124,
+        127, 130, 133, 137, 140, 143, 147, 150, 154, 158,
+        162, 165, 169, 174, 178, 182, 187, 191, 196, 200,
+        205, 210, 215, 221, 226, 232, 237, 243, 249, 255,
+        261, 267, 274, 280, 287, 294, 301, 309, 316, 324,
+        332, 340, 348, 357, 365, 374, 383, 392, 402, 412,
+        422, 432, 442, 453, 464, 475, 487, 499, 511, 523,
+        536, 549, 562, 576, 590, 604, 619, 634, 649, 665,
+        681, 698, 715, 732, 750, 768, 787, 806, 825, 845,
+        866, 887, 909, 931, 953, 976
+    };
+
+    auto parseEIA96 = [&](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.size() != 3) return false;
         std::transform(s.begin(), s.end(), s.begin(), ::toupper);
         if (!std::isdigit(s[0]) || !std::isdigit(s[1])) return false;
         int codeNum = (s[0] - '0') * 10 + (s[1] - '0');
-
-        static const int eia96_table[97] = {
-            0,
-            100, 102, 105, 107, 110, 113, 115, 118, 121, 124,
-            127, 130, 133, 137, 140, 143, 147, 150, 154, 158,
-            162, 165, 169, 174, 178, 182, 187, 191, 196, 200,
-            205, 210, 215, 221, 226, 232, 237, 243, 249, 255,
-            261, 267, 274, 280, 287, 294, 301, 309, 316, 324,
-            332, 340, 348, 357, 365, 374, 383, 392, 402, 412,
-            422, 432, 442, 453, 464, 475, 487, 499, 511, 523,
-            536, 549, 562, 576, 590, 604, 619, 634, 649, 665,
-            681, 698, 715, 732, 750, 768, 787, 806, 825, 845,
-            866, 887, 909, 931, 953, 976
-        };
         if (codeNum < 1 || codeNum > 96) return false;
-        int base = eia96_table[codeNum];
+        int base = EIA96_TABLE[codeNum];
 
         double mult = 0.0;
         char multChar = s[2];
@@ -175,21 +175,8 @@ inline ConvResult handleConv(double value,
         return std::string(b);
     };
 
-    auto ohmsToEIA96 = [](double ohms) -> std::string {
+    auto ohmsToEIA96 = [&](double ohms) -> std::string {
         if (ohms <= 0) return "";
-        static const int eia96_table[97] = {
-            0,
-            100, 102, 105, 107, 110, 113, 115, 118, 121, 124,
-            127, 130, 133, 137, 140, 143, 147, 150, 154, 158,
-            162, 165, 169, 174, 178, 182, 187, 191, 196, 200,
-            205, 210, 215, 221, 226, 232, 237, 243, 249, 255,
-            261, 267, 274, 280, 287, 294, 301, 309, 316, 324,
-            332, 340, 348, 357, 365, 374, 383, 392, 402, 412,
-            422, 432, 442, 453, 464, 475, 487, 499, 511, 523,
-            536, 549, 562, 576, 590, 604, 619, 634, 649, 665,
-            681, 698, 715, 732, 750, 768, 787, 806, 825, 845,
-            866, 887, 909, 931, 953, 976
-        };
         static const struct { char c; double m; int exp; } mults[] = {
             {'Z', 0.001, -3}, {'Y', 0.01, -2}, {'X', 0.1, -1}, {'A', 1.0, 0},
             {'B', 10.0, 1}, {'C', 100.0, 2}, {'D', 1000.0, 3}, {'E', 10000.0, 4}, {'F', 100000.0, 5}
@@ -210,13 +197,13 @@ inline ConvResult handleConv(double value,
             char mc = mults[mi].c;
             double targetNorm = ohms / m;
 
-            // Binary search in sorted eia96_table (indices 1 to 96)
-            auto it = std::lower_bound(eia96_table + 1, eia96_table + 97, static_cast<int>(targetNorm));
-            int idx = static_cast<int>(it - eia96_table);
+            // Binary search in sorted EIA96_TABLE (indices 1 to 96)
+            auto it = std::lower_bound(EIA96_TABLE + 1, EIA96_TABLE + 97, static_cast<int>(targetNorm));
+            int idx = static_cast<int>(it - EIA96_TABLE);
 
             for (int candidate : {idx - 1, idx, idx + 1}) {
                 if (candidate >= 1 && candidate <= 96) {
-                    double calc = eia96_table[candidate] * m;
+                    double calc = EIA96_TABLE[candidate] * m;
                     double diff = std::abs(calc - ohms);
                     if (diff < bestDiff) {
                         bestDiff = diff;
