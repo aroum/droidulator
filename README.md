@@ -302,6 +302,11 @@ Droidulator provides native support for physical unit conversions, logarithmic r
 ### 1. Physical Units & Logarithmic Ratios
 
 - **Physical & Engineering Units**: `conv(5, "mile", "km")`, `conv(100, "km/hr")`, `conv(24, "AWG", "mm^2")`.
+- **Standard Metric Wire Gauges (`std_mm2`)**: Rounds cross-section up (IEC 60228 / GOST 22483 standard series: 0.03 ... 1200 mm²) with copper safety margin:
+  - `conv(2.1, "mm2", "std_mm2")` $\rightarrow$ `2.5 std_mm2`
+  - `conv(14, "AWG", "std_mm2")` $\rightarrow$ `2.5 std_mm2` *(14 AWG is 2.08 mm²)*
+- **Standard AWG Wire Gauges (`std_awg`)**: Rounds gauge down to thicker integer wire (more copper area):
+  - `conv(2.5, "mm2", "std_awg")` $\rightarrow$ `13 std_awg` *(13 AWG = 2.62 mm²)*
 - **dB & Power/Voltage Ratios**: `conv(30, "dBm", "mW")`, `conv(20, "dB", "times")` *(Power 100x)*, `conv(20, "dB_v", "times")` *(Voltage 10x)*.
 
 ### 2. Component Code & RKM Marking Conversions

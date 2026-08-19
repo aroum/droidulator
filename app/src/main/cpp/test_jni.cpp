@@ -80,6 +80,27 @@ int main() {
     std::cout << "conv(0.205, \"mm^2\", \"AWG\") = " << c_awg2.value << " " << c_awg2.unitStr << std::endl;
     assert(c_awg2.success && std::abs(c_awg2.value - 24.0) < 0.1);
 
+    // Standard cross-section (std_mm2) & Standard AWG (std_awg) tests with copper safety margin
+    ConvResult c_std_mm1 = handleConv(2.1, "mm2", "std_mm2", units_dat);
+    std::cout << "conv(2.1, \"mm2\", \"std_mm2\") = " << c_std_mm1.value << " " << c_std_mm1.unitStr << std::endl;
+    assert(c_std_mm1.success && c_std_mm1.value == 2.5 && c_std_mm1.unitStr == "std_mm2");
+
+    ConvResult c_std_mm2 = handleConv(2.5, "mm^2", "std_mm2", units_dat);
+    std::cout << "conv(2.5, \"mm^2\", \"std_mm2\") = " << c_std_mm2.value << " " << c_std_mm2.unitStr << std::endl;
+    assert(c_std_mm2.success && c_std_mm2.value == 2.5);
+
+    ConvResult c_std_mm3 = handleConv(14, "AWG", "std_mm2", units_dat); // 14 AWG ≈ 2.08 mm^2 -> 2.5 mm^2
+    std::cout << "conv(14, \"AWG\", \"std_mm2\") = " << c_std_mm3.value << " " << c_std_mm3.unitStr << std::endl;
+    assert(c_std_mm3.success && c_std_mm3.value == 2.5);
+
+    ConvResult c_std_awg1 = handleConv(2.5, "mm2", "std_awg", units_dat); // 2.5 mm^2 is between 13 and 14 AWG -> 13 AWG for safety
+    std::cout << "conv(2.5, \"mm2\", \"std_awg\") = " << c_std_awg1.value << " " << c_std_awg1.unitStr << std::endl;
+    assert(c_std_awg1.success && c_std_awg1.value == 13.0 && c_std_awg1.unitStr == "std_awg");
+
+    ConvResult c_std_awg2 = handleConv(2.08, "mm^2", "std_awg", units_dat); // 2.08 mm^2 -> 14 AWG
+    std::cout << "conv(2.08, \"mm^2\", \"std_awg\") = " << c_std_awg2.value << " " << c_std_awg2.unitStr << std::endl;
+    assert(c_std_awg2.success && c_std_awg2.value == 14.0);
+
     // Resistor / Capacitor / Inductor Code tests
     ConvResult c_res1 = handleConv(0, "01C", "ohm", units_dat);
     std::cout << "conv(\"01C\", \"ohm\") = " << c_res1.value << " " << c_res1.unitStr << std::endl;
