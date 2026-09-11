@@ -382,7 +382,7 @@ int main() {
     handled = handlePlotCommands("plot.xlim(-2, 2)", plot_err, plot_res);
     assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -2.0 && plot_xlim_max == 2.0);
 
-    // Test Case 8: conv(...) units autocomplete (mm, mm^2, mm2, std_mm2)
+    // Test Case 8: conv(...) units autocomplete (mm, mmHg, mm^2, mm2, std_mm2)
     reset_tab();
     auto_brackets = true;
     std::string expr8 = "conv(10, mm";
@@ -392,12 +392,52 @@ int main() {
     assert(expr8 == "conv(10, mm" && cursor8 == 11);
 
     handleTabCompletion(expr8, cursor8);
-    std::cout << "Test 8.2 [conv(10, mm -> mm^2]: " << expr8 << " cursor=" << cursor8 << std::endl;
-    assert(expr8 == "conv(10, mm^2" && cursor8 == 13);
+    std::cout << "Test 8.2 [conv(10, mm -> mmHg]: " << expr8 << " cursor=" << cursor8 << std::endl;
+    assert(expr8 == "conv(10, mmHg" && cursor8 == 13);
 
     handleTabCompletion(expr8, cursor8);
-    std::cout << "Test 8.3 [conv(10, mm^2 -> mm2]: " << expr8 << " cursor=" << cursor8 << std::endl;
-    assert(expr8 == "conv(10, mm2" && cursor8 == 12);
+    std::cout << "Test 8.3 [conv(10, mmHg -> mm^2]: " << expr8 << " cursor=" << cursor8 << std::endl;
+    assert(expr8 == "conv(10, mm^2" && cursor8 == 13);
+
+    // Test Case 8.4: Dimension-aware filter - length source "mm" completing "k" gives "km", NOT "kg"
+    reset_tab();
+    std::string expr8_len = "conv(10, \"mm\", k";
+    int cursor8_len = 16;
+    handleTabCompletion(expr8_len, cursor8_len);
+    std::cout << "Test 8.4 [conv(10, \"mm\", k -> km]: " << expr8_len << " cursor=" << cursor8_len << std::endl;
+    assert(expr8_len == "conv(10, \"mm\", km" && cursor8_len == 17);
+
+    // Test Case 8.5: Dimension-aware filter - pressure source "mmHg" completing "a" gives "atm"
+    reset_tab();
+    std::string expr8_press = "conv(10, \"mmHg\", a";
+    int cursor8_press = 18;
+    handleTabCompletion(expr8_press, cursor8_press);
+    std::cout << "Test 8.5 [conv(10, \"mmHg\", a -> atm]: " << expr8_press << " cursor=" << cursor8_press << std::endl;
+    assert(expr8_press == "conv(10, \"mmHg\", atm" && cursor8_press == 20);
+
+    // Test Case 8.6: Dimension-aware filter - mass source "kg" completing "p" gives "pound", NOT "Pa" or "psi"
+    reset_tab();
+    std::string expr8_mass = "conv(10, \"kg\", p";
+    int cursor8_mass = 16;
+    handleTabCompletion(expr8_mass, cursor8_mass);
+    std::cout << "Test 8.6 [conv(10, \"kg\", p -> pound]: " << expr8_mass << " cursor=" << cursor8_mass << std::endl;
+    assert(expr8_mass == "conv(10, \"kg\", pound" && cursor8_mass == 20);
+
+    // Test Case 8.7: Dimension-aware filter - wire/area source "awg" completing "m" gives "mm^2"
+    reset_tab();
+    std::string expr8_wire = "conv(10, \"awg\", m";
+    int cursor8_wire = 17;
+    handleTabCompletion(expr8_wire, cursor8_wire);
+    std::cout << "Test 8.7 [conv(10, \"awg\", m -> mm^2]: " << expr8_wire << " cursor=" << cursor8_wire << std::endl;
+    assert(expr8_wire == "conv(10, \"awg\", mm^2" && cursor8_wire == 20);
+
+    // Test Case 9: mmHg unit conversion verification
+    ConvResult c_mmhg = handleConv(760, "mmHg", "atm", units_dat);
+    std::cout << "conv(760, \"mmHg\", \"atm\") = " << c_mmhg.value << " " << c_mmhg.unitStr << std::endl;
+    assert(c_mmhg.success && std::abs(c_mmhg.value - 1.0) < 0.001);
+
+    ConvResult c_mmhg_low = handleConv(760, "mmhg", "atm", units_dat);
+    assert(c_mmhg_low.success && std::abs(c_mmhg_low.value - 1.0) < 0.001);
 
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;

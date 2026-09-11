@@ -418,13 +418,62 @@ class MainActivity : AppCompatActivity() {
                 val lastPartRaw = parts.last().trim()
                 val lastPart = lastPartRaw.trim('"', '\'')
 
+                // Detect source unit (fromUnit) if present in preceding arguments
+                val fromUnit: String? = when {
+                    parts.size >= 3 -> {
+                        val prevArg = parts[parts.size - 2].trim().trim('"', '\'')
+                        if (prevArg.isNotEmpty()) prevArg else null
+                    }
+                    parts.size == 2 -> {
+                        val firstArg = parts[0].trim().trim('"', '\'')
+                        // Check if first arg contains a number followed by a unit (e.g. "10 mm", "10mm", "100 ohm")
+                        val m = Regex("""^[\d.\s\+\-\*\/\^eE]+\s*([a-zA-Z][a-zA-Z\^\d_]*)$""").find(firstArg)
+                        m?.groupValues?.get(1)?.trim()
+                    }
+                    else -> null
+                }
+
                 val unitCandidates = listOf(
-                    "mm", "mm^2", "mm2", "std_mm2", "m", "cm", "km", "mile",
-                    "awg", "std_awg", "ohm", "smd3", "smd4", "eia96",
-                    "uf", "nf", "pf", "uh", "mh", "nh", "farad", "henry",
-                    "db", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu", "times",
-                    "kg", "g", "lb", "oz", "sec", "min", "hr"
+                    // Length & Distance
+                    "mm", "mmHg", "mm^2", "mm2", "std_mm2", "m", "meter", "cm", "km", "mile", "yard", "foot", "inch", "in", "ft", "yd", "nauticalmile", "angstrom", "au",
+                    // Area & Volume
+                    "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "sqft", "sqin",
+                    "m^3", "m3", "liter", "l", "ml", "dl", "cl", "gal", "gallon", "quart", "pint", "cup", "floz", "tbsp", "tsp", "barrel",
+                    // Pressure
+                    "torr", "atm", "bar", "mbar", "Pa", "pascal", "kPa", "MPa", "GPa", "psi", "psf", "inHg",
+                    // Electronics & Component Codes
+                    "ohm", "mohm", "kohm", "Mohm", "smd3", "smd4", "eia96", "awg", "std_awg",
+                    "farad", "F", "uF", "uf", "nF", "nf", "pF", "pf",
+                    "henry", "H", "uH", "uh", "mH", "mh", "nH", "nh",
+                    "ampere", "amp", "A", "mA", "uA", "kA",
+                    "volt", "V", "mV", "uV", "kV", "MV",
+                    "watt", "W", "mW", "uW", "kW", "MW", "GW", "hp", "horsepower",
+                    "Hz", "khz", "mhz", "ghz", "coulomb", "tesla", "weber",
+                    // Decibels & Ratios
+                    "dB", "db", "dBm", "dbm", "dBW", "dbw", "dBV", "dbv", "dBmV", "dbmv", "dBuV", "dbuv", "dBu", "dbu", "times", "ratio",
+                    // Mass & Weight
+                    "kg", "kilogram", "g", "gram", "mg", "ug", "ton", "tonne", "lb", "pound", "oz", "ounce", "stone", "carat",
+                    // Time
+                    "s", "sec", "second", "ms", "us", "ns", "min", "minute", "hr", "hour", "day", "week", "month", "year",
+                    // Speed
+                    "m/s", "km/hr", "km/h", "kph", "mph", "knot", "mach",
+                    // Energy & Work
+                    "joule", "J", "kJ", "MJ", "cal", "calorie", "kcal", "eV", "keV", "MeV", "GeV", "Wh", "kWh", "MWh", "BTU",
+                    // Force
+                    "newton", "N", "kN", "dyn", "dyne", "lbf", "kgf",
+                    // Temperature & Angle
+                    "degC", "degF", "kelvin", "K", "deg", "degree", "rad", "radian"
                 )
+
+                val fromDims = fromUnit?.let { getUnitDimensions(it) } ?: emptySet()
+                val filteredCandidates = if (fromDims.isNotEmpty()) {
+                    unitCandidates.filter { candidate ->
+                        val cDims = getUnitDimensions(candidate)
+                        cDims.any { it in fromDims }
+                    }
+                } else {
+                    unitCandidates
+                }
 
                 val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos)
                 val origPrefix = if (!isContinuation) {
@@ -438,9 +487,9 @@ class MainActivity : AppCompatActivity() {
                 }
 
                 val matches = if (origPrefix.isEmpty()) {
-                    unitCandidates
+                    filteredCandidates
                 } else {
-                    unitCandidates.filter { it.startsWith(origPrefix, ignoreCase = true) }
+                    filteredCandidates.filter { it.startsWith(origPrefix, ignoreCase = true) }
                 }
 
                 if (matches.isNotEmpty()) {
@@ -645,6 +694,77 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             refreshTabContent("Variables")
         }
+    }
+
+    private fun getUnitDimensions(unit: String): Set<String> {
+        val u = unit.trim().trim('"', '\'').lowercase()
+        if (u.isEmpty()) return emptySet()
+
+        val dims = mutableSetOf<String>()
+        if (u in setOf("mm", "m", "meter", "meters", "cm", "km", "mile", "miles", "yard", "yards", "foot", "feet", "inch", "inches", "in", "ft", "yd", "nauticalmile", "angstrom", "au")) {
+            dims.add("length")
+        }
+        if (u in setOf("mm^2", "mm2", "std_mm2", "awg", "std_awg", "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "acres", "sqft", "sqin")) {
+            dims.add("area_wire")
+        }
+        if (u in setOf("m^3", "m3", "cm^3", "cm3", "liter", "liters", "litre", "litres", "l", "ml", "dl", "cl", "gal", "gallon", "gallons", "quart", "quarts", "pint", "pints", "cup", "cups", "floz", "tbsp", "tsp", "barrel")) {
+            dims.add("volume")
+        }
+        if (u in setOf("mmhg", "torr", "atm", "bar", "mbar", "pa", "pascal", "kpa", "mpa", "gpa", "psi", "psf", "inhg")) {
+            dims.add("pressure")
+        }
+        if (u in setOf("ohm", "ohms", "mohm", "kohm", "mohm", "gohm", "smd3", "smd4", "eia96") ||
+            u.matches(Regex("""^\d{3,4}$""")) ||
+            u.matches(Regex("""^\d{2}[a-z]$""", RegexOption.IGNORE_CASE)) ||
+            u.matches(Regex("""^[0-9]+[rkm][0-9]*$""", RegexOption.IGNORE_CASE))) {
+            dims.add("resistance")
+        }
+        if (u in setOf("farad", "f", "uf", "nf", "pf")) {
+            dims.add("capacitance")
+        }
+        if (u in setOf("henry", "h", "uh", "mh", "nh")) {
+            dims.add("inductance")
+        }
+        if (u in setOf("ampere", "amp", "amps", "a", "ma", "ua", "ka")) {
+            dims.add("current")
+        }
+        if (u in setOf("volt", "volts", "v", "mv", "uv", "kv", "dbv", "dbmv", "dbuv", "dbu")) {
+            dims.add("voltage")
+        }
+        if (u in setOf("watt", "watts", "w", "mw", "uw", "kw", "gw", "hp", "horsepower", "dbm", "dbw")) {
+            dims.add("power")
+        }
+        if (u in setOf("db", "times", "ratio", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu")) {
+            dims.add("db_ratio")
+        }
+        if (u in setOf("hz", "khz", "mhz", "ghz")) {
+            dims.add("frequency")
+        }
+        if (u in setOf("kg", "kilogram", "kilograms", "g", "gram", "grams", "mg", "ug", "ton", "tonne", "tonnes", "lb", "pound", "pounds", "oz", "ounce", "ounces", "stone", "carat")) {
+            dims.add("mass")
+        }
+        if (u in setOf("s", "sec", "second", "seconds", "ms", "us", "ns", "min", "minute", "minutes", "hr", "hour", "hours", "day", "days", "week", "weeks", "month", "months", "year", "years")) {
+            dims.add("time")
+        }
+        if (u in setOf("m/s", "km/hr", "km/h", "kph", "mph", "knot", "knots", "mach")) {
+            dims.add("speed")
+        }
+        if (u in setOf("joule", "joules", "j", "kj", "mj", "cal", "calorie", "calories", "kcal", "ev", "kev", "mev", "gev", "wh", "kwh", "mwh", "btu")) {
+            dims.add("energy")
+        }
+        if (u in setOf("newton", "newtons", "n", "kn", "dyn", "dyne", "lbf", "kgf")) {
+            dims.add("force")
+        }
+        if (u in setOf("degc", "degf", "kelvin", "k")) {
+            dims.add("temperature")
+        }
+        if (u in setOf("deg", "degree", "degrees", "rad", "radian", "radians")) {
+            dims.add("angle")
+        }
+        if (u in setOf("coulomb", "tesla", "weber")) {
+            dims.add("em")
+        }
+        return dims
     }
 
     private fun setupNavigationButtons() {
