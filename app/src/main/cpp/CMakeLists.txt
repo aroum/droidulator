@@ -29,6 +29,7 @@ add_library(
 
 target_compile_options(cardulator_jni PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-includetinyexpr_compat.h>
+    -fdata-sections -ffunction-sections
 )
 
 # gnu-units contains old-style K&R declarations that conflict with NDK headers.
@@ -38,7 +39,7 @@ set_source_files_properties(
     gnu-units/parse.tab.c
     gnu-units/strfunc.c
     units_bridge.c
-    PROPERTIES COMPILE_FLAGS "-w -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0"
+    PROPERTIES COMPILE_FLAGS "-w -U_FORTIFY_SOURCE -D_FORTIFY_SOURCE=0 -fdata-sections -ffunction-sections"
 )
 
 target_compile_definitions(cardulator_jni PRIVATE UNIT_TEST=1)
@@ -48,4 +49,9 @@ find_library(log-lib log)
 target_link_libraries(
     cardulator_jni
     ${log-lib}
+)
+
+target_link_options(cardulator_jni PRIVATE
+    -Wl,--gc-sections
+    -Wl,--as-needed
 )

@@ -382,6 +382,23 @@ int main() {
     handled = handlePlotCommands("plot.xlim(-2, 2)", plot_err, plot_res);
     assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -2.0 && plot_xlim_max == 2.0);
 
+    // Test Case 8: conv(...) units autocomplete (mm, mm^2, mm2, std_mm2)
+    reset_tab();
+    auto_brackets = true;
+    std::string expr8 = "conv(10, mm";
+    int cursor8 = 11;
+    handleTabCompletion(expr8, cursor8);
+    std::cout << "Test 8.1 [conv(10, mm -> mm]: " << expr8 << " cursor=" << cursor8 << std::endl;
+    assert(expr8 == "conv(10, mm" && cursor8 == 11);
+
+    handleTabCompletion(expr8, cursor8);
+    std::cout << "Test 8.2 [conv(10, mm -> mm^2]: " << expr8 << " cursor=" << cursor8 << std::endl;
+    assert(expr8 == "conv(10, mm^2" && cursor8 == 13);
+
+    handleTabCompletion(expr8, cursor8);
+    std::cout << "Test 8.3 [conv(10, mm^2 -> mm2]: " << expr8 << " cursor=" << cursor8 << std::endl;
+    assert(expr8 == "conv(10, mm2" && cursor8 == 12);
+
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

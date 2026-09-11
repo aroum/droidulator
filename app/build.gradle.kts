@@ -12,13 +12,22 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "26.08.18"
+        versionName = "26.09.11"
 
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++20"
                 arguments += "-DANDROID_STL=c++_shared"
             }
+        }
+    }
+
+    splits {
+        abi {
+            isEnable = true
+            reset()
+            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            isUniversalApk = true
         }
     }
 

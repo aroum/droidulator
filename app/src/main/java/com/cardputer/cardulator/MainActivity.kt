@@ -106,6 +106,11 @@ class MainActivity : AppCompatActivity() {
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
 
+    // Cycling Tab Autocomplete state for conv and plot contexts
+    private var convTabOrigPrefix: String? = null
+    private var convTabSplitPos: Int = -1
+    private var convTabMatchIdx: Int = 0
+
     companion object {
         private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
 
@@ -404,32 +409,44 @@ class MainActivity : AppCompatActivity() {
             // Detect conv( context: suggest units/resistor codes inside conv(...)
             val convMatch = Regex("""conv\(([^)]*)$""").find(fullText.substring(0, caret))
             if (convMatch != null) {
+                val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
+                val lastParenPos = fullText.lastIndexOf('(', caret - 1)
+                val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
+
                 val argsContent = convMatch.groupValues[1]
                 val parts = argsContent.split(",")
                 val lastPartRaw = parts.last().trim()
                 val lastPart = lastPartRaw.trim('"', '\'')
 
                 val unitCandidates = listOf(
-                    "ohm", "smd3", "smd4", "eia96", "awg", "mm^2",
+                    "mm", "mm^2", "mm2", "std_mm2", "m", "cm", "km", "mile",
+                    "awg", "std_awg", "ohm", "smd3", "smd4", "eia96",
                     "uf", "nf", "pf", "uh", "mh", "nh", "farad", "henry",
                     "db", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu", "times",
-                    "km", "mile", "m", "cm", "mm", "kg", "g", "lb", "oz", "sec", "min", "hr"
+                    "kg", "g", "lb", "oz", "sec", "min", "hr"
                 )
 
-                val match = if (lastPart.isEmpty()) {
-                    "ohm"
+                val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos)
+                val origPrefix = if (!isContinuation) {
+                    convTabOrigPrefix = lastPart
+                    convTabSplitPos = splitPos
+                    convTabMatchIdx = 0
+                    lastPart
                 } else {
-                    unitCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) && !it.equals(lastPart, ignoreCase = true) }
-                        ?: unitCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) }
+                    convTabMatchIdx++
+                    convTabOrigPrefix ?: lastPart
                 }
 
-                if (match != null) {
-                    val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
-                    val lastParenPos = fullText.lastIndexOf('(', caret - 1)
-                    val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
+                val matches = if (origPrefix.isEmpty()) {
+                    unitCandidates
+                } else {
+                    unitCandidates.filter { it.startsWith(origPrefix, ignoreCase = true) }
+                }
+
+                if (matches.isNotEmpty()) {
+                    val match = matches[convTabMatchIdx % matches.size]
 
                     val prefix = fullText.substring(0, splitPos).trimEnd()
-
                     var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
                     if (endArgPos == -1) {
                         endArgPos = fullText.length
@@ -439,11 +456,19 @@ class MainActivity : AppCompatActivity() {
                     val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
                     val newArg = "\"$match\""
                     val newText = "$formattedPrefix$newArg$suffix"
-                    
+
                     etInput.setText(newText)
                     etInput.setSelection(formattedPrefix.length + newArg.length)
                     return@setOnClickListener
+                } else {
+                    convTabOrigPrefix = null
+                    convTabSplitPos = -1
+                    convTabMatchIdx = 0
                 }
+            } else {
+                convTabOrigPrefix = null
+                convTabSplitPos = -1
+                convTabMatchIdx = 0
             }
 
             // Detect plot( context: suggest plot parameters/functions inside plot(...)

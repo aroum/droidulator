@@ -67,34 +67,51 @@ jobs:
       id: prep
       run: |
         DATE_TAG=$(date +"%y.%m.%d")
-        RAW_APK=$(find app/build/outputs/apk/ci/ -name "*.apk" | head -n 1)
+        mkdir -p dist
         
         if [[ "${{ github.ref }}" == refs/tags/* ]]; then
           VERSION="${GITHUB_REF_NAME}"
-          APK_NAME="droidulator-${VERSION}.apk"
           RELEASE_TITLE="Droidulator ${VERSION}"
           IS_PRERELEASE=false
         else
           VERSION="${DATE_TAG}-nightly"
-          APK_NAME="droidulator-${DATE_TAG}-nightly.apk"
           RELEASE_TITLE="Droidulator Nightly (${DATE_TAG})"
           IS_PRERELEASE=true
         fi
-        
-        cp "$RAW_APK" "$APK_NAME"
-        echo "apk_path=${APK_NAME}" >> $GITHUB_OUTPUT
-        echo "apk_name=${APK_NAME}" >> $GITHUB_OUTPUT
+
+        # Rename and copy all built APKs (universal and ABI splits)
+        for apk in app/build/outputs/apk/ci/*.apk; do
+          [ -e "$apk" ] || continue
+          base=$(basename "$apk")
+          # Handle universal vs ABI names
+          if [[ "$base" == *"universal"* ]]; then
+            target="dist/droidulator-${VERSION}-universal.apk"
+          elif [[ "$base" == *"arm64-v8a"* ]]; then
+            target="dist/droidulator-${VERSION}-arm64-v8a.apk"
+          elif [[ "$base" == *"armeabi-v7a"* ]]; then
+            target="dist/droidulator-${VERSION}-armeabi-v7a.apk"
+          elif [[ "$base" == *"x86_64"* ]]; then
+            target="dist/droidulator-${VERSION}-x86_64.apk"
+          elif [[ "$base" == *"x86"* ]]; then
+            target="dist/droidulator-${VERSION}-x86.apk"
+          else
+            target="dist/droidulator-${VERSION}.apk"
+          fi
+          cp "$apk" "$target"
+          echo "Created $target"
+        done
+
         echo "version=${VERSION}" >> $GITHUB_OUTPUT
         echo "release_title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
         echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
 
-    - name: Upload Build Artifact
+    - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: ${{ steps.prep.outputs.apk_name }}
-        path: ${{ steps.prep.outputs.apk_path }}
+        name: droidulator-${{ steps.prep.outputs.version }}-apks
+        path: dist/*.apk
 
-    - name: Upload APK to GitHub Release
+    - name: Upload APKs to GitHub Release
       uses: softprops/action-gh-release@v2
       with:
         tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly' }}
@@ -106,8 +123,14 @@ jobs:
           - **Version:** `${{ steps.prep.outputs.version }}`
           - **Commit:** `${{ github.sha }}`
           - **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
+          
+          #### APK Variants:
+          - **`*-universal.apk`**: All-in-one APK containing native libraries for all architectures (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
+          - **`*-arm64-v8a.apk`**: Lightweight APK for modern 64-bit ARM devices (smartphones/tablets).
+          - **`*-armeabi-v7a.apk`**: Lightweight APK for legacy 32-bit ARM devices.
+          - **`*-x86_64.apk` / `*-x86.apk`**: Lightweight APKs for Intel/AMD Android emulators and x86 devices.
         prerelease: ${{ steps.prep.outputs.is_prerelease }}
         make_latest: ${{ steps.prep.outputs.is_prerelease == 'false' }}
-        files: ${{ steps.prep.outputs.apk_path }}
+        files: dist/*.apk
       env:
         GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
