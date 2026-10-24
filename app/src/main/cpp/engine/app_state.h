@@ -56,6 +56,7 @@ inline double plot_ylim_max = 0.0;
 inline double plot_center_x = 0.0;
 inline double plot_center_y = 0.0;
 inline double plot_scale = 1.0;
+inline std::string g_math_domain_err = "";
 
 extern std::vector<CustomScriptFunc> user_script_funcs;
 extern std::vector<double> history;

@@ -474,16 +474,16 @@ int main() {
 
     // Domain errors for asin/acos (|x| <= 1)
     evaluate("asin(2)", err);
-    assert(err == "Math Error");
+    assert(err == "Domain Error: asin(x) requires -1 <= x <= 1");
 
     evaluate("asin(-2)", err);
-    assert(err == "Math Error");
+    assert(err == "Domain Error: asin(x) requires -1 <= x <= 1");
 
     evaluate("acos(1.5)", err);
-    assert(err == "Math Error");
+    assert(err == "Domain Error: acos(x) requires -1 <= x <= 1");
 
     evaluate("acos(-1.5)", err);
-    assert(err == "Math Error");
+    assert(err == "Domain Error: acos(x) requires -1 <= x <= 1");
 
     // Trig in Radians Mode
     degreesMode = false;
@@ -518,13 +518,26 @@ int main() {
 
     // Hyperbolic domain errors
     evaluate("acosh(0.5)", err); // acosh defined for x >= 1
-    assert(err == "Math Error");
+    assert(err == "Domain Error: acosh(x) requires x >= 1");
 
     evaluate("atanh(1.5)", err); // atanh defined for |x| < 1
-    assert(err == "Math Error");
+    assert(err == "Domain Error: atanh(x) requires -1 < x < 1");
 
     evaluate("atanh(-2.0)", err);
-    assert(err == "Math Error");
+    assert(err == "Domain Error: atanh(x) requires -1 < x < 1");
+
+    // Additional domain error checks for sqrt, log, ln, fact
+    evaluate("sqrt(-4)", err);
+    assert(err == "Domain Error: sqrt(x) requires x >= 0");
+
+    evaluate("log(-10)", err);
+    assert(err == "Domain Error: log(x) requires x > 0");
+
+    evaluate("ln(0)", err);
+    assert(err == "Domain Error: ln(x) requires x > 0");
+
+    evaluate("fact(-2)", err);
+    assert(err == "Domain Error: fact(n) requires n >= 0");
 
     // Test Case 11: Acceleration conversions
     ConvResult c_acc1 = handleConv(1, "m/s^2", "cm/s^2", units_dat);
