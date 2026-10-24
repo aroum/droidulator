@@ -12,7 +12,8 @@ android {
         minSdk = 24
         targetSdk = 34
         versionCode = 1
-        versionName = "26.09.11"
+        val appVersionName = System.getenv("VERSION_NAME") ?: (project.findProperty("versionName") as? String ?: "26.10.25")
+        versionName = appVersionName
 
         externalNativeBuild {
             cmake {

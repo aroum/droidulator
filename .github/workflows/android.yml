@@ -1,136 +1,166 @@
-name: Android CI
+name: Build & Release App
 
 on:
   push:
-    branches: [ "main", "master" ]
+    branches:
+      - 'master'
+      - 'main'
     tags:
+      - '[0-9][0-9].[0-9][0-9].[0-9][0-9]*'
       - 'v*'
-      - '*.*.*'
-  pull_request:
-    branches: [ "main", "master" ]
   workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
-permissions:
-  contents: write
+env:
+  ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
 
 jobs:
-  build:
+  apk:
+    name: Generate APK
     runs-on: ubuntu-latest
-
+    permissions:
+      contents: write
     steps:
-    - name: Checkout Repository
-      uses: actions/checkout@v4
-      with:
-        submodules: recursive
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
 
-    - name: Set up JDK 17
-      uses: actions/setup-java@v4
-      with:
-        java-version: '17'
-        distribution: 'zulu'
+      - name: set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'zulu'
+          java-version: 17
 
-    - name: Setup Gradle
-      uses: gradle/actions/setup-gradle@v3
-      with:
-        gradle-version: 8.5
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+        with:
+          gradle-version: 8.5
 
-    - name: Create debug keystore
-      env:
-        CI_KEYSTORE: ${{ secrets.CI_KEYSTORE }}
-        CI_KEYSTORE_DECRYPT: ${{ secrets.CI_KEYSTORE_DECRYPT }}
-      if: ${{ env.CI_KEYSTORE != '' && env.CI_KEYSTORE_DECRYPT != '' }}
-      run: |
-        mkdir -p ~/.android
-        echo "$CI_KEYSTORE" > debug.keystore.asc
-        gpg -d --passphrase "$CI_KEYSTORE_DECRYPT" --batch debug.keystore.asc > ~/.android/debug.keystore
+      - name: Create debug keystore
+        env:
+          CI_KEYSTORE: ${{ secrets.CI_KEYSTORE }}
+          CI_KEYSTORE_DECRYPT: ${{ secrets.CI_KEYSTORE_DECRYPT }}
+        if: ${{ env.CI_KEYSTORE != '' && env.CI_KEYSTORE_DECRYPT != '' }}
+        run: |
+          mkdir -p ~/.android
+          echo "$CI_KEYSTORE" > debug.keystore.asc
+          gpg -d --passphrase "$CI_KEYSTORE_DECRYPT" --batch debug.keystore.asc > ~/.android/debug.keystore
 
-    - name: Decode Keystore
-      env:
-        KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
-      if: ${{ env.KEYSTORE_BASE64 != '' }}
-      run: |
-        printf '%s' "$KEYSTORE_BASE64" | base64 --decode > app/release.jks
+      - name: Decode Keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+        if: ${{ env.KEYSTORE_BASE64 != '' }}
+        run: |
+          printf '%s' "$KEYSTORE_BASE64" | base64 --decode > release.jks
+          cp release.jks app/release.jks
 
-    - name: Build APK (CI with keys if available)
-      run: gradle assembleCi --stacktrace
-      env:
-        RELEASE_KEYSTORE_PATH: "release.jks"
-        RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
-        RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
-        RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
-
-    - name: Prepare Artifact & Release Names
-      id: prep
-      run: |
-        DATE_TAG=$(date +"%y.%m.%d")
-        mkdir -p dist
-        
-        if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-          VERSION="${GITHUB_REF_NAME}"
-          RELEASE_TITLE="Droidulator ${VERSION}"
-          IS_PRERELEASE=false
-        else
-          VERSION="${DATE_TAG}-nightly"
-          RELEASE_TITLE="Droidulator Nightly (${DATE_TAG})"
-          IS_PRERELEASE=true
-        fi
-
-        # Rename and copy all built APKs (universal and ABI splits)
-        for apk in app/build/outputs/apk/ci/*.apk; do
-          [ -e "$apk" ] || continue
-          base=$(basename "$apk")
-          # Handle universal vs ABI names
-          if [[ "$base" == *"universal"* ]]; then
-            target="dist/droidulator-${VERSION}-universal.apk"
-          elif [[ "$base" == *"arm64-v8a"* ]]; then
-            target="dist/droidulator-${VERSION}-arm64-v8a.apk"
-          elif [[ "$base" == *"armeabi-v7a"* ]]; then
-            target="dist/droidulator-${VERSION}-armeabi-v7a.apk"
-          elif [[ "$base" == *"x86_64"* ]]; then
-            target="dist/droidulator-${VERSION}-x86_64.apk"
-          elif [[ "$base" == *"x86"* ]]; then
-            target="dist/droidulator-${VERSION}-x86.apk"
+      - name: Prepare build metadata and artifact names
+        run: |
+          BUILD_DATE=$(date -u +'%y.%m.%d')
+          
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            RELEASE_TITLE="${TAG_NAME}"
+            ARTIFACT_NAME="droidulator-${TAG_NAME}"
+            VERSION_NAME="${TAG_NAME}"
           else
-            target="dist/droidulator-${VERSION}.apk"
+            RELEASE_TITLE="${BUILD_DATE} (Nightly)"
+            ARTIFACT_NAME="droidulator-${BUILD_DATE}-nightly"
+            VERSION_NAME="${BUILD_DATE}"
           fi
-          cp "$apk" "$target"
-          echo "Created $target"
-        done
-
-        echo "version=${VERSION}" >> $GITHUB_OUTPUT
-        echo "release_title=${RELEASE_TITLE}" >> $GITHUB_OUTPUT
-        echo "is_prerelease=${IS_PRERELEASE}" >> $GITHUB_OUTPUT
-
-    - name: Upload Build Artifacts
-      uses: actions/upload-artifact@v4
-      with:
-        name: droidulator-${{ steps.prep.outputs.version }}-apks
-        path: dist/*.apk
-
-    - name: Upload APKs to GitHub Release
-      uses: softprops/action-gh-release@v2
-      with:
-        tag_name: ${{ startsWith(github.ref, 'refs/tags/') && github.ref_name || 'nightly' }}
-        name: ${{ steps.prep.outputs.release_title }}
-        body: |
-          ${{ steps.prep.outputs.is_prerelease == 'true' && '### 🌙 Droidulator Nightly Build (Ночная сборка)' || '### Droidulator Release' }}
           
-          - **Application:** Droidulator
-          - **Version:** `${{ steps.prep.outputs.version }}`
-          - **Commit:** `${{ github.sha }}`
-          - **Build Date:** $(date -u +"%Y-%m-%d %H:%M:%S UTC")
-          
-          #### APK Variants:
-          - **`*-universal.apk`**: All-in-one APK containing native libraries for all architectures (`arm64-v8a`, `armeabi-v7a`, `x86_64`, `x86`).
-          - **`*-arm64-v8a.apk`**: Lightweight APK for modern 64-bit ARM devices (smartphones/tablets).
-          - **`*-armeabi-v7a.apk`**: Lightweight APK for legacy 32-bit ARM devices.
-          - **`*-x86_64.apk` / `*-x86.apk`**: Lightweight APKs for Intel/AMD Android emulators and x86 devices.
-        prerelease: ${{ steps.prep.outputs.is_prerelease }}
-        make_latest: ${{ steps.prep.outputs.is_prerelease == 'false' }}
-        files: dist/*.apk
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> $GITHUB_ENV
+          echo "RELEASE_TITLE=${RELEASE_TITLE}" >> $GITHUB_ENV
+          echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
+          echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+
+      - name: Build debug APK
+        run: gradle assembleCi --stacktrace
+        env:
+          VERSION_NAME: ${{ env.VERSION_NAME }}
+          RELEASE_KEYSTORE_PATH: "release.jks"
+          RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
+          RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
+          RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
+
+      - name: Prepare APK artifact names
+        run: |
+          cd app/build/outputs/apk/ci
+          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
+            TAG_NAME="${{ github.ref_name }}"
+            UNIVERSAL_APK=$(ls *universal*.apk 2>/dev/null | head -n 1 || true)
+            if [ -n "$UNIVERSAL_APK" ] && [ -f "$UNIVERSAL_APK" ]; then
+              cp -f "$UNIVERSAL_APK" "droidulator-${TAG_NAME}.apk" || true
+            fi
+            for arch in arm64-v8a armeabi-v7a x86_64 x86; do
+              SOURCE_APK=$(ls *${arch}*.apk 2>/dev/null | head -n 1 || true)
+              if [ -n "$SOURCE_APK" ] && [ -f "$SOURCE_APK" ] && [ "$SOURCE_APK" != "droidulator-${TAG_NAME}-${arch}.apk" ]; then
+                mv -f "$SOURCE_APK" "droidulator-${TAG_NAME}-${arch}.apk" || true
+              fi
+            done
+            for apk in *.apk; do
+              if [[ "$apk" != "droidulator-${TAG_NAME}"* ]]; then
+                rm -f "$apk"
+              fi
+            done
+          else
+            BUILD_DATE=$(date -u +'%y.%m.%d')
+            # Create nightly-named split APKs for all architectures
+            for arch in arm64-v8a armeabi-v7a x86_64 x86 universal; do
+              SOURCE_APK=$(ls *${arch}*.apk 2>/dev/null | head -n 1 || true)
+              if [ -n "$SOURCE_APK" ] && [ -f "$SOURCE_APK" ]; then
+                cp -f "$SOURCE_APK" "droidulator-${BUILD_DATE}-nightly-${arch}.apk" || true
+              fi
+            done
+            UNIVERSAL_APK=$(ls *universal*.apk 2>/dev/null | head -n 1 || true)
+            if [ -n "$UNIVERSAL_APK" ] && [ -f "$UNIVERSAL_APK" ]; then
+              cp -f "$UNIVERSAL_APK" "droidulator-${BUILD_DATE}-nightly.apk" || true
+            fi
+            # Remove raw build artifacts without -nightly to keep nightly release clean
+            for apk in *.apk; do
+              if [[ "$apk" != *"-nightly"* ]]; then
+                rm -f "$apk"
+              fi
+            done
+          fi
+          ls -la
+
+      - name: Upload APK Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: app/build/outputs/apk/ci/*.apk
+          retention-days: 3
+
+      - name: Create GitHub Release (Tag Release)
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          name: ${{ env.RELEASE_TITLE }}
+          files: app/build/outputs/apk/ci/*.apk
+          generate_release_notes: true
+          prerelease: false
+
+      - name: Clean up previous Nightly release
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release delete nightly --yes --cleanup-tag || true
+          sleep 2
+
+      - name: Create Nightly GitHub Release
+        if: "!startsWith(github.ref, 'refs/tags/')"
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: nightly
+          target_commitish: ${{ github.sha }}
+          name: ${{ env.RELEASE_TITLE }}
+          body: "Automated nightly build (${{ env.BUILD_DATE }}) from main branch."
+          files: app/build/outputs/apk/ci/*.apk
+          prerelease: true
+          make_latest: false
