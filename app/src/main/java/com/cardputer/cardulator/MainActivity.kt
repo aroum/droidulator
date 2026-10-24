@@ -105,6 +105,7 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
+    private var isSubmitting = false
 
     // Cycling Tab Autocomplete state for conv and plot contexts
     private var convTabOrigPrefix: String? = null
@@ -357,6 +358,9 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
+                if (!isSubmitting) {
+                    dismissErrorOverlay()
+                }
                 if (isHighlighting || s == null) return
 
                 val currentText = s.toString()
@@ -839,6 +843,9 @@ class MainActivity : AppCompatActivity() {
         tvOutput.setOnClickListener {
             dismissErrorOverlay()
         }
+        etInput.setOnClickListener {
+            dismissErrorOverlay()
+        }
     }
 
     private fun setupSettingsHandlers() {
@@ -1045,38 +1052,44 @@ class MainActivity : AppCompatActivity() {
         val input = etInput.text.toString().trim()
         if (input.isEmpty()) return
 
-        val activeTab = tabs[currentTabPosition]
-        if (activeTab == "Scripts") {
-            val log = CardulatorEngine.nativeRunScript(input)
-            appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
-            etInput.setText("")
-        } else {
-            val res = CardulatorEngine.nativeEvaluate(input)
-            val isError = res.startsWith("ERROR: ")
-            if (isError) {
-                val errDetails = res.substring(7)
-                showErrorOverlay(errDetails)
+        isSubmitting = true
+        try {
+            val activeTab = tabs[currentTabPosition]
+            if (activeTab == "Scripts") {
+                val log = CardulatorEngine.nativeRunScript(input)
+                appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
+                etInput.setText("")
             } else {
-                dismissErrorOverlay()
-            }
-            appendOutputEntry(input, res, isError)
+                etInput.setText("")
 
-            // Always add to history (even if command had an error, so Up Arrow can recall it)
-            if (replHistory.isEmpty() || replHistory.last() != input) {
-                replHistory.add(input)
-            }
-            replHistoryIndex = -1
-            etInput.setText("")
+                val res = CardulatorEngine.nativeEvaluate(input)
+                val isError = res.startsWith("ERROR: ")
+                if (isError) {
+                    val errDetails = res.substring(7)
+                    showErrorOverlay(errDetails)
+                } else {
+                    dismissErrorOverlay()
+                }
+                appendOutputEntry(input, res, isError)
 
-            if (!res.startsWith("ERROR: ")) {
-                // Switch to Plot tab if a plot command was issued successfully
-                if (input.startsWith("plot(") || input.startsWith("plot.")) {
-                    val plotIdx = tabs.indexOf("Plot")
-                    if (plotIdx != -1) {
-                        spinnerTabs.setSelection(plotIdx)
+                // Always add to history (even if command had an error, so Up Arrow can recall it)
+                if (replHistory.isEmpty() || replHistory.last() != input) {
+                    replHistory.add(input)
+                }
+                replHistoryIndex = -1
+
+                if (!res.startsWith("ERROR: ")) {
+                    // Switch to Plot tab if a plot command was issued successfully
+                    if (input.startsWith("plot(") || input.startsWith("plot.")) {
+                        val plotIdx = tabs.indexOf("Plot")
+                        if (plotIdx != -1) {
+                            spinnerTabs.setSelection(plotIdx)
+                        }
                     }
                 }
             }
+        } finally {
+            isSubmitting = false
         }
         etInput.requestFocus()
         etInput.post {
@@ -2368,5 +2381,12 @@ class MainActivity : AppCompatActivity() {
         }
 
         isHighlighting = false
+    }
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (event.action == KeyEvent.ACTION_DOWN) {
+            dismissErrorOverlay()
+        }
+        return super.dispatchKeyEvent(event)
     }
 }

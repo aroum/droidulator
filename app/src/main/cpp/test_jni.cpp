@@ -261,7 +261,11 @@ int main() {
     assert(expr1 == "pi" && cursor1 == 2);
 
     handleTabCompletion(expr1, cursor1);
-    std::cout << "Test 1.2 [pi -> print()]: " << expr1 << " cursor=" << cursor1 << std::endl;
+    std::cout << "Test 1.2 [pi -> phi]: " << expr1 << " cursor=" << cursor1 << std::endl;
+    assert(expr1 == "phi" && cursor1 == 3);
+
+    handleTabCompletion(expr1, cursor1);
+    std::cout << "Test 1.3 [phi -> print()]: " << expr1 << " cursor=" << cursor1 << std::endl;
     assert(expr1 == "print()" && cursor1 == 6); // comp_start(0) + "print(".length(6)
 
     handleTabCompletion(expr1, cursor1);
@@ -372,8 +376,36 @@ int main() {
     assert(expr6 == "pi" && cursor6 == 2);
 
     handleTabCompletion(expr6, cursor6);
-    std::cout << "Test 6.2 [no auto_brackets p -> print(]: " << expr6 << " cursor=" << cursor6 << std::endl;
+    std::cout << "Test 6.2 [no auto_brackets pi -> phi]: " << expr6 << " cursor=" << cursor6 << std::endl;
+    assert(expr6 == "phi" && cursor6 == 3);
+
+    handleTabCompletion(expr6, cursor6);
+    std::cout << "Test 6.3 [no auto_brackets phi -> print(]: " << expr6 << " cursor=" << cursor6 << std::endl;
     assert(expr6 == "print(" && cursor6 == 6);
+
+    // Test Case 6b: de -> deg2rad() / def , deg2 -> deg2rad(), d2 -> d2r()
+    reset_tab();
+    auto_brackets = true;
+    std::string expr_deg2 = "deg2";
+    int cursor_deg2 = 4;
+    handleTabCompletion(expr_deg2, cursor_deg2);
+    assert(expr_deg2 == "deg2rad()" && cursor_deg2 == 8);
+
+    reset_tab();
+    std::string expr_de = "de";
+    int cursor_de = 2;
+    handleTabCompletion(expr_de, cursor_de);
+    assert(expr_de == "deg2rad()" && cursor_de == 8);
+    handleTabCompletion(expr_de, cursor_de);
+    assert(expr_de == "def " && cursor_de == 4);
+    handleTabCompletion(expr_de, cursor_de);
+    assert(expr_de == "deg2rad()" && cursor_de == 8);
+
+    reset_tab();
+    std::string expr_d2 = "d2";
+    int cursor_d2 = 2;
+    handleTabCompletion(expr_d2, cursor_d2);
+    assert(expr_d2 == "d2r()" && cursor_d2 == 4);
     // Test Case 7: plot.xlim and plot.ylim vector support [min, max] and [min max]
     double plot_res = 0.0;
     std::string plot_err = "";
