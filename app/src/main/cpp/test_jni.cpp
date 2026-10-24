@@ -533,7 +533,7 @@ int main() {
     ConvResult c_acc2 = handleConv(1, "g0", "m/s^2", units_dat);
     assert(c_acc2.success && std::abs(c_acc2.value - 9.80665) < 1e-3);
 
-    ConvResult c_acc3 = handleConv(9.80665, "m/s2", "g", units_dat);
+    ConvResult c_acc3 = handleConv(9.80665, "m/s^2", "g", units_dat);
     assert(c_acc3.success && std::abs(c_acc3.value - 1.0) < 1e-3);
 
     ConvResult c_acc4 = handleConv(100, "gal", "m/s^2", units_dat);

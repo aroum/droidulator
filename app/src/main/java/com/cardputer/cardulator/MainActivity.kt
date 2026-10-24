@@ -458,7 +458,7 @@ class MainActivity : AppCompatActivity() {
                     // Speed
                     "m/s", "km/hr", "km/h", "kph", "mph", "knot", "mach",
                     // Acceleration
-                    "m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "ft/s^2", "ft/s2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity",
+                    "m/s^2", "cm/s^2", "km/s^2", "km/h^2", "ft/s^2", "in/s^2", "gal", "g0", "gee", "gravity",
                     // Energy & Work
                     "joule", "J", "kJ", "MJ", "cal", "calorie", "kcal", "eV", "keV", "MeV", "GeV", "Wh", "kWh", "MWh", "BTU",
                     // Force
