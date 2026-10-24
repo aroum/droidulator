@@ -457,6 +457,8 @@ class MainActivity : AppCompatActivity() {
                     "s", "sec", "second", "ms", "us", "ns", "min", "minute", "hr", "hour", "day", "week", "month", "year",
                     // Speed
                     "m/s", "km/hr", "km/h", "kph", "mph", "knot", "mach",
+                    // Acceleration
+                    "m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "ft/s^2", "ft/s2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity",
                     // Energy & Work
                     "joule", "J", "kJ", "MJ", "cal", "calorie", "kcal", "eV", "keV", "MeV", "GeV", "Wh", "kWh", "MWh", "BTU",
                     // Force
@@ -748,6 +750,9 @@ class MainActivity : AppCompatActivity() {
         }
         if (u in setOf("m/s", "km/hr", "km/h", "kph", "mph", "knot", "knots", "mach")) {
             dims.add("speed")
+        }
+        if (u in setOf("m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "km/hr^2", "km/hr2", "ft/s^2", "ft/s2", "fps2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity", "g")) {
+            dims.add("acceleration")
         }
         if (u in setOf("joule", "joules", "j", "kj", "mj", "cal", "calorie", "calories", "kcal", "ev", "kev", "mev", "gev", "wh", "kwh", "mwh", "btu")) {
             dims.add("energy")

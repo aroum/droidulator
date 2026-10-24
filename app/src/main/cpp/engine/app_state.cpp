@@ -15,7 +15,7 @@ bool degreesMode = true;
 bool auto_brackets = true;
 
 std::vector<std::string> autocomplete_words = {
-    "sin(", "cos(", "tan(", "ctan(", "asin(", "acos(", "atan(",
+    "sin(", "cos(", "tan(", "ctan(", "cot(", "asin(", "acos(", "atan(", "atan2(",
     "sinh(", "cosh(", "tanh(", "asinh(", "acosh(", "atanh(",
     "sqrt(", "ln(", "log(", "log2(", "logb(", "exp(", "cbrt(",
     "abs(", "ceil(", "floor(", "round(", "trunc(", "sgn(", "mod(",

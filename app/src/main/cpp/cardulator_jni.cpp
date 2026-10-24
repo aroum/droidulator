@@ -166,27 +166,28 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             std::stringstream ss;
             if (!assign_var2.empty()) {
                 // If unit variable requested, format assignment
-                ss << assign_var1 << " = " << c_res.value << "\n";
+                ss << assign_var1 << " = " << fmtNum(c_res.value) << "\n";
                 ss << assign_var2 << " = \"" << c_res.unitStr << "\"";
             } else {
-                ss << assign_var1 << " = " << c_res.value;
+                ss << assign_var1 << " = " << fmtNum(c_res.value);
                 if (!c_res.unitStr.empty()) {
-                    ss << " " << c_res.unitStr;
+                    ss << " (" << c_res.unitStr << ")";
                 }
             }
             return env->NewStringUTF(ss.str().c_str());
         }
 
-        std::stringstream ss;
-        if (c_res.value == 0.0 && !c_res.unitStr.empty() && std::isdigit(c_res.unitStr[0])) {
-            ss << c_res.unitStr;
+        std::string resultStr;
+        if (c_res.value == 0.0 && !c_res.unitStr.empty() && (std::isdigit(c_res.unitStr[0]) || c_res.unitStr.find('R') != std::string::npos)) {
+            resultStr = c_res.unitStr;
         } else {
-            ss << c_res.value;
+            history.push_back(c_res.value);
+            resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(c_res.value);
             if (!c_res.unitStr.empty()) {
-                ss << " " << c_res.unitStr;
+                resultStr += " (" + c_res.unitStr + ")";
             }
         }
-        return env->NewStringUTF(ss.str().c_str());
+        return env->NewStringUTF(resultStr.c_str());
     }
 
     // 2. Handle help / help()

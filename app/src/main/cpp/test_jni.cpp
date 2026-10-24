@@ -310,7 +310,11 @@ int main() {
     assert(expr4 == "ctan()" && cursor4 == 5);
 
     handleTabCompletion(expr4, cursor4);
-    std::cout << "Test 4.3 [ctan() -> cosh()]: " << expr4 << " cursor=" << cursor4 << std::endl;
+    std::cout << "Test 4.2b [ctan() -> cot()]: " << expr4 << " cursor=" << cursor4 << std::endl;
+    assert(expr4 == "cot()" && cursor4 == 4);
+
+    handleTabCompletion(expr4, cursor4);
+    std::cout << "Test 4.3 [cot() -> cosh()]: " << expr4 << " cursor=" << cursor4 << std::endl;
     assert(expr4 == "cosh()" && cursor4 == 5);
 
     handleTabCompletion(expr4, cursor4);
@@ -438,6 +442,112 @@ int main() {
 
     ConvResult c_mmhg_low = handleConv(760, "mmhg", "atm", units_dat);
     assert(c_mmhg_low.success && std::abs(c_mmhg_low.value - 1.0) < 0.001);
+
+    // Test Case 10: Trigonometric & Hyperbolic functions test suite
+    degreesMode = true;
+    double t_sin = evaluate("sin(30)", err);
+    assert(err.empty() && std::abs(t_sin - 0.5) < 1e-6);
+
+    double t_cos = evaluate("cos(60)", err);
+    assert(err.empty() && std::abs(t_cos - 0.5) < 1e-6);
+
+    double t_tan = evaluate("tan(45)", err);
+    assert(err.empty() && std::abs(t_tan - 1.0) < 1e-6);
+
+    double t_ctan = evaluate("ctan(45)", err);
+    assert(err.empty() && std::abs(t_ctan - 1.0) < 1e-6);
+
+    double t_cot = evaluate("cot(45)", err);
+    assert(err.empty() && std::abs(t_cot - 1.0) < 1e-6);
+
+    double t_asin = evaluate("asin(0.5)", err);
+    assert(err.empty() && std::abs(t_asin - 30.0) < 1e-6);
+
+    double t_acos = evaluate("acos(0.5)", err);
+    assert(err.empty() && std::abs(t_acos - 60.0) < 1e-6);
+
+    double t_atan = evaluate("atan(1.0)", err);
+    assert(err.empty() && std::abs(t_atan - 45.0) < 1e-6);
+
+    double t_atan2 = evaluate("atan2(1.0, 1.0)", err);
+    assert(err.empty() && std::abs(t_atan2 - 45.0) < 1e-6);
+
+    // Domain errors for asin/acos (|x| <= 1)
+    evaluate("asin(2)", err);
+    assert(err == "Math Error");
+
+    evaluate("asin(-2)", err);
+    assert(err == "Math Error");
+
+    evaluate("acos(1.5)", err);
+    assert(err == "Math Error");
+
+    evaluate("acos(-1.5)", err);
+    assert(err == "Math Error");
+
+    // Trig in Radians Mode
+    degreesMode = false;
+    double t_sin_rad = evaluate("sin(pi / 6)", err);
+    assert(err.empty() && std::abs(t_sin_rad - 0.5) < 1e-6);
+
+    double t_asin_rad = evaluate("asin(1)", err);
+    assert(err.empty() && std::abs(t_asin_rad - M_PI / 2.0) < 1e-6);
+
+    double t_atan2_rad = evaluate("atan2(1, 1)", err);
+    assert(err.empty() && std::abs(t_atan2_rad - M_PI / 4.0) < 1e-6);
+    degreesMode = true;
+
+    // Hyperbolic & Inverse Hyperbolic
+    double t_sinh0 = evaluate("sinh(0)", err);
+    assert(err.empty() && std::abs(t_sinh0 - 0.0) < 1e-6);
+
+    double t_cosh0 = evaluate("cosh(0)", err);
+    assert(err.empty() && std::abs(t_cosh0 - 1.0) < 1e-6);
+
+    double t_tanh0 = evaluate("tanh(0)", err);
+    assert(err.empty() && std::abs(t_tanh0 - 0.0) < 1e-6);
+
+    double t_asinh = evaluate("asinh(sinh(1.5))", err);
+    assert(err.empty() && std::abs(t_asinh - 1.5) < 1e-4);
+
+    double t_acosh = evaluate("acosh(cosh(2.0))", err);
+    assert(err.empty() && std::abs(t_acosh - 2.0) < 1e-4);
+
+    double t_atanh = evaluate("atanh(tanh(0.75))", err);
+    assert(err.empty() && std::abs(t_atanh - 0.75) < 1e-4);
+
+    // Hyperbolic domain errors
+    evaluate("acosh(0.5)", err); // acosh defined for x >= 1
+    assert(err == "Math Error");
+
+    evaluate("atanh(1.5)", err); // atanh defined for |x| < 1
+    assert(err == "Math Error");
+
+    evaluate("atanh(-2.0)", err);
+    assert(err == "Math Error");
+
+    // Test Case 11: Acceleration conversions
+    ConvResult c_acc1 = handleConv(1, "m/s^2", "cm/s^2", units_dat);
+    assert(c_acc1.success && std::abs(c_acc1.value - 100.0) < 1e-3);
+
+    ConvResult c_acc2 = handleConv(1, "g0", "m/s^2", units_dat);
+    assert(c_acc2.success && std::abs(c_acc2.value - 9.80665) < 1e-3);
+
+    ConvResult c_acc3 = handleConv(9.80665, "m/s2", "g", units_dat);
+    assert(c_acc3.success && std::abs(c_acc3.value - 1.0) < 1e-3);
+
+    ConvResult c_acc4 = handleConv(100, "gal", "m/s^2", units_dat);
+    assert(c_acc4.success && std::abs(c_acc4.value - 1.0) < 1e-3);
+
+    ConvResult c_acc5 = handleConv(1, "gravity", "ft/s^2", units_dat);
+    assert(c_acc5.success && std::abs(c_acc5.value - 32.174) < 0.05);
+
+    // Test Case 12: Acceleration dimension-aware tab completion
+    reset_tab();
+    std::string expr_acc = "conv(10, \"m/s^2\", c";
+    int cursor_acc = 19;
+    handleTabCompletion(expr_acc, cursor_acc);
+    assert(expr_acc == "conv(10, \"m/s^2\", cm/s^2" && cursor_acc == 24);
 
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
