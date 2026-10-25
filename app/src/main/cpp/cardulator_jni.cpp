@@ -408,12 +408,10 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, jobject thiz) {
     history.clear();
     user_args.clear();
-    user_funcs.clear();
-    user_script_funcs.clear();
-    user_consts.clear();
     user_arrays.clear();
     script_console_output.clear();
-    LOGI("History and session state cleared.");
+    resetTabState();
+    LOGI("History and variables cleared.");
 }
 
 JNIEXPORT jstring JNICALL

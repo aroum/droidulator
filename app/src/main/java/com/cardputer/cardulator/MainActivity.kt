@@ -729,29 +729,20 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Clear button (Short click: clear input field; 1000ms long press: clear all user variables)
+        // Clear button (Short click: clear input field; 800ms long press: clear history & variables)
         val clearHandler = android.os.Handler(android.os.Looper.getMainLooper())
         var isLongPressTriggered = false
         val longPressRunnable = Runnable {
             isLongPressTriggered = true
-            val varsRaw = CardulatorEngine.nativeGetVariables()
-            val lines = varsRaw.split("\n").filter { it.contains("=") }
-            for (line in lines) {
-                val varName = line.split("=")[0].trim()
-                CardulatorEngine.nativeDeleteVariable(varName)
-            }
-            saveUserDataToStorage()
-            Toast.makeText(this, "All variables deleted", Toast.LENGTH_SHORT).show()
-            if (tabs[currentTabPosition] == "Variables") {
-                refreshTabContent("Variables")
-            }
+            btnClear.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+            clearSessionAndHistory()
         }
 
         btnClear.setOnTouchListener { _, event ->
             when (event.action) {
                 android.view.MotionEvent.ACTION_DOWN -> {
                     isLongPressTriggered = false
-                    clearHandler.postDelayed(longPressRunnable, 1000)
+                    clearHandler.postDelayed(longPressRunnable, 800)
                 }
                 android.view.MotionEvent.ACTION_UP -> {
                     clearHandler.removeCallbacks(longPressRunnable)
@@ -1115,10 +1106,17 @@ class MainActivity : AppCompatActivity() {
         CardulatorEngine.nativeClearHistory()
         replHistory.clear()
         replHistoryIndex = -1
+        tempReplInput = ""
+        convTabCachedMatches = null
         tvOutput.text = if (hideWelcomeMessage) "History & Session Cleared.\n" else "History & Session Cleared.\n$WELCOME_MSG"
         etInput.setText("")
         dismissErrorOverlay()
-        Toast.makeText(this, "History & Session Cleared", Toast.LENGTH_SHORT).show()
+        saveUserDataToStorage()
+        Toast.makeText(this, "History and variables cleared", Toast.LENGTH_SHORT).show()
+        val activeTab = tabs[currentTabPosition]
+        if (activeTab == "Variables" || activeTab == "Formulas" || activeTab == "Constants") {
+            refreshTabContent(activeTab)
+        }
     }
 
     private fun showErrorOverlay(errorMessage: String) {
