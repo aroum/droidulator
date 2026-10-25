@@ -542,6 +542,18 @@ int main() {
     double t_asinh = evaluate("asinh(sinh(1.5))", err);
     assert(err.empty() && std::abs(t_asinh - 1.5) < 1e-4);
 
+    double t_ahsin = evaluate("ahsin(sinh(1.5))", err);
+    assert(err.empty() && std::abs(t_ahsin - 1.5) < 1e-4);
+
+    double t_ahcos = evaluate("ahcos(cosh(2.0))", err);
+    assert(err.empty() && std::abs(t_ahcos - 2.0) < 1e-4);
+
+    double t_ahtan = evaluate("ahtan(tanh(0.75))", err);
+    assert(err.empty() && std::abs(t_ahtan - 0.75) < 1e-4);
+
+    double t_arcsin = evaluate("arcsin(0.5)", err);
+    assert(err.empty() && std::abs(t_arcsin - 30.0) < 1e-4);
+
     double t_acosh = evaluate("acosh(cosh(2.0))", err);
     assert(err.empty() && std::abs(t_acosh - 2.0) < 1e-4);
 
