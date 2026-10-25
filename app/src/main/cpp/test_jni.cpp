@@ -554,6 +554,66 @@ int main() {
     double t_arcsin = evaluate("arcsin(0.5)", err);
     assert(err.empty() && std::abs(t_arcsin - 30.0) < 1e-4);
 
+    double t_tg = evaluate("tg(45)", err);
+    assert(err.empty() && std::abs(t_tg - 1.0) < 1e-4);
+
+    double t_ctg = evaluate("ctg(45)", err);
+    assert(err.empty() && std::abs(t_ctg - 1.0) < 1e-4);
+
+    double t_sec = evaluate("sec(60)", err);
+    assert(err.empty() && std::abs(t_sec - 2.0) < 1e-4);
+
+    double t_csc = evaluate("csc(30)", err);
+    assert(err.empty() && std::abs(t_csc - 2.0) < 1e-4);
+
+    double t_cosec = evaluate("cosec(30)", err);
+    assert(err.empty() && std::abs(t_cosec - 2.0) < 1e-4);
+
+    double t_arctg = evaluate("arctg(1)", err);
+    assert(err.empty() && std::abs(t_arctg - 45.0) < 1e-4);
+
+    double t_arcctg = evaluate("arcctg(1)", err);
+    assert(err.empty() && std::abs(t_arcctg - 45.0) < 1e-4);
+
+    double t_arcsec = evaluate("arcsec(2)", err);
+    assert(err.empty() && std::abs(t_arcsec - 60.0) < 1e-4);
+
+    double t_arccsc = evaluate("arccsc(2)", err);
+    assert(err.empty() && std::abs(t_arccsc - 30.0) < 1e-4);
+
+    double t_arccosec = evaluate("arccosec(2)", err);
+    assert(err.empty() && std::abs(t_arccosec - 30.0) < 1e-4);
+
+    double t_sh = evaluate("sh(0)", err);
+    assert(err.empty() && std::abs(t_sh - 0.0) < 1e-6);
+
+    double t_ch = evaluate("ch(0)", err);
+    assert(err.empty() && std::abs(t_ch - 1.0) < 1e-6);
+
+    double t_th = evaluate("th(0)", err);
+    assert(err.empty() && std::abs(t_th - 0.0) < 1e-6);
+
+    double t_sech = evaluate("sech(0)", err);
+    assert(err.empty() && std::abs(t_sech - 1.0) < 1e-6);
+
+    double t_coth = evaluate("coth(1.5)", err);
+    assert(err.empty() && std::abs(t_coth - (1.0 / std::tanh(1.5))) < 1e-4);
+
+    double t_csch = evaluate("csch(1.5)", err);
+    assert(err.empty() && std::abs(t_csch - (1.0 / std::sinh(1.5))) < 1e-4);
+
+    double t_acoth = evaluate("acoth(coth(1.5))", err);
+    assert(err.empty() && std::abs(t_acoth - 1.5) < 1e-4);
+
+    double t_asech = evaluate("asech(sech(0.5))", err);
+    assert(err.empty() && std::abs(t_asech - 0.5) < 1e-4);
+
+    double t_acsch = evaluate("acsch(csch(1.5))", err);
+    assert(err.empty() && std::abs(t_acsch - 1.5) < 1e-4);
+
+    double t_arccosech = evaluate("arccosech(csch(1.5))", err);
+    assert(err.empty() && std::abs(t_arccosech - 1.5) < 1e-4);
+
     double t_acosh = evaluate("acosh(cosh(2.0))", err);
     assert(err.empty() && std::abs(t_acosh - 2.0) < 1e-4);
 
