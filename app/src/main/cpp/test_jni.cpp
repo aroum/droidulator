@@ -643,6 +643,60 @@ int main() {
     evaluate("fact(-2)", err);
     assert(err == "Domain Error: fact(n) requires n >= 0");
 
+    // Domain errors for new trigonometric and hyperbolic functions
+    evaluate("asec(0.5)", err);
+    assert(err == "Domain Error: asec(x) requires |x| >= 1");
+
+    evaluate("arcsec(-0.5)", err);
+    assert(err == "Domain Error: asec(x) requires |x| >= 1");
+
+    evaluate("acsc(0.5)", err);
+    assert(err == "Domain Error: acsc(x) requires |x| >= 1");
+
+    evaluate("arccsc(-0.5)", err);
+    assert(err == "Domain Error: acsc(x) requires |x| >= 1");
+
+    evaluate("coth(0)", err);
+    assert(err == "Domain Error: coth(x) requires x != 0");
+
+    evaluate("csch(0)", err);
+    assert(err == "Domain Error: csch(x) requires x != 0");
+
+    evaluate("acoth(0.5)", err);
+    assert(err == "Domain Error: acoth(x) requires |x| > 1");
+
+    evaluate("acoth(1.0)", err);
+    assert(err == "Domain Error: acoth(x) requires |x| > 1");
+
+    evaluate("asech(0)", err);
+    assert(err == "Domain Error: asech(x) requires 0 < x <= 1");
+
+    evaluate("asech(2)", err);
+    assert(err == "Domain Error: asech(x) requires 0 < x <= 1");
+
+    evaluate("acsch(0)", err);
+    assert(err == "Domain Error: acsch(x) requires x != 0");
+
+    // Singularity domain errors (degrees mode)
+    degreesMode = true;
+    evaluate("tan(90)", err);
+    assert(err == "Domain Error: tan(x) undefined when cos(x) = 0");
+
+    evaluate("tg(90)", err);
+    assert(err == "Domain Error: tan(x) undefined when cos(x) = 0");
+
+    evaluate("sec(90)", err);
+    assert(err == "Domain Error: sec(x) undefined when cos(x) = 0");
+
+    evaluate("csc(0)", err);
+    assert(err == "Domain Error: csc(x) undefined when sin(x) = 0");
+
+    evaluate("cot(0)", err);
+    assert(err == "Domain Error: cot(x) undefined when sin(x) = 0");
+
+    evaluate("ctg(0)", err);
+    assert(err == "Domain Error: cot(x) undefined when sin(x) = 0");
+
     // Test Case 11: Acceleration conversions
     ConvResult c_acc1 = handleConv(1, "m/s^2", "cm/s^2", units_dat);
     assert(c_acc1.success && std::abs(c_acc1.value - 100.0) < 1e-3);
