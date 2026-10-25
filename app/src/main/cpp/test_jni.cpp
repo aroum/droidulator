@@ -594,6 +594,47 @@ int main() {
     handleTabCompletion(expr_acc, cursor_acc);
     assert(expr_acc == "conv(10, \"m/s^2\", cm/s^2" && cursor_acc == 24);
 
+    // Test Case 13: Angle operations and output formatting
+    degreesMode = true;
+    double val_asin = evaluateInput("asin(0.5)", err, isDef);
+    assert(err.empty() && std::abs(val_asin - 30.0) < 1e-6);
+    assert(g_last_result_angle == AngleUnit::DEG);
+
+    degreesMode = false;
+    double val_asin_rad = evaluateInput("asin(0.5)", err, isDef);
+    assert(err.empty() && std::abs(val_asin_rad - 0.5235987) < 1e-5);
+    assert(g_last_result_angle == AngleUnit::RAD);
+
+    // Variable assignment x = asin(0.5)
+    degreesMode = true;
+    evaluateInput("x_angle = asin(0.5)", err, isDef);
+    assert(err.empty() && isDef);
+    assert(g_last_result_angle == AngleUnit::DEG);
+
+    // Conversions deg2rad and rad2deg
+    evaluateInput("r_angle = deg2rad(180)", err, isDef);
+    assert(err.empty() && isDef);
+    assert(g_last_result_angle == AngleUnit::RAD);
+
+    evaluateInput("d_angle = rad2deg(pi)", err, isDef);
+    assert(err.empty() && isDef);
+    assert(g_last_result_angle == AngleUnit::DEG);
+
+    // Non-angle trig operations must reset g_last_result_angle to NONE
+    evaluateInput("sin(30)", err, isDef);
+    assert(g_last_result_angle == AngleUnit::NONE);
+
+    // Test Case 14: Tab completion caching verification
+    reset_tab();
+    std::string test_expr = "p";
+    int test_cursor = 1;
+    handleTabCompletion(test_expr, test_cursor);
+    assert(test_expr == "pi");
+    handleTabCompletion(test_expr, test_cursor);
+    assert(test_expr == "phi");
+    handleTabCompletion(test_expr, test_cursor);
+    assert(test_expr == "print()");
+
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

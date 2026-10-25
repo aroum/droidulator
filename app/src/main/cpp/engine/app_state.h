@@ -58,6 +58,13 @@ inline double plot_center_y = 0.0;
 inline double plot_scale = 1.0;
 inline std::string g_math_domain_err = "";
 
+enum class AngleUnit {
+    NONE,
+    DEG,
+    RAD
+};
+inline AngleUnit g_last_result_angle = AngleUnit::NONE;
+
 extern std::vector<CustomScriptFunc> user_script_funcs;
 extern std::vector<double> history;
 extern std::vector<UserArg> user_args;

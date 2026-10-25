@@ -111,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     private var convTabOrigPrefix: String? = null
     private var convTabSplitPos: Int = -1
     private var convTabMatchIdx: Int = 0
+    private var convTabCachedMatches: List<String>? = null
 
     companion object {
         private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
@@ -121,6 +122,170 @@ class MainActivity : AppCompatActivity() {
         private val FUNC_REGEX = Regex("\\b(sin|cos|tan|ctan|asin|acos|atan|sinh|cosh|tanh|sqrt|ln|log|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|var|std|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv)\\b")
         private val CONST_REGEX = Regex("\\b(pi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
+
+        private const val DIM_NONE         = 0
+        private const val DIM_LENGTH       = 1 shl 0
+        private const val DIM_AREA_WIRE    = 1 shl 1
+        private const val DIM_VOLUME       = 1 shl 2
+        private const val DIM_PRESSURE     = 1 shl 3
+        private const val DIM_RESISTANCE   = 1 shl 4
+        private const val DIM_CAPACITANCE  = 1 shl 5
+        private const val DIM_INDUCTANCE   = 1 shl 6
+        private const val DIM_CURRENT      = 1 shl 7
+        private const val DIM_VOLTAGE      = 1 shl 8
+        private const val DIM_POWER        = 1 shl 9
+        private const val DIM_DB_RATIO     = 1 shl 10
+        private const val DIM_FREQUENCY    = 1 shl 11
+        private const val DIM_MASS         = 1 shl 12
+        private const val DIM_TIME         = 1 shl 13
+        private const val DIM_SPEED        = 1 shl 14
+        private const val DIM_ACCELERATION = 1 shl 15
+        private const val DIM_ENERGY       = 1 shl 16
+        private const val DIM_FORCE        = 1 shl 17
+        private const val DIM_TEMPERATURE  = 1 shl 18
+        private const val DIM_ANGLE        = 1 shl 19
+        private const val DIM_EM           = 1 shl 20
+
+        private data class UnitCandidate(val name: String, val dims: Int)
+
+        private val CONV_UNIT_CANDIDATES = listOf(
+            UnitCandidate("mm", DIM_LENGTH), UnitCandidate("mmHg", DIM_PRESSURE),
+            UnitCandidate("mm^2", DIM_AREA_WIRE), UnitCandidate("mm2", DIM_AREA_WIRE),
+            UnitCandidate("std_mm2", DIM_AREA_WIRE), UnitCandidate("m", DIM_LENGTH),
+            UnitCandidate("meter", DIM_LENGTH), UnitCandidate("cm", DIM_LENGTH),
+            UnitCandidate("km", DIM_LENGTH), UnitCandidate("mile", DIM_LENGTH),
+            UnitCandidate("yard", DIM_LENGTH), UnitCandidate("foot", DIM_LENGTH),
+            UnitCandidate("inch", DIM_LENGTH), UnitCandidate("in", DIM_LENGTH),
+            UnitCandidate("ft", DIM_LENGTH), UnitCandidate("yd", DIM_LENGTH),
+            UnitCandidate("nauticalmile", DIM_LENGTH), UnitCandidate("angstrom", DIM_LENGTH),
+            UnitCandidate("au", DIM_LENGTH),
+            UnitCandidate("m^2", DIM_AREA_WIRE), UnitCandidate("m2", DIM_AREA_WIRE),
+            UnitCandidate("cm^2", DIM_AREA_WIRE), UnitCandidate("cm2", DIM_AREA_WIRE),
+            UnitCandidate("km^2", DIM_AREA_WIRE), UnitCandidate("km2", DIM_AREA_WIRE),
+            UnitCandidate("hectare", DIM_AREA_WIRE), UnitCandidate("acre", DIM_AREA_WIRE),
+            UnitCandidate("sqft", DIM_AREA_WIRE), UnitCandidate("sqin", DIM_AREA_WIRE),
+            UnitCandidate("m^3", DIM_VOLUME), UnitCandidate("m3", DIM_VOLUME),
+            UnitCandidate("liter", DIM_VOLUME), UnitCandidate("l", DIM_VOLUME),
+            UnitCandidate("ml", DIM_VOLUME), UnitCandidate("dl", DIM_VOLUME),
+            UnitCandidate("cl", DIM_VOLUME), UnitCandidate("gal", DIM_VOLUME),
+            UnitCandidate("gallon", DIM_VOLUME), UnitCandidate("quart", DIM_VOLUME),
+            UnitCandidate("pint", DIM_VOLUME), UnitCandidate("cup", DIM_VOLUME),
+            UnitCandidate("floz", DIM_VOLUME), UnitCandidate("tbsp", DIM_VOLUME),
+            UnitCandidate("tsp", DIM_VOLUME), UnitCandidate("barrel", DIM_VOLUME),
+            UnitCandidate("torr", DIM_PRESSURE), UnitCandidate("atm", DIM_PRESSURE),
+            UnitCandidate("bar", DIM_PRESSURE), UnitCandidate("mbar", DIM_PRESSURE),
+            UnitCandidate("Pa", DIM_PRESSURE), UnitCandidate("pascal", DIM_PRESSURE),
+            UnitCandidate("kPa", DIM_PRESSURE), UnitCandidate("MPa", DIM_PRESSURE),
+            UnitCandidate("GPa", DIM_PRESSURE), UnitCandidate("psi", DIM_PRESSURE),
+            UnitCandidate("psf", DIM_PRESSURE), UnitCandidate("inHg", DIM_PRESSURE),
+            UnitCandidate("ohm", DIM_RESISTANCE), UnitCandidate("mohm", DIM_RESISTANCE),
+            UnitCandidate("kohm", DIM_RESISTANCE), UnitCandidate("Mohm", DIM_RESISTANCE),
+            UnitCandidate("smd3", DIM_RESISTANCE), UnitCandidate("smd4", DIM_RESISTANCE),
+            UnitCandidate("eia96", DIM_RESISTANCE), UnitCandidate("awg", DIM_AREA_WIRE),
+            UnitCandidate("std_awg", DIM_AREA_WIRE),
+            UnitCandidate("farad", DIM_CAPACITANCE), UnitCandidate("F", DIM_CAPACITANCE),
+            UnitCandidate("uF", DIM_CAPACITANCE), UnitCandidate("uf", DIM_CAPACITANCE),
+            UnitCandidate("nF", DIM_CAPACITANCE), UnitCandidate("nf", DIM_CAPACITANCE),
+            UnitCandidate("pF", DIM_CAPACITANCE), UnitCandidate("pf", DIM_CAPACITANCE),
+            UnitCandidate("henry", DIM_INDUCTANCE), UnitCandidate("H", DIM_INDUCTANCE),
+            UnitCandidate("uH", DIM_INDUCTANCE), UnitCandidate("uh", DIM_INDUCTANCE),
+            UnitCandidate("mH", DIM_INDUCTANCE), UnitCandidate("mh", DIM_INDUCTANCE),
+            UnitCandidate("nH", DIM_INDUCTANCE), UnitCandidate("nh", DIM_INDUCTANCE),
+            UnitCandidate("ampere", DIM_CURRENT), UnitCandidate("amp", DIM_CURRENT),
+            UnitCandidate("A", DIM_CURRENT), UnitCandidate("mA", DIM_CURRENT),
+            UnitCandidate("uA", DIM_CURRENT), UnitCandidate("kA", DIM_CURRENT),
+            UnitCandidate("volt", DIM_VOLTAGE), UnitCandidate("V", DIM_VOLTAGE),
+            UnitCandidate("mV", DIM_VOLTAGE), UnitCandidate("uV", DIM_VOLTAGE),
+            UnitCandidate("kV", DIM_VOLTAGE), UnitCandidate("MV", DIM_VOLTAGE),
+            UnitCandidate("watt", DIM_POWER), UnitCandidate("W", DIM_POWER),
+            UnitCandidate("mW", DIM_POWER), UnitCandidate("uW", DIM_POWER),
+            UnitCandidate("kW", DIM_POWER), UnitCandidate("MW", DIM_POWER),
+            UnitCandidate("GW", DIM_POWER), UnitCandidate("hp", DIM_POWER),
+            UnitCandidate("horsepower", DIM_POWER),
+            UnitCandidate("Hz", DIM_FREQUENCY), UnitCandidate("khz", DIM_FREQUENCY),
+            UnitCandidate("mhz", DIM_FREQUENCY), UnitCandidate("ghz", DIM_FREQUENCY),
+            UnitCandidate("coulomb", DIM_EM), UnitCandidate("tesla", DIM_EM),
+            UnitCandidate("weber", DIM_EM),
+            UnitCandidate("dB", DIM_DB_RATIO), UnitCandidate("db", DIM_DB_RATIO),
+            UnitCandidate("dBm", DIM_POWER or DIM_DB_RATIO), UnitCandidate("dbm", DIM_POWER or DIM_DB_RATIO),
+            UnitCandidate("dBW", DIM_POWER or DIM_DB_RATIO), UnitCandidate("dbw", DIM_POWER or DIM_DB_RATIO),
+            UnitCandidate("dBV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbv", DIM_VOLTAGE or DIM_DB_RATIO),
+            UnitCandidate("dBmV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbmv", DIM_VOLTAGE or DIM_DB_RATIO),
+            UnitCandidate("dBuV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbuv", DIM_VOLTAGE or DIM_DB_RATIO),
+            UnitCandidate("dBu", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbu", DIM_VOLTAGE or DIM_DB_RATIO),
+            UnitCandidate("times", DIM_DB_RATIO), UnitCandidate("ratio", DIM_DB_RATIO),
+            UnitCandidate("kg", DIM_MASS), UnitCandidate("kilogram", DIM_MASS),
+            UnitCandidate("g", DIM_MASS), UnitCandidate("gram", DIM_MASS),
+            UnitCandidate("mg", DIM_MASS), UnitCandidate("ug", DIM_MASS),
+            UnitCandidate("ton", DIM_MASS), UnitCandidate("tonne", DIM_MASS),
+            UnitCandidate("lb", DIM_MASS), UnitCandidate("pound", DIM_MASS),
+            UnitCandidate("oz", DIM_MASS), UnitCandidate("ounce", DIM_MASS),
+            UnitCandidate("stone", DIM_MASS), UnitCandidate("carat", DIM_MASS),
+            UnitCandidate("s", DIM_TIME), UnitCandidate("sec", DIM_TIME),
+            UnitCandidate("second", DIM_TIME), UnitCandidate("ms", DIM_TIME),
+            UnitCandidate("us", DIM_TIME), UnitCandidate("ns", DIM_TIME),
+            UnitCandidate("min", DIM_TIME), UnitCandidate("minute", DIM_TIME),
+            UnitCandidate("hr", DIM_TIME), UnitCandidate("hour", DIM_TIME),
+            UnitCandidate("day", DIM_TIME), UnitCandidate("week", DIM_TIME),
+            UnitCandidate("month", DIM_TIME), UnitCandidate("year", DIM_TIME),
+            UnitCandidate("m/s", DIM_SPEED), UnitCandidate("km/hr", DIM_SPEED),
+            UnitCandidate("km/h", DIM_SPEED), UnitCandidate("kph", DIM_SPEED),
+            UnitCandidate("mph", DIM_SPEED), UnitCandidate("knot", DIM_SPEED),
+            UnitCandidate("mach", DIM_SPEED),
+            UnitCandidate("m/s^2", DIM_ACCELERATION), UnitCandidate("cm/s^2", DIM_ACCELERATION),
+            UnitCandidate("km/s^2", DIM_ACCELERATION), UnitCandidate("km/h^2", DIM_ACCELERATION),
+            UnitCandidate("ft/s^2", DIM_ACCELERATION), UnitCandidate("in/s^2", DIM_ACCELERATION),
+            UnitCandidate("gal", DIM_ACCELERATION), UnitCandidate("g0", DIM_ACCELERATION),
+            UnitCandidate("gee", DIM_ACCELERATION), UnitCandidate("gravity", DIM_ACCELERATION),
+            UnitCandidate("joule", DIM_ENERGY), UnitCandidate("J", DIM_ENERGY),
+            UnitCandidate("kJ", DIM_ENERGY), UnitCandidate("MJ", DIM_ENERGY),
+            UnitCandidate("cal", DIM_ENERGY), UnitCandidate("calorie", DIM_ENERGY),
+            UnitCandidate("kcal", DIM_ENERGY), UnitCandidate("eV", DIM_ENERGY),
+            UnitCandidate("keV", DIM_ENERGY), UnitCandidate("MeV", DIM_ENERGY),
+            UnitCandidate("GeV", DIM_ENERGY), UnitCandidate("Wh", DIM_ENERGY),
+            UnitCandidate("kWh", DIM_ENERGY), UnitCandidate("MWh", DIM_ENERGY),
+            UnitCandidate("BTU", DIM_ENERGY),
+            UnitCandidate("newton", DIM_FORCE), UnitCandidate("N", DIM_FORCE),
+            UnitCandidate("kN", DIM_FORCE), UnitCandidate("dyn", DIM_FORCE),
+            UnitCandidate("dyne", DIM_FORCE), UnitCandidate("lbf", DIM_FORCE),
+            UnitCandidate("kgf", DIM_FORCE),
+            UnitCandidate("degC", DIM_TEMPERATURE), UnitCandidate("degF", DIM_TEMPERATURE),
+            UnitCandidate("kelvin", DIM_TEMPERATURE), UnitCandidate("K", DIM_TEMPERATURE),
+            UnitCandidate("deg", DIM_ANGLE), UnitCandidate("degree", DIM_ANGLE),
+            UnitCandidate("rad", DIM_ANGLE), UnitCandidate("radian", DIM_ANGLE)
+        )
+
+        private val UNIT_DIMENSION_MAP: Map<String, Int> = run {
+            val map = HashMap<String, Int>(256)
+            fun add(dims: Int, vararg units: String) {
+                for (u in units) {
+                    val prev = map[u.lowercase()] ?: 0
+                    map[u.lowercase()] = prev or dims
+                }
+            }
+            add(DIM_LENGTH, "mm", "m", "meter", "meters", "cm", "km", "mile", "miles", "yard", "yards", "foot", "feet", "inch", "inches", "in", "ft", "yd", "nauticalmile", "angstrom", "au")
+            add(DIM_AREA_WIRE, "mm^2", "mm2", "std_mm2", "awg", "std_awg", "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "acres", "sqft", "sqin")
+            add(DIM_VOLUME, "m^3", "m3", "cm^3", "cm3", "liter", "liters", "litre", "litres", "l", "ml", "dl", "cl", "gal", "gallon", "gallons", "quart", "quarts", "pint", "pints", "cup", "cups", "floz", "tbsp", "tsp", "barrel")
+            add(DIM_PRESSURE, "mmhg", "torr", "atm", "bar", "mbar", "pa", "pascal", "kpa", "mpa", "gpa", "psi", "psf", "inhg")
+            add(DIM_RESISTANCE, "ohm", "ohms", "mohm", "kohm", "smd3", "smd4", "eia96")
+            add(DIM_CAPACITANCE, "farad", "f", "uf", "nf", "pf")
+            add(DIM_INDUCTANCE, "henry", "h", "uh", "mh", "nh")
+            add(DIM_CURRENT, "ampere", "amp", "amps", "a", "ma", "ua", "ka")
+            add(DIM_VOLTAGE, "volt", "volts", "v", "mv", "uv", "kv", "dbv", "dbmv", "dbuv", "dbu")
+            add(DIM_POWER, "watt", "watts", "w", "mw", "uw", "kw", "gw", "hp", "horsepower", "dbm", "dbw")
+            add(DIM_DB_RATIO, "db", "times", "ratio", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu")
+            add(DIM_FREQUENCY, "hz", "khz", "mhz", "ghz")
+            add(DIM_MASS, "kg", "kilogram", "kilograms", "g", "gram", "grams", "mg", "ug", "ton", "tonne", "tonnes", "lb", "pound", "pounds", "oz", "ounce", "ounces", "stone", "carat")
+            add(DIM_TIME, "s", "sec", "second", "seconds", "ms", "us", "ns", "min", "minute", "minutes", "hr", "hour", "hours", "day", "days", "week", "weeks", "month", "months", "year", "years")
+            add(DIM_SPEED, "m/s", "km/hr", "km/h", "kph", "mph", "knot", "knots", "mach")
+            add(DIM_ACCELERATION, "m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "km/hr^2", "km/hr2", "ft/s^2", "ft/s2", "fps2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity", "g")
+            add(DIM_ENERGY, "joule", "joules", "j", "kj", "mj", "cal", "calorie", "calories", "kcal", "ev", "kev", "mev", "gev", "wh", "kwh", "mwh", "btu")
+            add(DIM_FORCE, "newton", "newtons", "n", "kn", "dyn", "dyne", "lbf", "kgf")
+            add(DIM_TEMPERATURE, "degc", "degf", "kelvin", "k")
+            add(DIM_ANGLE, "deg", "degree", "degrees", "rad", "radian", "radians")
+            add(DIM_EM, "coulomb", "tesla", "weber")
+            map
+        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -417,6 +582,28 @@ class MainActivity : AppCompatActivity() {
                 val lastParenPos = fullText.lastIndexOf('(', caret - 1)
                 val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
 
+                val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos && convTabCachedMatches != null)
+                if (isContinuation) {
+                    val cached = convTabCachedMatches!!
+                    if (cached.isNotEmpty()) {
+                        convTabMatchIdx++
+                        val match = cached[convTabMatchIdx % cached.size]
+
+                        val prefix = fullText.substring(0, splitPos).trimEnd()
+                        var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
+                        if (endArgPos == -1) endArgPos = fullText.length
+                        val suffix = fullText.substring(endArgPos)
+
+                        val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
+                        val newArg = "\"$match\""
+                        val newText = "$formattedPrefix$newArg$suffix"
+
+                        etInput.setText(newText)
+                        etInput.setSelection(formattedPrefix.length + newArg.length)
+                        return@setOnClickListener
+                    }
+                }
+
                 val argsContent = convMatch.groupValues[1]
                 val parts = argsContent.split(",")
                 val lastPartRaw = parts.last().trim()
@@ -437,69 +624,26 @@ class MainActivity : AppCompatActivity() {
                     else -> null
                 }
 
-                val unitCandidates = listOf(
-                    // Length & Distance
-                    "mm", "mmHg", "mm^2", "mm2", "std_mm2", "m", "meter", "cm", "km", "mile", "yard", "foot", "inch", "in", "ft", "yd", "nauticalmile", "angstrom", "au",
-                    // Area & Volume
-                    "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "sqft", "sqin",
-                    "m^3", "m3", "liter", "l", "ml", "dl", "cl", "gal", "gallon", "quart", "pint", "cup", "floz", "tbsp", "tsp", "barrel",
-                    // Pressure
-                    "torr", "atm", "bar", "mbar", "Pa", "pascal", "kPa", "MPa", "GPa", "psi", "psf", "inHg",
-                    // Electronics & Component Codes
-                    "ohm", "mohm", "kohm", "Mohm", "smd3", "smd4", "eia96", "awg", "std_awg",
-                    "farad", "F", "uF", "uf", "nF", "nf", "pF", "pf",
-                    "henry", "H", "uH", "uh", "mH", "mh", "nH", "nh",
-                    "ampere", "amp", "A", "mA", "uA", "kA",
-                    "volt", "V", "mV", "uV", "kV", "MV",
-                    "watt", "W", "mW", "uW", "kW", "MW", "GW", "hp", "horsepower",
-                    "Hz", "khz", "mhz", "ghz", "coulomb", "tesla", "weber",
-                    // Decibels & Ratios
-                    "dB", "db", "dBm", "dbm", "dBW", "dbw", "dBV", "dbv", "dBmV", "dbmv", "dBuV", "dbuv", "dBu", "dbu", "times", "ratio",
-                    // Mass & Weight
-                    "kg", "kilogram", "g", "gram", "mg", "ug", "ton", "tonne", "lb", "pound", "oz", "ounce", "stone", "carat",
-                    // Time
-                    "s", "sec", "second", "ms", "us", "ns", "min", "minute", "hr", "hour", "day", "week", "month", "year",
-                    // Speed
-                    "m/s", "km/hr", "km/h", "kph", "mph", "knot", "mach",
-                    // Acceleration
-                    "m/s^2", "cm/s^2", "km/s^2", "km/h^2", "ft/s^2", "in/s^2", "gal", "g0", "gee", "gravity",
-                    // Energy & Work
-                    "joule", "J", "kJ", "MJ", "cal", "calorie", "kcal", "eV", "keV", "MeV", "GeV", "Wh", "kWh", "MWh", "BTU",
-                    // Force
-                    "newton", "N", "kN", "dyn", "dyne", "lbf", "kgf",
-                    // Temperature & Angle
-                    "degC", "degF", "kelvin", "K", "deg", "degree", "rad", "radian"
-                )
-
-                val fromDims = fromUnit?.let { getUnitDimensions(it) } ?: emptySet()
-                val filteredCandidates = if (fromDims.isNotEmpty()) {
-                    unitCandidates.filter { candidate ->
-                        val cDims = getUnitDimensions(candidate)
-                        cDims.any { it in fromDims }
-                    }
+                val fromMask = fromUnit?.let { getUnitDimensionMask(it) } ?: DIM_NONE
+                val filteredCandidates = if (fromMask != DIM_NONE) {
+                    CONV_UNIT_CANDIDATES.filter { (it.dims and fromMask) != 0 }.map { it.name }
                 } else {
-                    unitCandidates
+                    CONV_UNIT_CANDIDATES.map { it.name }
                 }
 
-                val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos)
-                val origPrefix = if (!isContinuation) {
-                    convTabOrigPrefix = lastPart
-                    convTabSplitPos = splitPos
-                    convTabMatchIdx = 0
-                    lastPart
-                } else {
-                    convTabMatchIdx++
-                    convTabOrigPrefix ?: lastPart
-                }
+                convTabOrigPrefix = lastPart
+                convTabSplitPos = splitPos
+                convTabMatchIdx = 0
 
-                val matches = if (origPrefix.isEmpty()) {
+                val matches = if (lastPart.isEmpty()) {
                     filteredCandidates
                 } else {
-                    filteredCandidates.filter { it.startsWith(origPrefix, ignoreCase = true) }
+                    filteredCandidates.filter { it.startsWith(lastPart, ignoreCase = true) }
                 }
 
                 if (matches.isNotEmpty()) {
-                    val match = matches[convTabMatchIdx % matches.size]
+                    convTabCachedMatches = matches
+                    val match = matches[0]
 
                     val prefix = fullText.substring(0, splitPos).trimEnd()
                     var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
@@ -519,11 +663,13 @@ class MainActivity : AppCompatActivity() {
                     convTabOrigPrefix = null
                     convTabSplitPos = -1
                     convTabMatchIdx = 0
+                    convTabCachedMatches = null
                 }
             } else {
                 convTabOrigPrefix = null
                 convTabSplitPos = -1
                 convTabMatchIdx = 0
+                convTabCachedMatches = null
             }
 
             // Detect plot( context: suggest plot parameters/functions inside plot(...)
@@ -702,76 +848,14 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun getUnitDimensions(unit: String): Set<String> {
+    private fun getUnitDimensionMask(unit: String): Int {
         val u = unit.trim().trim('"', '\'').lowercase()
-        if (u.isEmpty()) return emptySet()
-
-        val dims = mutableSetOf<String>()
-        if (u in setOf("mm", "m", "meter", "meters", "cm", "km", "mile", "miles", "yard", "yards", "foot", "feet", "inch", "inches", "in", "ft", "yd", "nauticalmile", "angstrom", "au")) {
-            dims.add("length")
-        }
-        if (u in setOf("mm^2", "mm2", "std_mm2", "awg", "std_awg", "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "acres", "sqft", "sqin")) {
-            dims.add("area_wire")
-        }
-        if (u in setOf("m^3", "m3", "cm^3", "cm3", "liter", "liters", "litre", "litres", "l", "ml", "dl", "cl", "gal", "gallon", "gallons", "quart", "quarts", "pint", "pints", "cup", "cups", "floz", "tbsp", "tsp", "barrel")) {
-            dims.add("volume")
-        }
-        if (u in setOf("mmhg", "torr", "atm", "bar", "mbar", "pa", "pascal", "kpa", "mpa", "gpa", "psi", "psf", "inhg")) {
-            dims.add("pressure")
-        }
-        if (u in setOf("ohm", "ohms", "mohm", "kohm", "mohm", "gohm", "smd3", "smd4", "eia96") ||
-            u.matches(Regex("""^\d{3,4}$""")) ||
-            u.matches(Regex("""^\d{2}[a-z]$""", RegexOption.IGNORE_CASE)) ||
-            u.matches(Regex("""^[0-9]+[rkm][0-9]*$""", RegexOption.IGNORE_CASE))) {
-            dims.add("resistance")
-        }
-        if (u in setOf("farad", "f", "uf", "nf", "pf")) {
-            dims.add("capacitance")
-        }
-        if (u in setOf("henry", "h", "uh", "mh", "nh")) {
-            dims.add("inductance")
-        }
-        if (u in setOf("ampere", "amp", "amps", "a", "ma", "ua", "ka")) {
-            dims.add("current")
-        }
-        if (u in setOf("volt", "volts", "v", "mv", "uv", "kv", "dbv", "dbmv", "dbuv", "dbu")) {
-            dims.add("voltage")
-        }
-        if (u in setOf("watt", "watts", "w", "mw", "uw", "kw", "gw", "hp", "horsepower", "dbm", "dbw")) {
-            dims.add("power")
-        }
-        if (u in setOf("db", "times", "ratio", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu")) {
-            dims.add("db_ratio")
-        }
-        if (u in setOf("hz", "khz", "mhz", "ghz")) {
-            dims.add("frequency")
-        }
-        if (u in setOf("kg", "kilogram", "kilograms", "g", "gram", "grams", "mg", "ug", "ton", "tonne", "tonnes", "lb", "pound", "pounds", "oz", "ounce", "ounces", "stone", "carat")) {
-            dims.add("mass")
-        }
-        if (u in setOf("s", "sec", "second", "seconds", "ms", "us", "ns", "min", "minute", "minutes", "hr", "hour", "hours", "day", "days", "week", "weeks", "month", "months", "year", "years")) {
-            dims.add("time")
-        }
-        if (u in setOf("m/s", "km/hr", "km/h", "kph", "mph", "knot", "knots", "mach")) {
-            dims.add("speed")
-        }
-        if (u in setOf("m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "km/hr^2", "km/hr2", "ft/s^2", "ft/s2", "fps2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity", "g")) {
-            dims.add("acceleration")
-        }
-        if (u in setOf("joule", "joules", "j", "kj", "mj", "cal", "calorie", "calories", "kcal", "ev", "kev", "mev", "gev", "wh", "kwh", "mwh", "btu")) {
-            dims.add("energy")
-        }
-        if (u in setOf("newton", "newtons", "n", "kn", "dyn", "dyne", "lbf", "kgf")) {
-            dims.add("force")
-        }
-        if (u in setOf("degc", "degf", "kelvin", "k")) {
-            dims.add("temperature")
-        }
-        if (u in setOf("deg", "degree", "degrees", "rad", "radian", "radians")) {
-            dims.add("angle")
-        }
-        if (u in setOf("coulomb", "tesla", "weber")) {
-            dims.add("em")
+        if (u.isEmpty()) return DIM_NONE
+        var dims = UNIT_DIMENSION_MAP[u] ?: DIM_NONE
+        if (u.matches(Regex("""^\d{3,4}$""")) ||
+            u.matches(Regex("""^\d{2}[a-z]$""")) ||
+            u.matches(Regex("""^[0-9]+[rkm][0-9]*$"""))) {
+            dims = dims or DIM_RESISTANCE
         }
         return dims
     }

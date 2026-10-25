@@ -160,6 +160,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 } else {
                     user_args.push_back({assign_var1, c_res.value});
                 }
+                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), assign_var1) == autocomplete_words.end()) {
+                    autocomplete_words.push_back(assign_var1);
+                }
             }
 
             // Save unit string to second variable if present (or just output definition)
@@ -287,6 +290,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             if (!last_is_def) {
                 history.push_back(last_res);
                 resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(last_res);
+                if (g_last_result_angle == AngleUnit::DEG) {
+                    resultStr += " (deg)";
+                } else if (g_last_result_angle == AngleUnit::RAD) {
+                    resultStr += " (rad)";
+                }
             }
             return env->NewStringUTF(resultStr.c_str());
         }
@@ -308,6 +316,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 resultStr = lhs + " = Array[" + std::to_string(user_arrays[lhs].size()) + "]";
             } else {
                 resultStr = lhs + " = " + fmtNum(result);
+                if (g_last_result_angle == AngleUnit::DEG) {
+                    resultStr += " (deg)";
+                } else if (g_last_result_angle == AngleUnit::RAD) {
+                    resultStr += " (rad)";
+                }
             }
         } else {
             resultStr = "Def OK";
@@ -333,9 +346,19 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
 
         if (!label.empty()) {
             resultStr = label + " = " + fmtNum(result);
+            if (g_last_result_angle == AngleUnit::DEG) {
+                resultStr += " (deg)";
+            } else if (g_last_result_angle == AngleUnit::RAD) {
+                resultStr += " (rad)";
+            }
         } else {
             history.push_back(result);
             resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(result);
+            if (g_last_result_angle == AngleUnit::DEG) {
+                resultStr += " (deg)";
+            } else if (g_last_result_angle == AngleUnit::RAD) {
+                resultStr += " (rad)";
+            }
         }
     }
 
