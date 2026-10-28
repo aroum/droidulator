@@ -3,6 +3,7 @@
 #include <vector>
 #include <map>
 #include <sstream>
+#include <iomanip>
 #include <android/log.h>
 
 #define LOG_TAG "CardulatorJNI"
