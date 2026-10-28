@@ -27,4 +27,10 @@ object CardulatorEngine {
     external fun nativeDeleteConstant(name: String): Boolean
     external fun nativeDeleteFormula(name: String): Boolean
     external fun nativeGetPlotLines(): String
+    external fun nativeFormatNumber(value: Double): String
+    external fun nativeHasLastNumeric(): Boolean
+    external fun nativeGetLastNumericVal(): Double
+    external fun nativeGetLastNumericPrefix(): String
+    external fun nativeGetLastNumericSuffix(): String
+    external fun nativeGetConvUnits(fromUnit: String, prefix: String): String
 }

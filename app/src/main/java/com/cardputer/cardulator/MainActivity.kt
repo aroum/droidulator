@@ -99,7 +99,18 @@ class MainActivity : AppCompatActivity() {
     private var showEVars = false
 
     // REPL History management
+    private data class ReplDisplayItem(
+        val input: String,
+        val rawOutput: String,
+        val isError: Boolean,
+        val hasNum: Boolean = false,
+        val numVal: Double = 0.0,
+        val prefix: String = "",
+        val suffix: String = "",
+        val isRawText: Boolean = false
+    )
     private val replHistory = mutableListOf<String>()
+    private val replDisplayItems = mutableListOf<ReplDisplayItem>()
     private var replHistoryIndex = -1
     private var tempReplInput = ""
 
@@ -118,174 +129,10 @@ class MainActivity : AppCompatActivity() {
 
         // Pre-compiled regex patterns for zero-allocation syntax highlighting
         private val NUMBER_REGEX = Regex("\\b\\d+(\\.\\d+)?\\b")
-        private val KEYWORD_REGEX = Regex("\\b(for|while|if|else|return|const)\\b")
-        private val FUNC_REGEX = Regex("\\b(sin|cos|tan|ctan|asin|acos|atan|sinh|cosh|tanh|sqrt|ln|log|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|var|std|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv)\\b")
-        private val CONST_REGEX = Regex("\\b(pi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
+        private val KEYWORD_REGEX = Regex("\\b(for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
+        private val FUNC_REGEX = Regex("\\b(sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
+        private val CONST_REGEX = Regex("\\b(pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
-
-        private const val DIM_NONE         = 0
-        private const val DIM_LENGTH       = 1 shl 0
-        private const val DIM_AREA_WIRE    = 1 shl 1
-        private const val DIM_VOLUME       = 1 shl 2
-        private const val DIM_PRESSURE     = 1 shl 3
-        private const val DIM_RESISTANCE   = 1 shl 4
-        private const val DIM_CAPACITANCE  = 1 shl 5
-        private const val DIM_INDUCTANCE   = 1 shl 6
-        private const val DIM_CURRENT      = 1 shl 7
-        private const val DIM_VOLTAGE      = 1 shl 8
-        private const val DIM_POWER        = 1 shl 9
-        private const val DIM_DB_RATIO     = 1 shl 10
-        private const val DIM_FREQUENCY    = 1 shl 11
-        private const val DIM_MASS         = 1 shl 12
-        private const val DIM_TIME         = 1 shl 13
-        private const val DIM_SPEED        = 1 shl 14
-        private const val DIM_ACCELERATION = 1 shl 15
-        private const val DIM_ENERGY       = 1 shl 16
-        private const val DIM_FORCE        = 1 shl 17
-        private const val DIM_TEMPERATURE  = 1 shl 18
-        private const val DIM_ANGLE        = 1 shl 19
-        private const val DIM_EM           = 1 shl 20
-
-        private data class UnitCandidate(val name: String, val dims: Int)
-
-        private val CONV_UNIT_CANDIDATES = listOf(
-            UnitCandidate("mm", DIM_LENGTH), UnitCandidate("mmHg", DIM_PRESSURE),
-            UnitCandidate("mm^2", DIM_AREA_WIRE), UnitCandidate("mm2", DIM_AREA_WIRE),
-            UnitCandidate("std_mm2", DIM_AREA_WIRE), UnitCandidate("m", DIM_LENGTH),
-            UnitCandidate("meter", DIM_LENGTH), UnitCandidate("cm", DIM_LENGTH),
-            UnitCandidate("km", DIM_LENGTH), UnitCandidate("mile", DIM_LENGTH),
-            UnitCandidate("yard", DIM_LENGTH), UnitCandidate("foot", DIM_LENGTH),
-            UnitCandidate("inch", DIM_LENGTH), UnitCandidate("in", DIM_LENGTH),
-            UnitCandidate("ft", DIM_LENGTH), UnitCandidate("yd", DIM_LENGTH),
-            UnitCandidate("nauticalmile", DIM_LENGTH), UnitCandidate("angstrom", DIM_LENGTH),
-            UnitCandidate("au", DIM_LENGTH),
-            UnitCandidate("m^2", DIM_AREA_WIRE), UnitCandidate("m2", DIM_AREA_WIRE),
-            UnitCandidate("cm^2", DIM_AREA_WIRE), UnitCandidate("cm2", DIM_AREA_WIRE),
-            UnitCandidate("km^2", DIM_AREA_WIRE), UnitCandidate("km2", DIM_AREA_WIRE),
-            UnitCandidate("hectare", DIM_AREA_WIRE), UnitCandidate("acre", DIM_AREA_WIRE),
-            UnitCandidate("sqft", DIM_AREA_WIRE), UnitCandidate("sqin", DIM_AREA_WIRE),
-            UnitCandidate("m^3", DIM_VOLUME), UnitCandidate("m3", DIM_VOLUME),
-            UnitCandidate("liter", DIM_VOLUME), UnitCandidate("l", DIM_VOLUME),
-            UnitCandidate("ml", DIM_VOLUME), UnitCandidate("dl", DIM_VOLUME),
-            UnitCandidate("cl", DIM_VOLUME), UnitCandidate("gal", DIM_VOLUME),
-            UnitCandidate("gallon", DIM_VOLUME), UnitCandidate("quart", DIM_VOLUME),
-            UnitCandidate("pint", DIM_VOLUME), UnitCandidate("cup", DIM_VOLUME),
-            UnitCandidate("floz", DIM_VOLUME), UnitCandidate("tbsp", DIM_VOLUME),
-            UnitCandidate("tsp", DIM_VOLUME), UnitCandidate("barrel", DIM_VOLUME),
-            UnitCandidate("torr", DIM_PRESSURE), UnitCandidate("atm", DIM_PRESSURE),
-            UnitCandidate("bar", DIM_PRESSURE), UnitCandidate("mbar", DIM_PRESSURE),
-            UnitCandidate("Pa", DIM_PRESSURE), UnitCandidate("pascal", DIM_PRESSURE),
-            UnitCandidate("kPa", DIM_PRESSURE), UnitCandidate("MPa", DIM_PRESSURE),
-            UnitCandidate("GPa", DIM_PRESSURE), UnitCandidate("psi", DIM_PRESSURE),
-            UnitCandidate("psf", DIM_PRESSURE), UnitCandidate("inHg", DIM_PRESSURE),
-            UnitCandidate("ohm", DIM_RESISTANCE), UnitCandidate("mohm", DIM_RESISTANCE),
-            UnitCandidate("kohm", DIM_RESISTANCE), UnitCandidate("Mohm", DIM_RESISTANCE),
-            UnitCandidate("smd3", DIM_RESISTANCE), UnitCandidate("smd4", DIM_RESISTANCE),
-            UnitCandidate("eia96", DIM_RESISTANCE), UnitCandidate("awg", DIM_AREA_WIRE),
-            UnitCandidate("std_awg", DIM_AREA_WIRE),
-            UnitCandidate("farad", DIM_CAPACITANCE), UnitCandidate("F", DIM_CAPACITANCE),
-            UnitCandidate("uF", DIM_CAPACITANCE), UnitCandidate("uf", DIM_CAPACITANCE),
-            UnitCandidate("nF", DIM_CAPACITANCE), UnitCandidate("nf", DIM_CAPACITANCE),
-            UnitCandidate("pF", DIM_CAPACITANCE), UnitCandidate("pf", DIM_CAPACITANCE),
-            UnitCandidate("henry", DIM_INDUCTANCE), UnitCandidate("H", DIM_INDUCTANCE),
-            UnitCandidate("uH", DIM_INDUCTANCE), UnitCandidate("uh", DIM_INDUCTANCE),
-            UnitCandidate("mH", DIM_INDUCTANCE), UnitCandidate("mh", DIM_INDUCTANCE),
-            UnitCandidate("nH", DIM_INDUCTANCE), UnitCandidate("nh", DIM_INDUCTANCE),
-            UnitCandidate("ampere", DIM_CURRENT), UnitCandidate("amp", DIM_CURRENT),
-            UnitCandidate("A", DIM_CURRENT), UnitCandidate("mA", DIM_CURRENT),
-            UnitCandidate("uA", DIM_CURRENT), UnitCandidate("kA", DIM_CURRENT),
-            UnitCandidate("volt", DIM_VOLTAGE), UnitCandidate("V", DIM_VOLTAGE),
-            UnitCandidate("mV", DIM_VOLTAGE), UnitCandidate("uV", DIM_VOLTAGE),
-            UnitCandidate("kV", DIM_VOLTAGE), UnitCandidate("MV", DIM_VOLTAGE),
-            UnitCandidate("watt", DIM_POWER), UnitCandidate("W", DIM_POWER),
-            UnitCandidate("mW", DIM_POWER), UnitCandidate("uW", DIM_POWER),
-            UnitCandidate("kW", DIM_POWER), UnitCandidate("MW", DIM_POWER),
-            UnitCandidate("GW", DIM_POWER), UnitCandidate("hp", DIM_POWER),
-            UnitCandidate("horsepower", DIM_POWER),
-            UnitCandidate("Hz", DIM_FREQUENCY), UnitCandidate("khz", DIM_FREQUENCY),
-            UnitCandidate("mhz", DIM_FREQUENCY), UnitCandidate("ghz", DIM_FREQUENCY),
-            UnitCandidate("coulomb", DIM_EM), UnitCandidate("tesla", DIM_EM),
-            UnitCandidate("weber", DIM_EM),
-            UnitCandidate("dB", DIM_DB_RATIO), UnitCandidate("db", DIM_DB_RATIO),
-            UnitCandidate("dBm", DIM_POWER or DIM_DB_RATIO), UnitCandidate("dbm", DIM_POWER or DIM_DB_RATIO),
-            UnitCandidate("dBW", DIM_POWER or DIM_DB_RATIO), UnitCandidate("dbw", DIM_POWER or DIM_DB_RATIO),
-            UnitCandidate("dBV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbv", DIM_VOLTAGE or DIM_DB_RATIO),
-            UnitCandidate("dBmV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbmv", DIM_VOLTAGE or DIM_DB_RATIO),
-            UnitCandidate("dBuV", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbuv", DIM_VOLTAGE or DIM_DB_RATIO),
-            UnitCandidate("dBu", DIM_VOLTAGE or DIM_DB_RATIO), UnitCandidate("dbu", DIM_VOLTAGE or DIM_DB_RATIO),
-            UnitCandidate("times", DIM_DB_RATIO), UnitCandidate("ratio", DIM_DB_RATIO),
-            UnitCandidate("kg", DIM_MASS), UnitCandidate("kilogram", DIM_MASS),
-            UnitCandidate("g", DIM_MASS), UnitCandidate("gram", DIM_MASS),
-            UnitCandidate("mg", DIM_MASS), UnitCandidate("ug", DIM_MASS),
-            UnitCandidate("ton", DIM_MASS), UnitCandidate("tonne", DIM_MASS),
-            UnitCandidate("lb", DIM_MASS), UnitCandidate("pound", DIM_MASS),
-            UnitCandidate("oz", DIM_MASS), UnitCandidate("ounce", DIM_MASS),
-            UnitCandidate("stone", DIM_MASS), UnitCandidate("carat", DIM_MASS),
-            UnitCandidate("s", DIM_TIME), UnitCandidate("sec", DIM_TIME),
-            UnitCandidate("second", DIM_TIME), UnitCandidate("ms", DIM_TIME),
-            UnitCandidate("us", DIM_TIME), UnitCandidate("ns", DIM_TIME),
-            UnitCandidate("min", DIM_TIME), UnitCandidate("minute", DIM_TIME),
-            UnitCandidate("hr", DIM_TIME), UnitCandidate("hour", DIM_TIME),
-            UnitCandidate("day", DIM_TIME), UnitCandidate("week", DIM_TIME),
-            UnitCandidate("month", DIM_TIME), UnitCandidate("year", DIM_TIME),
-            UnitCandidate("m/s", DIM_SPEED), UnitCandidate("km/hr", DIM_SPEED),
-            UnitCandidate("km/h", DIM_SPEED), UnitCandidate("kph", DIM_SPEED),
-            UnitCandidate("mph", DIM_SPEED), UnitCandidate("knot", DIM_SPEED),
-            UnitCandidate("mach", DIM_SPEED),
-            UnitCandidate("m/s^2", DIM_ACCELERATION), UnitCandidate("cm/s^2", DIM_ACCELERATION),
-            UnitCandidate("km/s^2", DIM_ACCELERATION), UnitCandidate("km/h^2", DIM_ACCELERATION),
-            UnitCandidate("ft/s^2", DIM_ACCELERATION), UnitCandidate("in/s^2", DIM_ACCELERATION),
-            UnitCandidate("gal", DIM_ACCELERATION), UnitCandidate("g0", DIM_ACCELERATION),
-            UnitCandidate("gee", DIM_ACCELERATION), UnitCandidate("gravity", DIM_ACCELERATION),
-            UnitCandidate("joule", DIM_ENERGY), UnitCandidate("J", DIM_ENERGY),
-            UnitCandidate("kJ", DIM_ENERGY), UnitCandidate("MJ", DIM_ENERGY),
-            UnitCandidate("cal", DIM_ENERGY), UnitCandidate("calorie", DIM_ENERGY),
-            UnitCandidate("kcal", DIM_ENERGY), UnitCandidate("eV", DIM_ENERGY),
-            UnitCandidate("keV", DIM_ENERGY), UnitCandidate("MeV", DIM_ENERGY),
-            UnitCandidate("GeV", DIM_ENERGY), UnitCandidate("Wh", DIM_ENERGY),
-            UnitCandidate("kWh", DIM_ENERGY), UnitCandidate("MWh", DIM_ENERGY),
-            UnitCandidate("BTU", DIM_ENERGY),
-            UnitCandidate("newton", DIM_FORCE), UnitCandidate("N", DIM_FORCE),
-            UnitCandidate("kN", DIM_FORCE), UnitCandidate("dyn", DIM_FORCE),
-            UnitCandidate("dyne", DIM_FORCE), UnitCandidate("lbf", DIM_FORCE),
-            UnitCandidate("kgf", DIM_FORCE),
-            UnitCandidate("degC", DIM_TEMPERATURE), UnitCandidate("degF", DIM_TEMPERATURE),
-            UnitCandidate("kelvin", DIM_TEMPERATURE), UnitCandidate("K", DIM_TEMPERATURE),
-            UnitCandidate("deg", DIM_ANGLE), UnitCandidate("degree", DIM_ANGLE),
-            UnitCandidate("rad", DIM_ANGLE), UnitCandidate("radian", DIM_ANGLE)
-        )
-
-        private val UNIT_DIMENSION_MAP: Map<String, Int> = run {
-            val map = HashMap<String, Int>(256)
-            fun add(dims: Int, vararg units: String) {
-                for (u in units) {
-                    val prev = map[u.lowercase()] ?: 0
-                    map[u.lowercase()] = prev or dims
-                }
-            }
-            add(DIM_LENGTH, "mm", "m", "meter", "meters", "cm", "km", "mile", "miles", "yard", "yards", "foot", "feet", "inch", "inches", "in", "ft", "yd", "nauticalmile", "angstrom", "au")
-            add(DIM_AREA_WIRE, "mm^2", "mm2", "std_mm2", "awg", "std_awg", "m^2", "m2", "cm^2", "cm2", "km^2", "km2", "hectare", "acre", "acres", "sqft", "sqin")
-            add(DIM_VOLUME, "m^3", "m3", "cm^3", "cm3", "liter", "liters", "litre", "litres", "l", "ml", "dl", "cl", "gal", "gallon", "gallons", "quart", "quarts", "pint", "pints", "cup", "cups", "floz", "tbsp", "tsp", "barrel")
-            add(DIM_PRESSURE, "mmhg", "torr", "atm", "bar", "mbar", "pa", "pascal", "kpa", "mpa", "gpa", "psi", "psf", "inhg")
-            add(DIM_RESISTANCE, "ohm", "ohms", "mohm", "kohm", "smd3", "smd4", "eia96")
-            add(DIM_CAPACITANCE, "farad", "f", "uf", "nf", "pf")
-            add(DIM_INDUCTANCE, "henry", "h", "uh", "mh", "nh")
-            add(DIM_CURRENT, "ampere", "amp", "amps", "a", "ma", "ua", "ka")
-            add(DIM_VOLTAGE, "volt", "volts", "v", "mv", "uv", "kv", "dbv", "dbmv", "dbuv", "dbu")
-            add(DIM_POWER, "watt", "watts", "w", "mw", "uw", "kw", "gw", "hp", "horsepower", "dbm", "dbw")
-            add(DIM_DB_RATIO, "db", "times", "ratio", "dbm", "dbw", "dbv", "dbmv", "dbuv", "dbu")
-            add(DIM_FREQUENCY, "hz", "khz", "mhz", "ghz")
-            add(DIM_MASS, "kg", "kilogram", "kilograms", "g", "gram", "grams", "mg", "ug", "ton", "tonne", "tonnes", "lb", "pound", "pounds", "oz", "ounce", "ounces", "stone", "carat")
-            add(DIM_TIME, "s", "sec", "second", "seconds", "ms", "us", "ns", "min", "minute", "minutes", "hr", "hour", "hours", "day", "days", "week", "weeks", "month", "months", "year", "years")
-            add(DIM_SPEED, "m/s", "km/hr", "km/h", "kph", "mph", "knot", "knots", "mach")
-            add(DIM_ACCELERATION, "m/s^2", "m/s2", "cm/s^2", "cm/s2", "km/s^2", "km/s2", "km/h^2", "km/h2", "km/hr^2", "km/hr2", "ft/s^2", "ft/s2", "fps2", "in/s^2", "in/s2", "gal", "g0", "gee", "gravity", "g")
-            add(DIM_ENERGY, "joule", "joules", "j", "kj", "mj", "cal", "calorie", "calories", "kcal", "ev", "kev", "mev", "gev", "wh", "kwh", "mwh", "btu")
-            add(DIM_FORCE, "newton", "newtons", "n", "kn", "dyn", "dyne", "lbf", "kgf")
-            add(DIM_TEMPERATURE, "degc", "degf", "kelvin", "k")
-            add(DIM_ANGLE, "deg", "degree", "degrees", "rad", "radian", "radians")
-            add(DIM_EM, "coulomb", "tesla", "weber")
-            map
-        }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -363,9 +210,15 @@ class MainActivity : AppCompatActivity() {
         isAutoPairEnabled = prefs.getBoolean("auto_pair", true)
         showEVars = prefs.getBoolean("show_evars", false)
         themeMode = prefs.getInt("theme_mode", 0)
+        isEnterSendMode = prefs.getBoolean("enter_send_mode", true)
+        val savedDegMode = prefs.getBoolean("degrees_mode", true)
 
+        cbDigitGrouping.isChecked = isDigitGroupingActive
         cbHideWelcome.isChecked = hideWelcomeMessage
         cbAutoPair.isChecked = isAutoPairEnabled
+        CardulatorEngine.nativeSetDegRad(savedDegMode)
+        tvMode.text = if (savedDegMode) "DEG" else "RAD"
+        updateEnterActionButtonText()
         if (hideWelcomeMessage) {
             tvOutput.text = ""
         } else {
@@ -624,22 +477,12 @@ class MainActivity : AppCompatActivity() {
                     else -> null
                 }
 
-                val fromMask = fromUnit?.let { getUnitDimensionMask(it) } ?: DIM_NONE
-                val filteredCandidates = if (fromMask != DIM_NONE) {
-                    CONV_UNIT_CANDIDATES.filter { (it.dims and fromMask) != 0 }.map { it.name }
-                } else {
-                    CONV_UNIT_CANDIDATES.map { it.name }
-                }
-
                 convTabOrigPrefix = lastPart
                 convTabSplitPos = splitPos
                 convTabMatchIdx = 0
 
-                val matches = if (lastPart.isEmpty()) {
-                    filteredCandidates
-                } else {
-                    filteredCandidates.filter { it.startsWith(lastPart, ignoreCase = true) }
-                }
+                val matches = CardulatorEngine.nativeGetConvUnits(fromUnit ?: "", lastPart)
+                    .split("\n").filter { it.isNotEmpty() }
 
                 if (matches.isNotEmpty()) {
                     convTabCachedMatches = matches
@@ -796,7 +639,7 @@ class MainActivity : AppCompatActivity() {
                         val varsRaw = CardulatorEngine.nativeGetVariables()
                         val lines = varsRaw.split("\n").filter { it.contains("=") }
                         for (line in lines) {
-                            val varName = line.split("=")[0].trim()
+                            val varName = line.split("=", limit = 2)[0].trim()
                             CardulatorEngine.nativeDeleteVariable(varName)
                         }
                     }
@@ -804,7 +647,7 @@ class MainActivity : AppCompatActivity() {
                         val formulasRaw = CardulatorEngine.nativeGetFormulas()
                         val lines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
                         for (line in lines) {
-                            val fnName = line.split("=")[0].split("(")[0].trim()
+                            val fnName = line.split("=", limit = 2)[0].split("(")[0].trim()
                             CardulatorEngine.nativeDeleteFormula(fnName)
                         }
                     }
@@ -812,7 +655,7 @@ class MainActivity : AppCompatActivity() {
                         val constsRaw = CardulatorEngine.nativeGetConstants()
                         val lines = constsRaw.split("\n").filter { it.contains("=") }
                         for (line in lines) {
-                            val name = line.split("=")[0].trim()
+                            val name = line.split("=", limit = 2)[0].trim()
                             if (name != "pi" && name != "e") {
                                 CardulatorEngine.nativeDeleteConstant(name)
                             }
@@ -837,18 +680,6 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             refreshTabContent("Variables")
         }
-    }
-
-    private fun getUnitDimensionMask(unit: String): Int {
-        val u = unit.trim().trim('"', '\'').lowercase()
-        if (u.isEmpty()) return DIM_NONE
-        var dims = UNIT_DIMENSION_MAP[u] ?: DIM_NONE
-        if (u.matches(Regex("""^\d{3,4}$""")) ||
-            u.matches(Regex("""^\d{2}[a-z]$""")) ||
-            u.matches(Regex("""^[0-9]+[rkm][0-9]*$"""))) {
-            dims = dims or DIM_RESISTANCE
-        }
-        return dims
     }
 
     private fun setupNavigationButtons() {
@@ -1044,14 +875,16 @@ class MainActivity : AppCompatActivity() {
             )
         }
 
-        if (replHistory.isNotEmpty()) {
-            val historyCopy = ArrayList(replHistory)
-            CardulatorEngine.nativeClearHistory()
-
-            for (input in historyCopy) {
-                val res = CardulatorEngine.nativeEvaluate(input)
-                val isError = res.startsWith("ERROR: ")
-                ssb.append(formatHighlightedReplEntry(input, res, isError))
+        for (item in replDisplayItems) {
+            if (item.isRawText) {
+                ssb.append(item.rawOutput)
+            } else {
+                val res = if (item.hasNum) {
+                    item.prefix + CardulatorEngine.nativeFormatNumber(item.numVal) + item.suffix
+                } else {
+                    item.rawOutput
+                }
+                ssb.append(formatHighlightedReplEntry(item.input, res, item.isError))
             }
         }
 
@@ -1062,6 +895,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendOutputEntry(input: String, res: String, isError: Boolean) {
+        val hasNum = !isError && CardulatorEngine.nativeHasLastNumeric()
+        replDisplayItems.add(
+            ReplDisplayItem(
+                input = input,
+                rawOutput = res,
+                isError = isError,
+                hasNum = hasNum,
+                numVal = if (hasNum) CardulatorEngine.nativeGetLastNumericVal() else 0.0,
+                prefix = if (hasNum) CardulatorEngine.nativeGetLastNumericPrefix() else "",
+                suffix = if (hasNum) CardulatorEngine.nativeGetLastNumericSuffix() else ""
+            )
+        )
         val entrySsb = formatHighlightedReplEntry(input, res, isError)
         val currentText = tvOutput.text
         val ssb = android.text.SpannableStringBuilder(currentText)
@@ -1073,6 +918,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendRawOutput(text: String) {
+        replDisplayItems.add(ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true))
         val currentText = tvOutput.text
         val ssb = android.text.SpannableStringBuilder(currentText)
         ssb.append(text)
@@ -1084,6 +930,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun toggleEnterAction() {
         isEnterSendMode = !isEnterSendMode
+        getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
+            .edit()
+            .putBoolean("enter_send_mode", isEnterSendMode)
+            .apply()
         updateEnterActionButtonText()
     }
 
@@ -1100,11 +950,16 @@ class MainActivity : AppCompatActivity() {
         val nextDeg = !isDeg
         CardulatorEngine.nativeSetDegRad(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
+        getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
+            .edit()
+            .putBoolean("degrees_mode", nextDeg)
+            .apply()
     }
 
     private fun clearSessionAndHistory() {
         CardulatorEngine.nativeClearHistory()
         replHistory.clear()
+        replDisplayItems.clear()
         replHistoryIndex = -1
         tempReplInput = ""
         convTabCachedMatches = null
@@ -1274,7 +1129,7 @@ class MainActivity : AppCompatActivity() {
                 var lines = varsRaw.split("\n").filter { it.contains("=") }
                 if (!showEVars) {
                     lines = lines.filter { line ->
-                        val varName = line.split("=")[0].trim()
+                        val varName = line.split("=", limit = 2)[0].trim()
                         !(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })
                     }
                 }
@@ -1289,7 +1144,7 @@ class MainActivity : AppCompatActivity() {
                     itemsContainer.addView(emptyTv)
                 } else {
                     for (line in lines) {
-                        val parts = line.split("=")
+                        val parts = line.split("=", limit = 2)
                         val name = parts[0].trim()
                         val value = if (parts.size > 1) parts[1].trim() else ""
 
@@ -1323,7 +1178,7 @@ class MainActivity : AppCompatActivity() {
                 val lines = constsRaw.split("\n").filter { it.contains("=") }
 
                 for (line in lines) {
-                    val parts = line.split("=")
+                    val parts = line.split("=", limit = 2)
                     val name = parts[0].trim()
                     val value = if (parts.size > 1) parts[1].trim() else ""
                     val isBuiltIn = (name == "pi" || name == "e")
@@ -1371,7 +1226,7 @@ class MainActivity : AppCompatActivity() {
                     itemsContainer.addView(emptyTv)
                 } else {
                     for (line in lines) {
-                        val parts = line.split("=")
+                        val parts = line.split("=", limit = 2)
                         val name = parts[0].trim()
                         val bodySubtitle = if (parts.size > 1) "= " + parts[1].trim() else line
 
@@ -1794,7 +1649,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showRunFormulaDialog(formulaLine: String) {
-        val formulaHeader = formulaLine.split("=")[0].trim()
+        val formulaHeader = formulaLine.split("=", limit = 2)[0].trim()
         val cleanName = if (formulaHeader.contains("(")) formulaHeader.substring(0, formulaHeader.indexOf("(")).trim() else formulaHeader
 
         var params = emptyList<String>()
@@ -2144,7 +1999,7 @@ class MainActivity : AppCompatActivity() {
             val varLines = varsRaw.split("\n").filter { it.contains("=") }
             val varsArray = org.json.JSONArray()
             for (l in varLines) {
-                val varName = l.split("=")[0].trim()
+                val varName = l.split("=", limit = 2)[0].trim()
                 if (!(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })) {
                     varsArray.put(l)
                 }
@@ -2165,7 +2020,7 @@ class MainActivity : AppCompatActivity() {
             val constLines = constsRaw.split("\n").filter { it.contains("=") }
             val constsArray = org.json.JSONArray()
             for (l in constLines) {
-                val name = l.split("=")[0].trim()
+                val name = l.split("=", limit = 2)[0].trim()
                 if (name != "pi" && name != "e") {
                     constsArray.put(l)
                 }
@@ -2218,7 +2073,7 @@ class MainActivity : AppCompatActivity() {
                 val constsArray = json.getJSONArray("constants")
                 for (i in 0 until constsArray.length()) {
                     val line = constsArray.getString(i)
-                    val parts = line.split("=")
+                    val parts = line.split("=", limit = 2)
                     if (parts.size >= 2) {
                         val name = parts[0].trim()
                         val valStr = parts[1].trim()
@@ -2294,7 +2149,9 @@ class MainActivity : AppCompatActivity() {
         mainRoot.setBackgroundColor(bgColor)
         topHeaderBar.setBackgroundColor(bgSoftColor)
         spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
-        setupTabSpinner()
+        (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
+        (spinnerFmtMode.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
+        (spinnerFmtPrec.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
 
         // Scroll Views & Plot View
         scrollView.setBackgroundColor(bgColor)
@@ -2331,6 +2188,7 @@ class MainActivity : AppCompatActivity() {
         if (currentTab in arrayOf("Variables", "Formulas", "Constants", "Scripts")) {
             renderDedicatedMenuList(currentTab)
         }
+        rebuildReplOutput()
 
         // Re-apply syntax highlighting for input field if non-empty
         if (etInput.text.isNotEmpty()) {
@@ -2339,7 +2197,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     // --- Syntax Highlighting & Bracket Matching ---
-    private fun applyExpressionSyntaxHighlighting(ssb: android.text.SpannableStringBuilder, startOffset: Int, text: String) {
+    private fun applyExpressionSyntaxHighlighting(ssb: Spannable, startOffset: Int, text: String) {
         val numColor = ThemePalette.purple
         val funcColor = ThemePalette.aqua
         val constColor = ThemePalette.yellow
@@ -2450,17 +2308,7 @@ class MainActivity : AppCompatActivity() {
             editable.removeSpan(span)
         }
 
-        val text = editable.toString()
-        val dummySsb = android.text.SpannableStringBuilder(text)
-        applyExpressionSyntaxHighlighting(dummySsb, 0, text)
-
-        val newSpans = dummySsb.getSpans(0, dummySsb.length, ForegroundColorSpan::class.java)
-        for (span in newSpans) {
-            val start = dummySsb.getSpanStart(span)
-            val end = dummySsb.getSpanEnd(span)
-            val flags = dummySsb.getSpanFlags(span)
-            editable.setSpan(ForegroundColorSpan(span.foregroundColor), start, end, flags)
-        }
+        applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
 
         isHighlighting = false
     }

@@ -52,6 +52,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInitUnits(JNIEnv *env, jobj
     LOGI("GNU Units initialised: %s", g_units_dat_path.c_str());
 }
 
+static bool g_last_has_num = false;
+static double g_last_num_val = 0.0;
+static std::string g_last_prefix;
+static std::string g_last_suffix;
+
 // Preview evaluation — evaluates formula without adding to history (used for live formula dialog preview)
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluatePreview(JNIEnv *env, jobject thiz, jstring input_jstr) {
@@ -66,6 +71,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluatePreview(JNIEnv *env
 
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobject thiz, jstring input_jstr) {
+    g_last_has_num = false;
+    g_last_num_val = 0.0;
+    g_last_prefix.clear();
+    g_last_suffix.clear();
+
     std::string expression = toCppString(env, input_jstr);
     if (expression.empty()) return env->NewStringUTF("");
 
@@ -172,10 +182,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 ss << assign_var1 << " = " << fmtNum(c_res.value) << "\n";
                 ss << assign_var2 << " = \"" << c_res.unitStr << "\"";
             } else {
-                ss << assign_var1 << " = " << fmtNum(c_res.value);
-                if (!c_res.unitStr.empty()) {
-                    ss << " (" << c_res.unitStr << ")";
-                }
+                g_last_has_num = true;
+                g_last_num_val = c_res.value;
+                g_last_prefix = assign_var1 + " = ";
+                g_last_suffix = c_res.unitStr.empty() ? "" : (" (" + c_res.unitStr + ")");
+                ss << g_last_prefix << fmtNum(c_res.value) << g_last_suffix;
             }
             return env->NewStringUTF(ss.str().c_str());
         }
@@ -185,10 +196,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             resultStr = c_res.unitStr;
         } else {
             history.push_back(c_res.value);
-            resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(c_res.value);
-            if (!c_res.unitStr.empty()) {
-                resultStr += " (" + c_res.unitStr + ")";
-            }
+            g_last_has_num = true;
+            g_last_num_val = c_res.value;
+            g_last_prefix = "e" + std::to_string(history.size()) + " = ";
+            g_last_suffix = c_res.unitStr.empty() ? "" : (" (" + c_res.unitStr + ")");
+            resultStr = g_last_prefix + fmtNum(c_res.value) + g_last_suffix;
         }
         return env->NewStringUTF(resultStr.c_str());
     }
@@ -289,12 +301,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         } else {
             if (!last_is_def) {
                 history.push_back(last_res);
-                resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(last_res);
+                g_last_has_num = true;
+                g_last_num_val = last_res;
+                g_last_prefix = "e" + std::to_string(history.size()) + " = ";
                 if (g_last_result_angle == AngleUnit::DEG) {
-                    resultStr += " (deg)";
+                    g_last_suffix = " (deg)";
                 } else if (g_last_result_angle == AngleUnit::RAD) {
-                    resultStr += " (rad)";
+                    g_last_suffix = " (rad)";
                 }
+                resultStr = g_last_prefix + fmtNum(last_res) + g_last_suffix;
             }
             return env->NewStringUTF(resultStr.c_str());
         }
@@ -311,19 +326,41 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         std::string lhs = (eq_pos != std::string::npos) ? expression.substr(0, eq_pos) : expression;
         lhs.erase(0, lhs.find_first_not_of(" \t"));
         lhs.erase(lhs.find_last_not_of(" \t") + 1);
+        if (lhs.rfind("const ", 0) == 0 || lhs.rfind("const\t", 0) == 0) {
+            lhs = lhs.substr(5);
+            lhs.erase(0, lhs.find_first_not_of(" \t"));
+        }
         if (lhs.find('(') == std::string::npos) {
             if (user_arrays.find(lhs) != user_arrays.end()) {
                 resultStr = lhs + " = Array[" + std::to_string(user_arrays[lhs].size()) + "]";
             } else {
-                resultStr = lhs + " = " + fmtNum(result);
+                g_last_has_num = true;
+                g_last_num_val = result;
+                g_last_prefix = lhs + " = ";
                 if (g_last_result_angle == AngleUnit::DEG) {
-                    resultStr += " (deg)";
+                    g_last_suffix = " (deg)";
                 } else if (g_last_result_angle == AngleUnit::RAD) {
-                    resultStr += " (rad)";
+                    g_last_suffix = " (rad)";
                 }
+                resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
             }
         } else {
             resultStr = "Def OK";
+        }
+    } else if (g_last_eval_is_array) {
+        std::string trimmed = expression;
+        trimmed.erase(0, trimmed.find_first_not_of(" \t"));
+        trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
+        std::string arr_str = "[";
+        for (size_t k = 0; k < g_last_eval_array.size(); ++k) {
+            arr_str += fmtNum(g_last_eval_array[k]);
+            if (k + 1 < g_last_eval_array.size()) arr_str += ", ";
+        }
+        arr_str += "]";
+        if (user_arrays.find(trimmed) != user_arrays.end()) {
+            resultStr = trimmed + " = " + arr_str;
+        } else {
+            resultStr = arr_str;
         }
     } else {
         std::string trimmed = expression;
@@ -344,21 +381,21 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             label = trimmed;
         }
 
+        g_last_has_num = true;
+        g_last_num_val = result;
+        if (g_last_result_angle == AngleUnit::DEG) {
+            g_last_suffix = " (deg)";
+        } else if (g_last_result_angle == AngleUnit::RAD) {
+            g_last_suffix = " (rad)";
+        }
+
         if (!label.empty()) {
-            resultStr = label + " = " + fmtNum(result);
-            if (g_last_result_angle == AngleUnit::DEG) {
-                resultStr += " (deg)";
-            } else if (g_last_result_angle == AngleUnit::RAD) {
-                resultStr += " (rad)";
-            }
+            g_last_prefix = label + " = ";
+            resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
         } else {
             history.push_back(result);
-            resultStr = "e" + std::to_string(history.size()) + " = " + fmtNum(result);
-            if (g_last_result_angle == AngleUnit::DEG) {
-                resultStr += " (deg)";
-            } else if (g_last_result_angle == AngleUnit::RAD) {
-                resultStr += " (rad)";
-            }
+            g_last_prefix = "e" + std::to_string(history.size()) + " = ";
+            resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
         }
     }
 
@@ -417,6 +454,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, j
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, jobject thiz) {
     std::ostringstream out;
+    out << std::setprecision(15);
     if (user_args.empty() && user_arrays.empty() && history.empty()) {
         out << "No user variables defined.";
     } else {
@@ -453,6 +491,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetFormulas(JNIEnv *env, jo
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConstants(JNIEnv *env, jobject thiz) {
     std::ostringstream out;
+    out << std::setprecision(15);
     out << "pi = 3.141592653589793\n";
     out << "e  = 2.718281828459045\n";
     for (const auto& c : user_consts) {
@@ -581,6 +620,44 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRegisterScript(JNIEnv *env,
     std::string code = toCppString(env, code_jstr);
     if (name.empty()) return;
     user_named_scripts[name] = code;
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeFormatNumber(JNIEnv *env, jobject thiz, jdouble val) {
+    return env->NewStringUTF(fmtNum(static_cast<double>(val)).c_str());
+}
+
+JNIEXPORT jboolean JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeHasLastNumeric(JNIEnv *env, jobject thiz) {
+    return g_last_has_num ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jdouble JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericVal(JNIEnv *env, jobject thiz) {
+    return static_cast<jdouble>(g_last_num_val);
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericPrefix(JNIEnv *env, jobject thiz) {
+    return env->NewStringUTF(g_last_prefix.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericSuffix(JNIEnv *env, jobject thiz) {
+    return env->NewStringUTF(g_last_suffix.c_str());
+}
+
+JNIEXPORT jstring JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConvUnits(JNIEnv *env, jobject thiz, jstring from_jstr, jstring prefix_jstr) {
+    std::string from_unit = toCppString(env, from_jstr);
+    std::string prefix = toCppString(env, prefix_jstr);
+    auto matches = getConvUnitMatches(from_unit, prefix);
+    std::ostringstream oss;
+    for (size_t i = 0; i < matches.size(); ++i) {
+        if (i > 0) oss << "\n";
+        oss << matches[i];
+    }
+    return env->NewStringUTF(oss.str().c_str());
 }
 
 } // extern "C"
