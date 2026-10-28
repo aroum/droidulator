@@ -29,6 +29,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Run C++ Engine Unit Tests
+        run: |
+          gcc -c -w -Dmain=units_main app/src/main/cpp/units_bridge.c app/src/main/cpp/gnu-units/units.c app/src/main/cpp/gnu-units/parse.tab.c app/src/main/cpp/gnu-units/strfunc.c -Iapp/src/main/cpp/gnu-units
+          g++ -std=c++20 -O2 -Iapp/src/main/cpp -Iapp/src/main/cpp/engine -Iapp/src/main/cpp/tinyexpr-plusplus -Iapp/src/main/cpp/gnu-units -include app/src/main/cpp/engine/tinyexpr_compat.h -DUNITS_DAT_PATH=\"app/src/main/assets/units.dat\" app/src/main/cpp/test_jni.cpp app/src/main/cpp/tinyexpr-plusplus/tinyexpr.cpp units_bridge.o units.o parse.tab.o strfunc.o -w -o /tmp/test_jni
+          /tmp/test_jni
+          rm -f units_bridge.o units.o parse.tab.o strfunc.o /tmp/test_jni
+
       - name: set up JDK 17
         uses: actions/setup-java@v4
         with:

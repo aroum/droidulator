@@ -761,6 +761,152 @@ int main() {
     handleTabCompletion(test_expr, test_cursor);
     assert(test_expr == "print()");
 
+    // Test Case 15: logb(x, base) argument order and domain validation
+    double v_logb1 = evaluate("logb(8, 2)", err);
+    assert(err.empty() && std::abs(v_logb1 - 3.0) < 1e-6);
+    double v_logb2 = evaluate("logb(100, 10)", err);
+    assert(err.empty() && std::abs(v_logb2 - 2.0) < 1e-6);
+    evaluate("logb(8, 1)", err);
+    assert(err.find("Domain Error") != std::string::npos);
+    evaluate("logb(-8, 2)", err);
+    assert(err.find("Domain Error") != std::string::npos);
+
+    // Test Case 16: Combinatorics, Factorial, Fibonacci bounds & multiplicative C/P
+    evaluate("fact(3.5)", err);
+    assert(err == "Domain Error: fact(n) requires integer n >= 0");
+    evaluate("fact(171)", err);
+    assert(err == "Overflow Error: fact(n) exceeds maximum limit (n <= 170)");
+    evaluate("fact(1e9)", err);
+    assert(err == "Overflow Error: fact(n) exceeds maximum limit (n <= 170)");
+    evaluate("fib(1477)", err);
+    assert(err == "Overflow Error: fib(n) exceeds maximum limit (n <= 1476)");
+    evaluate("fib(2.5)", err);
+    assert(err == "Domain Error: fib(n) requires integer n >= 0");
+
+    // C(180, 2) must not overflow intermediate factorial (180 * 179 / 2 = 16110)
+    double v_c180 = evaluate("C(180, 2)", err);
+    assert(err.empty() && std::abs(v_c180 - 16110.0) < 1e-6);
+    double v_cnk = evaluate("Cnk(10, 3)", err);
+    assert(err.empty() && std::abs(v_cnk - 120.0) < 1e-6);
+    double v_p180 = evaluate("P(180, 2)", err);
+    assert(err.empty() && std::abs(v_p180 - 32220.0) < 1e-6);
+
+    // Variadic gcd / lcm / sum / prod / min / max
+    double v_gcd3 = evaluate("gcd(12, 18, 30)", err);
+    assert(err.empty() && std::abs(v_gcd3 - 6.0) < 1e-6);
+    double v_lcm3 = evaluate("lcm(4, 6, 8)", err);
+    assert(err.empty() && std::abs(v_lcm3 - 24.0) < 1e-6);
+    double v_sum_var = evaluate("sum(1, 2, 3, 4, 5)", err);
+    assert(err.empty() && std::abs(v_sum_var - 15.0) < 1e-6);
+    double v_prod_var = evaluate("prod(2, 3, 4)", err);
+    assert(err.empty() && std::abs(v_prod_var - 24.0) < 1e-6);
+
+    // Overflow vs Division by Zero distinction
+    evaluate("1 / 0", err);
+    assert(err == "Division by Zero");
+    evaluate("exp(1000)", err);
+    assert(err == "Overflow Error");
+
+    // Test Case 17: Inline conditionals (if, iff) and inline loops (sum, prod, min, max)
+    double v_if1 = evaluateInput("if(5 > 3, 10, 20)", err, isDef);
+    assert(err.empty() && std::abs(v_if1 - 10.0) < 1e-6);
+    double v_if2 = evaluateInput("if(2 > 5, 10, 20)", err, isDef);
+    assert(err.empty() && std::abs(v_if2 - 20.0) < 1e-6);
+    double v_iff = evaluateInput("iff(2 > 5, 10, 3 == 3, 42, 99)", err, isDef);
+    assert(err.empty() && std::abs(v_iff - 42.0) < 1e-6);
+
+    double v_loop_sum = evaluateInput("sum(i, 1, 10, i^2)", err, isDef);
+    assert(err.empty() && std::abs(v_loop_sum - 385.0) < 1e-6);
+    double v_loop_prod = evaluateInput("prod(i, 1, 5, i)", err, isDef);
+    assert(err.empty() && std::abs(v_loop_prod - 120.0) < 1e-6);
+    double v_loop_min = evaluateInput("min(i, 1, 5, (i - 3)^2 + 2)", err, isDef);
+    assert(err.empty() && std::abs(v_loop_min - 2.0) < 1e-6);
+    double v_loop_max = evaluateInput("max(i, 1, 5, i * 3)", err, isDef);
+    assert(err.empty() && std::abs(v_loop_max - 15.0) < 1e-6);
+
+    // Test Case 18: Vector & Array operations, inline indexing, domain errors in arrays
+    evaluateInput("arr = [10, 20, 30, 40]", err, isDef);
+    assert(err.empty() && isDef && user_arrays.count("arr") && user_arrays["arr"].size() == 4);
+    double v_arr_idx = evaluateInput("arr[2]", err, isDef);
+    assert(err.empty() && std::abs(v_arr_idx - 20.0) < 1e-6);
+    double v_arr_sum = evaluateInput("sum(arr)", err, isDef);
+    assert(err.empty() && std::abs(v_arr_sum - 100.0) < 1e-6);
+    double v_arr_prod = evaluateInput("prod(arr)", err, isDef);
+    assert(err.empty() && std::abs(v_arr_prod - 240000.0) < 1e-6);
+    double v_arr_mean = evaluateInput("mean(arr)", err, isDef);
+    assert(err.empty() && std::abs(v_arr_mean - 25.0) < 1e-6);
+
+    // Inline range indexing (1:2:10)[2] -> 3 (1-based)
+    double v_inline_idx = evaluateInput("(1:2:10)[2]", err, isDef);
+    assert(err.empty() && std::abs(v_inline_idx - 3.0) < 1e-6);
+
+    // Dot product of two equal-size vectors
+    evaluateInput("vecA = [1, 2, 3]", err, isDef);
+    assert(err.empty());
+    evaluateInput("vecB = [4, 5, 6]", err, isDef);
+    assert(err.empty());
+    double v_dot = evaluateInput("vecA * vecB", err, isDef);
+    assert(err.empty() && std::abs(v_dot - 32.0) < 1e-6);
+
+    // Vectorized function evaluation & domain error propagation
+    degreesMode = true;
+    evaluateInput("sin([0, 30, 90])", err, isDef);
+    assert(err.empty() && g_last_eval_is_array && g_last_eval_array.size() == 3);
+    assert(std::abs(g_last_eval_array[1] - 0.5) < 1e-6 && std::abs(g_last_eval_array[2] - 1.0) < 1e-6);
+
+    evaluateInput("asec([0.5, 2])", err, isDef);
+    assert(err == "Domain Error: asec(x) requires |x| >= 1");
+
+    // Test Case 19: Units adapter - times_amp/times_v -> dB (20*log10) vs times -> dB (10*log10) & tempC/tempF/tempK
+    ConvResult c_amp_db = handleConv(10, "times_amp", "dB", units_dat);
+    assert(c_amp_db.success && std::abs(c_amp_db.value - 20.0) < 1e-6);
+    ConvResult c_v_db = handleConv(10, "times_v", "dB", units_dat);
+    assert(c_v_db.success && std::abs(c_v_db.value - 20.0) < 1e-6);
+    ConvResult c_pow_db = handleConv(10, "times", "dB", units_dat);
+    assert(c_pow_db.success && std::abs(c_pow_db.value - 10.0) < 1e-6);
+    ConvResult c_neg_db = handleConv(-5, "times", "dB", units_dat);
+    assert(!c_neg_db.success && c_neg_db.errorMsg.find("Domain Error") != std::string::npos);
+
+    ConvResult c_temp1 = handleConv(100, "tempC", "tempF", units_dat);
+    assert(c_temp1.success && std::abs(c_temp1.value - 212.0) < 1e-4);
+    ConvResult c_temp2 = handleConv(0, "tempC", "tempK", units_dat);
+    assert(c_temp2.success && std::abs(c_temp2.value - 273.15) < 1e-4);
+    ConvResult c_temp3 = handleConv(0, "tempK", "degR", units_dat);
+    assert(c_temp3.success && std::abs(c_temp3.value - 0.0) < 1e-4);
+
+    // Test Case 20: Script engine - session variable preservation, loops, conditionals, recursion
+    user_args.clear();
+    user_arrays.clear();
+    evaluateInput("session_var = 100", err, isDef);
+    assert(err.empty());
+
+    std::string script_code =
+        "fn fact_rec(n) {\n"
+        "  if (n <= 1) {\n"
+        "    return 1\n"
+        "  }\n"
+        "  return n * fact_rec(n - 1)\n"
+        "}\n"
+        "total = session_var\n"
+        "for (i = 1; i <= 5; i = i + 1) {\n"
+        "  total = total + i\n"
+        "}\n"
+        "r = fact_rec(5)\n"
+        "print(total + r)\n";
+    runScript(script_code);
+    std::string script_out;
+    for (const auto& line : script_console_output) script_out += line + "\n";
+    std::cout << "Script output: " << script_out;
+    // session_var(100) + sum(1..5)(15) + fact_rec(5)(120) = 235
+    assert(script_out.find("235") != std::string::npos);
+    // Verify session_var was NOT wiped by runScript
+    double v_sess = evaluateInput("session_var", err, isDef);
+    assert(err.empty() && std::abs(v_sess - 100.0) < 1e-6);
+
+    // Test Case 21: getConvUnitMatches dimension filtering
+    auto len_units = getConvUnitMatches("mm", "k");
+    assert(!len_units.empty() && len_units[0] == "km");
+
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }
