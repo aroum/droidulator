@@ -64,8 +64,8 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
                        "  - Pressure: Pa, bar, atm, psi, torr, mmHg, inHg\n"
                        "  - Energy/Work: J, cal, BTU, eV, kWh, erg, ftlb\n"
                        "  - Power: W, hp (horsepower), BTU/hr, cal/s\n"
-                       "  - Temperature: tempC, tempF, tempK, tempR\n"
-                       "  - Wire / Cross Section: AWG, mm^2, kcmil, MCM\n"
+                       "  - Temperature: degC (tempC), degF (tempF), K (tempK), degR (tempR)\n"
+                       "  - Wire / Cross Section: AWG, mm^2, std_mm2, std_awg, kcmil, MCM\n"
                        "  - Decibel & Ratios: dB, dB_power, dB_v, dBm, dBW, dBV, dBu, dBmV, dBuV\n"
                        "  - Pure Ratios & Multipliers: times, ratio, x, percent (%), ppm, ppb\n"
                        "  - Electricity & Magnetism: A, V, ohm, F, H, C, Wb, T, G (gauss)\n"
@@ -145,13 +145,21 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
         else if (target == "dot") {
             help_out = "dot(v1, v2) or dot(a, b) : Dot product of vectors/scalars";
         }
-        else if (target == "fact" || target == "C" || target == "P" || target == "gcd" || target == "lcm" || target == "fib") {
-            help_out = "fact(n) / n! : Factorial n!\n"
-                       "C(n, k)      : Combinations nCr\n"
-                       "P(n, k)      : Permutations nPr\n"
-                       "gcd(a, b)    : Greatest Common Divisor\n"
-                       "lcm(a, b)    : Least Common Multiple\n"
-                       "fib(n)       : n-th Fibonacci number";
+        else if (target == "fact" || target == "C" || target == "Cnk" || target == "P" || target == "gcd" || target == "lcm" || target == "fib") {
+            help_out = "fact(n) / n!      : Factorial n! (0 <= n <= 170)\n"
+                       "C(n, k) / Cnk(n,k): Combinations nCr\n"
+                       "P(n, k)           : Permutations nPr\n"
+                       "gcd(a, b)         : Greatest Common Divisor\n"
+                       "lcm(a, b)         : Least Common Multiple\n"
+                       "fib(n)            : n-th Fibonacci number (0 <= n <= 1476)";
+        }
+        else if (target == "if" || target == "iff") {
+            help_out = "if(cond, expr_true, expr_false) : Inline conditional\n"
+                       "iff(c1, v1, c2, v2, ..., def)   : Multi-branch conditional";
+        }
+        else if (target == "sum" || target == "prod" || target == "min" || target == "max") {
+            help_out = target + "(i, start, end, expr) : Inline loop over i = start..end\n" +
+                       target + "(vector) or " + target + "(a, b, ...) : Aggregate over values";
         }
         else if (target == "rUni" || target == "rNor") {
             help_out = "rUni(min, max): Random float in range\n"

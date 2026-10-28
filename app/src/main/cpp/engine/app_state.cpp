@@ -35,5 +35,6 @@ std::vector<std::string> autocomplete_words = {
     "arsh(", "arch(", "arth(", "artg(", "arctgh(",
     "acoth(", "ahcot(", "arccoth(", "arcoth(", "arcth(", "ahcoth(",
     "asech(", "ahsec(", "arcsech(", "arsech(", "ahsech(",
-    "acsch(", "ahcsc(", "arccsch(", "arcsch(", "acosech(", "arccosec(", "ahcsch("
+    "acsch(", "ahcsc(", "arccsch(", "arcsch(", "acosech(", "arccosech(", "ahcsch(",
+    "Cnk(", "sum(", "prod(", "min(", "max(", "if(", "iff("
 };

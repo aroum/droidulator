@@ -64,6 +64,8 @@ enum class AngleUnit {
     RAD
 };
 inline AngleUnit g_last_result_angle = AngleUnit::NONE;
+inline bool g_last_eval_is_array = false;
+inline std::vector<double> g_last_eval_array;
 
 extern std::vector<CustomScriptFunc> user_script_funcs;
 extern std::vector<double> history;
