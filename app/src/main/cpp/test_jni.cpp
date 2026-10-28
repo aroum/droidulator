@@ -4,6 +4,7 @@
 #include <map>
 #include <cassert>
 #include <cmath>
+#include <cstdint>
 
 #define UNIT_TEST 1
 
