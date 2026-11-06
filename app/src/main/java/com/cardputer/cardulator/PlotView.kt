@@ -92,11 +92,9 @@ class PlotView @JvmOverloads constructor(
     }
 
     fun setThemeMode(isLight: Boolean) {
-        if (isLightTheme != isLight) {
-            isLightTheme = isLight
-            updateThemeColors()
-            invalidate()
-        }
+        isLightTheme = isLight
+        updateThemeColors()
+        invalidate()
     }
 
     private fun updateThemeColors() {

@@ -54,3 +54,10 @@ std::vector<std::string> autocomplete_words = {
     "acsch(", "ahcsc(", "arccsch(", "arcsch(", "acosech(", "arccosech(", "ahcsch(",
     "Cnk(", "sum(", "prod(", "min(", "max(", "if(", "iff("
 };
+static const std::vector<std::string> builtin_autocomplete_words = autocomplete_words;
+
+void resetAutocompleteWords() { autocomplete_words = builtin_autocomplete_words; }
+void removeUserAutocompleteWord(const std::string& word) {
+    if (std::find(builtin_autocomplete_words.begin(), builtin_autocomplete_words.end(), word) == builtin_autocomplete_words.end())
+        autocomplete_words.erase(std::remove(autocomplete_words.begin(), autocomplete_words.end(), word), autocomplete_words.end());
+}

@@ -1429,10 +1429,8 @@ double evaluate(const std::string& expr_str, std::string& err) {
 }
 
 double evaluateWithoutHistory(const std::string& expr_str, std::string& err) {
-    auto orig_history = history;
-    double val = evaluate(expr_str, err);
-    history = orig_history;
-    return val;
+    // evaluate() does not append or remove history entries.
+    return evaluate(expr_str, err);
 }
 
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {

@@ -26,22 +26,6 @@
             android:paddingStart="4dp"
             android:paddingEnd="4dp" />
 
-        <!-- Run Script Button (Visible in Scripts mode) -->
-        <Button
-            android:id="@+id/btn_run_script"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Run"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_aqua"
-            android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
-            android:visibility="gone"
-            android:layout_marginEnd="2dp" />
-
         <!-- Add Item Button (+) -->
         <Button
             android:id="@+id/btn_add_item"
@@ -374,7 +358,7 @@
             android:maxLines="6"
             android:scrollbars="vertical"
             android:imeOptions="actionDone"
-            android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword" />
+            android:inputType="textMultiLine|textNoSuggestions" />
 
         <TextView
             android:id="@+id/tv_error_overlay"

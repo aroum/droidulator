@@ -65,6 +65,8 @@ extern std::vector<std::string> user_funcs;
 extern std::map<std::string, std::vector<double>> user_arrays;
 extern std::map<std::string, std::string> user_named_scripts;
 extern std::vector<std::string> autocomplete_words;
+void resetAutocompleteWords();
+void removeUserAutocompleteWord(const std::string& word);
 extern std::vector<std::string> script_console_output;
 extern bool degreesMode;
 extern bool use_thousands_sep;

@@ -4,11 +4,7 @@ data class NativePlotLine(val x: DoubleArray, val y: DoubleArray, val color: Int
 
 object CardulatorEngine {
     init {
-        try {
-            System.loadLibrary("cardulator_jni")
-        } catch (e: UnsatisfiedLinkError) {
-            e.printStackTrace()
-        }
+        System.loadLibrary("cardulator_jni")
     }
 
     private var initialized = false
@@ -26,6 +22,7 @@ object CardulatorEngine {
     external fun nativeEvaluate(input: String): String
     external fun nativeEvaluatePreview(input: String): String
     external fun nativeAutocomplete(input: String, caretPos: Int, outCursor: IntArray): String
+    external fun nativeResetAutocomplete()
     external fun nativeRunScript(code: String): String
     external fun nativeRegisterScript(name: String, code: String)
     external fun nativeGetScriptFunctions(): Array<Array<String>>
@@ -38,6 +35,7 @@ object CardulatorEngine {
     external fun nativeGetConstants(): String
     external fun nativeGetHelp(topic: String): String
     external fun nativeSetDegRad(isDeg: Boolean)
+    external fun nativeGetDegRad(): Boolean
     external fun nativeSetFormatSettings(mode: Int, precision: Int, groupDigits: Boolean)
     external fun nativeDeleteVariable(name: String): Boolean
     external fun nativeDeleteConstant(name: String): Boolean

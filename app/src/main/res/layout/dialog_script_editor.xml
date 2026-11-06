@@ -69,6 +69,7 @@
     <!-- Script Name Field -->
     <EditText
         android:id="@+id/et_script_name"
+        android:inputType="textNoSuggestions"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:hint="Script Name (e.g. my_script)"

@@ -65,7 +65,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var topHeaderBar: LinearLayout
     private lateinit var spinnerTabs: Spinner
     private lateinit var tvMode: TextView
-    private lateinit var btnRunScript: Button
     private lateinit var btnAddItem: Button
 
     private lateinit var tvOutput: TextView
@@ -144,6 +143,14 @@ class MainActivity : AppCompatActivity() {
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
     private var isSubmitting = false
+    private var autocompleteEditor: EditText? = null
+
+    private fun selectAutocompleteEditor(editor: EditText) {
+        if (autocompleteEditor !== editor) {
+            CardulatorEngine.nativeResetAutocomplete()
+            autocompleteEditor = editor
+        }
+    }
 
     // Cycling Tab Autocomplete state for conv and plot contexts
     private var convTabOrigPrefix: String? = null
@@ -156,11 +163,65 @@ class MainActivity : AppCompatActivity() {
         private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
 
         // Pre-compiled regex patterns for zero-allocation syntax highlighting
-        private val NUMBER_REGEX = Regex("\\b\\d+(\\.\\d+)?\\b")
+        private val NUMBER_REGEX = Regex("(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[a-zA-Z]*(?![A-Za-z0-9_])")
         private val KEYWORD_REGEX = Regex("\\b(for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
         private val FUNC_REGEX = Regex("\\b(sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
         private val CONST_REGEX = Regex("\\b(pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
+    }
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun applySystemInsets(view: View) {
+        if (android.os.Build.VERSION.SDK_INT < 35) return
+        val left = view.paddingLeft
+        val top = view.paddingTop
+        val right = view.paddingRight
+        val bottom = view.paddingBottom
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(view) { target, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+            target.setPadding(left + bars.left, top + bars.top, right + bars.right, bottom + bars.bottom)
+            insets
+        }
+        androidx.core.view.ViewCompat.requestApplyInsets(view)
+    }
+
+    private fun convArgumentsBeforeCaret(text: String, caret: Int): Pair<Int, List<String>>? {
+        val stack = mutableListOf<Int>()
+        var quote: Char? = null
+        var escaped = false
+        for (i in 0 until caret) {
+            val c = text[i]
+            if (quote != null) {
+                if (escaped) escaped = false
+                else if (c == '\\') escaped = true
+                else if (c == quote) quote = null
+            } else when (c) {
+                '\'', '"' -> quote = c
+                '(' -> stack.add(i)
+                ')' -> if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
+            }
+        }
+        val open = stack.lastOrNull { pos -> pos >= 4 && text.substring(pos - 4, pos) == "conv" && (pos == 4 || !text[pos - 5].isLetterOrDigit() && text[pos - 5] != '_') } ?: return null
+        if (stack.last() != open) return null
+        val parts = mutableListOf<String>()
+        var start = open + 1
+        var depth = 0
+        quote = null
+        escaped = false
+        for (i in start until caret) {
+            val c = text[i]
+            if (quote != null) {
+                if (escaped) escaped = false else if (c == '\\') escaped = true else if (c == quote) quote = null
+            } else when (c) {
+                '\'', '"' -> quote = c
+                '(' -> depth++
+                ')' -> depth--
+                ',' -> if (depth == 0) { parts.add(text.substring(start, i)); start = i + 1 }
+            }
+        }
+        parts.add(text.substring(start, caret))
+        return start to parts
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -175,6 +236,15 @@ class MainActivity : AppCompatActivity() {
                 }
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) finishStartup()
+                }
+            } catch (error: UnsatisfiedLinkError) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        android.util.Log.e("Droidulator", "Unable to load calculator engine", error)
+                        AlertDialog.Builder(this).setMessage("Unable to load the calculator engine. Please reinstall the app.")
+                            .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                            .setOnCancelListener { finish() }.show()
+                    }
                 }
             } catch (error: Exception) {
                 runOnUiThread {
@@ -220,10 +290,10 @@ class MainActivity : AppCompatActivity() {
 
         // Bind Views
         mainRoot = findViewById(R.id.main_root)
+        applySystemInsets(mainRoot)
         topHeaderBar = mainRoot.getChildAt(0) as LinearLayout
         spinnerTabs = findViewById(R.id.spinner_tabs)
         tvMode = findViewById(R.id.tv_mode)
-        btnRunScript = findViewById(R.id.btn_run_script)
         btnAddItem = findViewById(R.id.btn_add_item)
         btnDeleteAll = findViewById(R.id.btn_delete_all)
         btnToggleEVars = findViewById(R.id.btn_toggle_evars)
@@ -334,7 +404,7 @@ class MainActivity : AppCompatActivity() {
                 v.setTextColor(ThemePalette.fgText)
                 v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                 v.textSize = 14f
-                v.setPadding(16, 16, 16, 16)
+                v.setPadding(dp(16), dp(16), dp(16), dp(16))
                 return v
             }
         }
@@ -373,7 +443,7 @@ class MainActivity : AppCompatActivity() {
                     v.setTextColor(ThemePalette.fgText)
                     v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                     v.textSize = 14f
-                    v.setPadding(16, 16, 16, 16)
+                    v.setPadding(dp(16), dp(16), dp(16), dp(16))
                     return v
                 }
             }
@@ -449,35 +519,39 @@ class MainActivity : AppCompatActivity() {
                 if (isHighlighting || s == null) return
 
                 val currentText = s.toString()
-                // Intercept inserted newline in REPL mode when enter send mode is active
-                if (tabs[currentTabPosition] == "REPL" && isEnterSendMode && currentText.contains("\n")) {
-                    isHighlighting = true
-                    // Replace newlines with spaces so multiline expressions/scripts don't collapse words together
-                    val cleanText = currentText.replace("\r\n", " ").replace("\n", " ").replace(Regex("""\s+"""), " ")
-                    etInput.setText(cleanText)
-                    etInput.setSelection(cleanText.length)
-                    isHighlighting = false
-                    submitCurrentInput()
-                    return
-                }
-
-                // Auto-brackets and auto-quotes insertion when typing a single character
+                // A pasted multiline expression must remain intact. Enter actions
+                // are handled by the editor/key listeners above.
                 if (isAutoPairEnabled && count == 1 && before == 0 && start < currentText.length) {
-                    val typedChar = currentText[start]
-                    val insertedPair = when (typedChar) {
-                        '(' -> ")"
-                        '[' -> "]"
-                        '{' -> "}"
-                        '"' -> "\""
-                        '\'' -> "'"
+                    val typed = currentText[start]
+                    val next = currentText.getOrNull(start + 1)
+                    val closing = when (typed) {
+                        '(' -> ')'
+                        '[' -> ']'
+                        '{' -> '}'
+                        '\"' -> '\"'
+                        '\'' -> '\''
                         else -> null
                     }
-                    if (insertedPair != null) {
-                        isHighlighting = true
-                        val newStr = currentText.substring(0, start + 1) + insertedPair + currentText.substring(start + 1)
-                        etInput.setText(newStr)
-                        etInput.setSelection(start + 1)
-                        isHighlighting = false
+                    if (next == typed && (typed == ')' || typed == ']' || typed == '}' || typed == '\"' || typed == '\'')) {
+                        etInput.post {
+                            val text = etInput.editableText
+                            if (start + 1 < text.length && text[start] == typed && text[start + 1] == typed) {
+                                isHighlighting = true
+                                try { text.delete(start, start + 1); etInput.setSelection(start + 1) }
+                                finally { isHighlighting = false }
+                                applySyntaxHighlighting(text)
+                            }
+                        }
+                    } else if (closing != null) {
+                        etInput.post {
+                            val text = etInput.editableText
+                            if (start < text.length && text[start] == typed) {
+                                isHighlighting = true
+                                try { text.insert(start + 1, closing.toString()); etInput.setSelection(start + 1) }
+                                finally { isHighlighting = false }
+                                applySyntaxHighlighting(text)
+                            }
+                        }
                     }
                 }
             }
@@ -492,15 +566,14 @@ class MainActivity : AppCompatActivity() {
     private fun setupControlButtons() {
         // Tab Autocomplete button & cursor insertion inside brackets
         btnTab.setOnClickListener {
+            selectAutocompleteEditor(etInput)
             val fullText = etInput.text.toString()
             val caret = etInput.selectionStart.coerceAtLeast(0)
 
             // Detect conv( context: suggest units/resistor codes inside conv(...)
-            val convMatch = Regex("""conv\(([^)]*)$""").find(fullText.substring(0, caret))
-            if (convMatch != null) {
-                val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
-                val lastParenPos = fullText.lastIndexOf('(', caret - 1)
-                val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
+            val convContext = convArgumentsBeforeCaret(fullText, caret)
+            if (convContext != null) {
+                val (splitPos, parts) = convContext
 
                 val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos && convTabCachedMatches != null)
                 if (isContinuation) {
@@ -524,8 +597,6 @@ class MainActivity : AppCompatActivity() {
                     }
                 }
 
-                val argsContent = convMatch.groupValues[1]
-                val parts = argsContent.split(",")
                 val lastPartRaw = parts.last().trim()
                 val lastPart = lastPartRaw.trim('"', '\'')
 
@@ -590,7 +661,7 @@ class MainActivity : AppCompatActivity() {
                 val lastPart = parts.last().trim().trim('"', '\'')
                 val plotCandidates = listOf(
                     "sin(x)", "cos(x)", "tan(x)", "exp(x)", "log(x)", "sqrt(x)",
-                    "x^2", "x^3", "abs(x)", "xlim", "ylim", "title", "grid"
+                    "x^2", "x^3", "abs(x)", "xlim", "ylim"
                 )
                 val match = if (lastPart.isEmpty()) {
                     "sin(x)"
@@ -621,9 +692,9 @@ class MainActivity : AppCompatActivity() {
                     if (runCallStart != -1) {
                         val baseText = fullText.substring(0, runCallStart)
                         val replacement = "run(\"$match\")"
-                        val newText = baseText + replacement
+                        val newText = baseText + replacement + fullText.substring(caret)
                         etInput.setText(newText)
-                        etInput.setSelection(newText.length)
+                        etInput.setSelection(baseText.length + replacement.length)
                         return@setOnClickListener
                     }
                 }
@@ -639,31 +710,17 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        // Clear button (Short click: clear input field; 800ms long press: clear history & variables)
-        val clearHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var isLongPressTriggered = false
-        val longPressRunnable = Runnable {
-            isLongPressTriggered = true
-            btnClear.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            clearSessionAndHistory()
+        btnClear.setOnClickListener {
+            etInput.setText("")
+            dismissErrorOverlay()
         }
-
-        btnClear.setOnTouchListener { _, event ->
-            when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    isLongPressTriggered = false
-                    clearHandler.postDelayed(longPressRunnable, 800)
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    clearHandler.removeCallbacks(longPressRunnable)
-                    if (!isLongPressTriggered) {
-                        etInput.setText("")
-                        dismissErrorOverlay()
-                    }
-                }
-                android.view.MotionEvent.ACTION_CANCEL -> {
-                    clearHandler.removeCallbacks(longPressRunnable)
-                }
+        btnClear.setOnLongClickListener {
+            val message = TextView(this).apply {
+                text = "Clear calculation history, variables and arrays?"
+                setTextColor(ThemePalette.fgText)
+            }
+            showGruvboxCustomDialog("Clear session", message, positiveText = "CLEAR") {
+                clearSessionAndHistory()
             }
             true
         }
@@ -671,19 +728,6 @@ class MainActivity : AppCompatActivity() {
         // Mode toggle (DEG / RAD)
         tvMode.setOnClickListener {
             toggleDegRad()
-        }
-
-        // Run Script button
-        btnRunScript.setOnClickListener {
-            val code = etInput.text.toString().trim()
-            if (code.isNotEmpty()) {
-                val log = CardulatorEngine.nativeRunScript(code)
-                saveUserDataToStorage()
-                appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
-                showScriptOutputDialog("Script Output", log)
-            } else {
-                Toast.makeText(this, "Script is empty", Toast.LENGTH_SHORT).show()
-            }
         }
 
         // Add Item button (Var / Const / Script)
@@ -977,10 +1021,12 @@ class MainActivity : AppCompatActivity() {
             )
         )
         val entrySsb = formatHighlightedReplEntry(input, res, isError)
-        val currentText = tvOutput.text
-        val ssb = android.text.SpannableStringBuilder(currentText)
-        ssb.append(entrySsb)
-        tvOutput.text = ssb
+        if (replDisplayItems.size > 500) {
+            replDisplayItems.removeAt(0)
+            rebuildReplOutput()
+        } else {
+            tvOutput.append(entrySsb)
+        }
         scrollView.post {
             scrollView.fullScroll(ScrollView.FOCUS_DOWN)
         }
@@ -988,10 +1034,12 @@ class MainActivity : AppCompatActivity() {
 
     private fun appendRawOutput(text: String) {
         replDisplayItems.add(ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true))
-        val currentText = tvOutput.text
-        val ssb = android.text.SpannableStringBuilder(currentText)
-        ssb.append(text)
-        tvOutput.text = ssb
+        if (replDisplayItems.size > 500) {
+            replDisplayItems.removeAt(0)
+            rebuildReplOutput()
+        } else {
+            tvOutput.append(text)
+        }
         scrollView.post {
             scrollView.fullScroll(ScrollView.FOCUS_DOWN)
         }
@@ -1015,7 +1063,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleDegRad() {
-        val isDeg = tvMode.text == "DEG"
+        val isDeg = CardulatorEngine.nativeGetDegRad()
         val nextDeg = !isDeg
         CardulatorEngine.nativeSetDegRad(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
@@ -1082,6 +1130,7 @@ class MainActivity : AppCompatActivity() {
                 // Always add to history (even if command had an error, so Up Arrow can recall it)
                 if (replHistory.isEmpty() || replHistory.last() != input) {
                     replHistory.add(input)
+                    if (replHistory.size > 500) replHistory.removeAt(0)
                 }
                 replHistoryIndex = -1
 
@@ -1103,19 +1152,18 @@ class MainActivity : AppCompatActivity() {
         etInput.post {
             etInput.requestFocus()
             val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-            imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+            imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
         }
     }
 
     private fun refreshTabContent(tabName: String) {
         dismissErrorOverlay()
-        btnRunScript.visibility = View.GONE
         btnAddItem.visibility = View.GONE
         btnDeleteAll.visibility = View.GONE
         btnToggleEVars.visibility = View.GONE
 
         when (tabName) {
-            "REPL", "Help" -> {
+            "REPL" -> {
                 scrollSettings.visibility = View.GONE
                 scrollItems.visibility = View.GONE
                 plotView.visibility = View.GONE
@@ -1123,10 +1171,6 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.VISIBLE
                 toolbarKeyboard.visibility = View.VISIBLE
 
-                if (tabName == "Help") {
-                    val help = CardulatorEngine.nativeGetHelp("")
-                    tvOutput.text = "\n--- Help & Functions ---\n$help\n"
-                }
             }
             "Plot" -> {
                 scrollView.visibility = View.GONE
@@ -1209,7 +1253,7 @@ class MainActivity : AppCompatActivity() {
                         text = "No user variables defined.\nClick '+ Add' above to create one."
                         setTextColor(dimColor)
                         textSize = 14f
-                        setPadding(16, 32, 16, 32)
+                        setPadding(dp(16), dp(32), dp(16), dp(32))
                     }
                     itemsContainer.addView(emptyTv)
                 } else {
@@ -1292,7 +1336,7 @@ class MainActivity : AppCompatActivity() {
                         text = "No custom formulas defined.\nClick '+ Add' above to create a formula e.g. f(x) = x^2"
                         setTextColor(dimColor)
                         textSize = 14f
-                        setPadding(16, 32, 16, 32)
+                        setPadding(dp(16), dp(32), dp(16), dp(32))
                     }
                     itemsContainer.addView(emptyTv)
                 } else {
@@ -1336,7 +1380,7 @@ class MainActivity : AppCompatActivity() {
                         text = "No custom scripts available.\nClick '+ Add' above to create a new script."
                         setTextColor(dimColor)
                         textSize = 14f
-                        setPadding(16, 32, 16, 32)
+                        setPadding(dp(16), dp(32), dp(16), dp(32))
                     }
                     itemsContainer.addView(emptyTv)
                 } else {
@@ -1393,12 +1437,12 @@ class MainActivity : AppCompatActivity() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(cardBgColor)
-            setPadding(16, 12, 16, 12)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.setMargins(0, 0, 0, 12)
+            lp.setMargins(0, 0, 0, dp(12))
             layoutParams = lp
         }
 
@@ -1424,7 +1468,7 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.setMargins(0, 8, 0, 0)
+            lp.setMargins(0, dp(8), 0, 0)
             layoutParams = lp
         }
 
@@ -1447,7 +1491,7 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.setMargins(16, 0, 0, 0)
+            lp.setMargins(dp(16), 0, 0, 0)
             layoutParams = lp
             setOnClickListener { onEdit() }
         }
@@ -1462,7 +1506,7 @@ class MainActivity : AppCompatActivity() {
                 LinearLayout.LayoutParams.WRAP_CONTENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.setMargins(16, 0, 0, 0)
+            lp.setMargins(dp(16), 0, 0, 0)
             layoutParams = lp
             setOnClickListener { onDelete() }
         }
@@ -1491,12 +1535,12 @@ class MainActivity : AppCompatActivity() {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(cardBgColor)
-            setPadding(16, 12, 16, 12)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
             val lp = LinearLayout.LayoutParams(
                 LinearLayout.LayoutParams.MATCH_PARENT,
                 LinearLayout.LayoutParams.WRAP_CONTENT
             )
-            lp.setMargins(0, 0, 0, 12)
+            lp.setMargins(0, 0, 0, dp(12))
             layoutParams = lp
         }
 
@@ -1525,7 +1569,7 @@ class MainActivity : AppCompatActivity() {
                     LinearLayout.LayoutParams.MATCH_PARENT,
                     LinearLayout.LayoutParams.WRAP_CONTENT
                 )
-                lp.setMargins(0, 8, 0, 0)
+                lp.setMargins(0, dp(8), 0, 0)
                 layoutParams = lp
             }
 
@@ -1552,7 +1596,7 @@ class MainActivity : AppCompatActivity() {
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     )
-                    if (onRun != null) lp.setMargins(16, 0, 0, 0)
+                    if (onRun != null) lp.setMargins(dp(16), 0, 0, 0)
                     layoutParams = lp
                     setOnClickListener { onEdit() }
                 }
@@ -1570,7 +1614,7 @@ class MainActivity : AppCompatActivity() {
                         LinearLayout.LayoutParams.WRAP_CONTENT,
                         LinearLayout.LayoutParams.WRAP_CONTENT
                     )
-                    lp.setMargins(16, 0, 0, 0)
+                    lp.setMargins(dp(16), 0, 0, 0)
                     layoutParams = lp
                     setOnClickListener { onDelete() }
                 }
@@ -1602,8 +1646,8 @@ class MainActivity : AppCompatActivity() {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
             val dialogDrawable = GradientDrawable().apply {
                 setColor(bgColor)
-                setStroke(2, borderColor)
-                cornerRadius = 16f
+                setStroke(dp(2), borderColor)
+                cornerRadius = dp(16).toFloat()
             }
             setBackgroundDrawable(dialogDrawable)
             setDimAmount(0.6f)
@@ -1616,7 +1660,7 @@ class MainActivity : AppCompatActivity() {
         val root = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
             setBackgroundColor(bgColor)
-            setPadding(36, 32, 36, 32)
+            setPadding(dp(36), dp(32), dp(36), dp(32))
         }
 
         val tvTitle = TextView(this).apply {
@@ -1625,22 +1669,18 @@ class MainActivity : AppCompatActivity() {
             textSize = 16f
             typeface = android.graphics.Typeface.MONOSPACE
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, 0, 0, 16)
+            setPadding(0, 0, 0, dp(16))
         }
 
         root.addView(tvTitle)
 
-        val contentContainer = if (contentView.parent == null) {
-            contentView
-        } else {
-            contentView
-        }
-        root.addView(contentContainer)
+        (contentView.parent as? ViewGroup)?.removeView(contentView)
+        root.addView(contentView)
 
         val btnBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.END
-            setPadding(0, 20, 0, 0)
+            setPadding(0, dp(20), 0, 0)
         }
 
         if (customButtons != null) {
@@ -1672,7 +1712,7 @@ class MainActivity : AppCompatActivity() {
                     textSize = 13f
                     setTypeface(typeface, android.graphics.Typeface.BOLD)
                     val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    if (showCancel) lp.setMargins(16, 0, 0, 0)
+                    if (showCancel) lp.setMargins(dp(16), 0, 0, 0)
                     layoutParams = lp
                     setOnClickListener {
                         onPositive?.invoke()
@@ -1700,19 +1740,19 @@ class MainActivity : AppCompatActivity() {
             setTextColor(fgColor)
             textSize = 13f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(20, 16, 20, 16)
+            setPadding(dp(20), dp(16), dp(20), dp(16))
         }
 
         val scrollContainer = ScrollView(this).apply {
             val bgDrawable = GradientDrawable().apply {
                 setColor(bgSoft)
-                setStroke(2, borderColor)
-                cornerRadius = 6f
+                setStroke(dp(2), borderColor)
+                cornerRadius = dp(6).toFloat()
             }
             background = bgDrawable
             isScrollbarFadingEnabled = false
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 400)
-            lp.setMargins(0, 8, 0, 8)
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(400))
+            lp.setMargins(0, dp(8), 0, dp(8))
             layoutParams = lp
             addView(tvOut)
         }
@@ -1745,14 +1785,15 @@ class MainActivity : AppCompatActivity() {
 
         for (param in params) {
             val et = EditText(this).apply {
+                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 hint = "Value for $param"
                 typeface = android.graphics.Typeface.MONOSPACE
                 setBackgroundColor(bgSoft)
                 setTextColor(fgColor)
                 setHintTextColor(fgDim)
-                setPadding(16, 12, 16, 12)
+                setPadding(dp(16), dp(12), dp(16), dp(12))
                 val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.setMargins(0, 0, 0, 12)
+                lp.setMargins(0, 0, 0, dp(12))
                 layoutParams = lp
             }
             layout.addView(et)
@@ -1764,7 +1805,7 @@ class MainActivity : AppCompatActivity() {
             setTextColor(fgDim)
             textSize = 12f
             typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 8, 0, 4)
+            setPadding(0, dp(8), 0, dp(4))
         }
 
         val tvResultValue = TextView(this).apply {
@@ -1773,11 +1814,11 @@ class MainActivity : AppCompatActivity() {
             textSize = 15f
             typeface = android.graphics.Typeface.MONOSPACE
             setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(20, 14, 20, 14)
+            setPadding(dp(20), dp(14), dp(20), dp(14))
             val bgDrawable = GradientDrawable().apply {
                 setColor(bgSoft)
-                setStroke(2, borderColor)
-                cornerRadius = 6f
+                setStroke(dp(2), borderColor)
+                cornerRadius = dp(6).toFloat()
             }
             background = bgDrawable
         }
@@ -1826,7 +1867,7 @@ class MainActivity : AppCompatActivity() {
             textSize = 13f
             setTypeface(typeface, android.graphics.Typeface.BOLD)
             val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(16, 0, 0, 0)
+            lp.setMargins(dp(16), 0, 0, 0)
             layoutParams = lp
         }
 
@@ -1848,6 +1889,7 @@ class MainActivity : AppCompatActivity() {
                 appendOutputEntry(currentEvalExpr, res, isErr)
                 if (replHistory.isEmpty() || replHistory.last() != currentEvalExpr) {
                     replHistory.add(currentEvalExpr)
+                    if (replHistory.size > 500) replHistory.removeAt(0)
                 }
                 saveUserDataToStorage()
                 Toast.makeText(this@MainActivity, "Exported to REPL", Toast.LENGTH_SHORT).show()
@@ -1868,6 +1910,7 @@ class MainActivity : AppCompatActivity() {
         val fgDim = ThemePalette.fgDim
 
         val et = EditText(this).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
             setText(initialExpr)
             setSelection(initialExpr.length)
             hint = hintText
@@ -1875,7 +1918,7 @@ class MainActivity : AppCompatActivity() {
             setBackgroundColor(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
-            setPadding(20, 16, 20, 16)
+            setPadding(dp(20), dp(16), dp(20), dp(16))
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
@@ -1904,6 +1947,7 @@ class MainActivity : AppCompatActivity() {
         dialog.setContentView(R.layout.dialog_script_editor)
 
         val root = dialog.findViewById<LinearLayout>(R.id.script_editor_root)
+        applySystemInsets(root)
         val btnCancel = dialog.findViewById<Button>(R.id.btn_script_cancel)
         val btnTab = dialog.findViewById<Button>(R.id.btn_script_tab)
         val btnRun = dialog.findViewById<Button>(R.id.btn_script_run)
@@ -1954,6 +1998,7 @@ class MainActivity : AppCompatActivity() {
         btnTab.apply {
             setTextColor(fgColor)
             setOnClickListener {
+                selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
                 val fullText = etCode.text.toString()
                 var wordStart = cursor
@@ -2210,7 +2255,15 @@ class MainActivity : AppCompatActivity() {
         if (uri != null) {
             try {
                 contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val jsonStr = inputStream.bufferedReader(Charsets.UTF_8).readText()
+                    val buffer = ByteArray(8192)
+                    val output = java.io.ByteArrayOutputStream()
+                    while (true) {
+                        val count = inputStream.read(buffer)
+                        if (count < 0) break
+                        require(output.size() + count <= 1024 * 1024) { "Theme file exceeds 1 MiB" }
+                        output.write(buffer, 0, count)
+                    }
+                    val jsonStr = output.toString("UTF-8")
                     if (ThemePalette.loadCustomThemeJson(jsonStr)) {
                         val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
                         prefs.edit().putString("custom_theme_json", jsonStr).apply()
@@ -2260,6 +2313,7 @@ class MainActivity : AppCompatActivity() {
         // Scroll Views & Plot View
         scrollView.setBackgroundColor(bgColor)
         tvOutput.setTextColor(fgColor)
+        tvMode.setTextColor(if (isLightThemeActive) ThemePalette.fgText else ThemePalette.yellow)
         scrollSettings.setBackgroundColor(bgColor)
         scrollItems.setBackgroundColor(bgColor)
         plotView.setThemeMode(isLightThemeActive)
@@ -2406,15 +2460,15 @@ class MainActivity : AppCompatActivity() {
 
     private fun applySyntaxHighlighting(editable: Editable) {
         isHighlighting = true
-
-        val existingSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
-        for (span in existingSpans) {
-            editable.removeSpan(span)
+        try {
+            val existingSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
+            for (span in existingSpans) {
+                editable.removeSpan(span)
+            }
+            applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
+        } finally {
+            isHighlighting = false
         }
-
-        applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
-
-        isHighlighting = false
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {

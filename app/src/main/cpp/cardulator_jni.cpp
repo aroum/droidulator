@@ -38,6 +38,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject t
     user_consts.clear();
     user_arrays.clear();
     script_console_output.clear();
+    resetAutocompleteWords();
+    resetTabState();
     degreesMode = true;
     LOGI("Cardulator Native Engine Initialized.");
 } catch (const std::bad_alloc&) {
@@ -519,6 +521,12 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeAutocomplete(JNIEnv *env, j
     throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
+JNIEXPORT void JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeResetAutocomplete(JNIEnv *, jobject) {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    resetTabState();
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeRunScript(JNIEnv *env, jobject thiz, jstring code_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
@@ -548,6 +556,8 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, jobject thiz) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     clearHistory();
+    for (const auto& arg : user_args) removeUserAutocompleteWord(arg.name);
+    for (const auto& array : user_arrays) removeUserAutocompleteWord(array.first);
     user_args.clear();
     user_arrays.clear();
     script_console_output.clear();
@@ -682,6 +692,12 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeSetFormatSettings(JNIEnv *e
 }
 
 JNIEXPORT jboolean JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetDegRad(JNIEnv *, jobject) {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    return degreesMode ? JNI_TRUE : JNI_FALSE;
+}
+
+JNIEXPORT jboolean JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env, jobject thiz, jstring name_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     if (!name_jstr) return JNI_FALSE;
@@ -690,10 +706,14 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env,
     auto it = std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == name; });
     if (it != user_args.end()) {
         user_args.erase(it, user_args.end());
+        removeUserAutocompleteWord(name);
+        resetTabState();
         return JNI_TRUE;
     }
     if (user_arrays.find(name) != user_arrays.end()) {
         user_arrays.erase(name);
+        removeUserAutocompleteWord(name);
+        resetTabState();
         return JNI_TRUE;
     }
     return JNI_FALSE;
@@ -714,6 +734,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteConstant(JNIEnv *env,
     auto it = std::remove_if(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; });
     if (it != user_consts.end()) {
         user_consts.erase(it, user_consts.end());
+        removeUserAutocompleteWord(name);
+        resetTabState();
         return JNI_TRUE;
     }
     return JNI_FALSE;
@@ -740,6 +762,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteFormula(JNIEnv *env, 
     });
     if (it != user_funcs.end()) {
         user_funcs.erase(it, user_funcs.end());
+        removeUserAutocompleteWord(name + "(");
+        resetTabState();
         return JNI_TRUE;
     }
     return JNI_FALSE;
