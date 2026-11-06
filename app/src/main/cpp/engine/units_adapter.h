@@ -745,12 +745,10 @@ inline ConvResult handleConv(double value,
     }
 
     // --- 3. Fallback to GNU Units bridge ---
-    static bool s_init = false;
-    if (!s_init) {
-        const char *dat = units_dat.empty() ? nullptr : units_dat.c_str();
-        bridge_init(dat);
-        s_init = true;
-        UNITS_LOGI("GNU Units bridge initialised");
+    const char *dat = units_dat.empty() ? nullptr : units_dat.c_str();
+    if (bridge_init(dat) != 0) {
+        res.errorMsg = "Unable to initialize the units database";
+        return res;
     }
 
     // Normalize commonly typed case variations for GNU Units database

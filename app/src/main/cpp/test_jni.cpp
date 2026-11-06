@@ -5,6 +5,8 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <thread>
+#include <atomic>
 extern "C" int bridge_test_fatal();
 
 
@@ -944,6 +946,18 @@ int main() {
     for (int i = 0; i < 100; ++i)
         assert(bridge_convert(1, "meter", "second", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
 
+    std::atomic<bool> conversions_ok{true};
+    std::vector<std::thread> workers;
+    for (int worker = 0; worker < 4; ++worker) workers.emplace_back([&] {
+        for (int i = 0; i < 100; ++i) {
+            double converted = 0;
+            char unit[64] = {}, error[128] = {};
+            if (bridge_convert(1, "cm", "m", &converted, unit, sizeof(unit), error, sizeof(error)) != 0 ||
+                std::abs(converted - 0.01) > 1e-12) conversions_ok = false;
+        }
+    });
+    for (auto& worker : workers) worker.join();
+    assert(conversions_ok);
     assert(bridge_test_fatal() == 1);
     assert(bridge_convert(1, "cm", "m", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
 

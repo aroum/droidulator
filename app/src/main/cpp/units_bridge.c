@@ -46,6 +46,7 @@ static int bridge_init_unlocked(const char *units_dat_path)
         err = readunits((char *)units_dat_path, stderr, &ucount, &pcount, &fcount, 0);
     } else {
         char *path = findunitsfile(0);
+        if (!path) return E_FILE;
         err = readunits(path, stderr, &ucount, &pcount, &fcount, 0);
     }
 

@@ -8,7 +8,10 @@ public class CardulatorEngine {
   public static void main(String[] args) {
     System.load(args[0]);
     CardulatorEngine e = new CardulatorEngine(); e.nativeInit();
+    if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
     String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);
+    String withNul = e.nativeEvaluate("print(\"a\u0000b\")");
+    if (!withNul.contains("a\u0000b")) throw new AssertionError("NUL in output");
     for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
     String all=e.nativeGetVariables(); if (!all.contains("e3 = 3") || !all.contains("e130 = 130") || all.contains("e2 = 2\n")) throw new AssertionError(all);
     if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
