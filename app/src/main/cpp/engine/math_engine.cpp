@@ -519,46 +519,36 @@ inline std::string preprocessPercentage(const std::string& s) {
 }
 
 inline std::string preprocessFactorial(const std::string& s) {
-    if (s.find('!') == std::string::npos) return s;
-    std::string res = "";
+    std::string res;
     res.reserve(s.size());
-    int n = s.size();
-    for (int i = 0; i < n; i++) {
-        if (s[i] == '!') {
-            bool is_postfix = false;
-            if (i > 0) {
-                char prev = s[i - 1];
-                if (std::isalnum(prev) || prev == ')' || prev == ']' || prev == '}') {
-                    is_postfix = true;
-                }
-            }
-            if (is_postfix) {
-                int j = i - 1;
-                if (s[j] == ')' || s[j] == ']' || s[j] == '}') {
-                    char close = s[j];
-                    char open = (close == ')') ? '(' : ((close == ']') ? '[' : '{');
-                    int depth = 1;
-                    j--;
-                    while (j >= 0 && depth > 0) {
-                        if (s[j] == close) depth++;
-                        else if (s[j] == open) depth--;
-                        j--;
-                    }
-                    j++;
-                } else {
-                    while (j >= 0 && (std::isalnum(s[j]) || s[j] == '_')) {
-                        j--;
-                    }
-                    j++;
-                }
-                std::string operand = s.substr(j, i - j);
-                res = res.substr(0, j) + "fact(" + operand + ")";
-            } else {
-                res += s[i];
-            }
-        } else {
+    for (size_t i = 0; i < s.size(); ++i) {
+        if (s[i] != '!' || (i + 1 < s.size() && s[i + 1] == '=') || res.empty()) {
             res += s[i];
+            continue;
         }
+        size_t end = res.size();
+        while (end > 0 && std::isspace(static_cast<unsigned char>(res[end - 1]))) --end;
+        if (end == 0) { res += s[i]; continue; }
+        size_t start = end;
+        char last = res[end - 1];
+        if (last == ')' || last == ']' || last == '}') {
+            const char open = last == ')' ? '(' : last == ']' ? '[' : '{';
+            int depth = 1;
+            --start;
+            while (start > 0 && depth > 0) {
+                char c = res[--start];
+                if (c == last) ++depth;
+                else if (c == open) --depth;
+            }
+            if (depth != 0) { res += s[i]; continue; }
+            if (open == '(' && start > 0 && (std::isalpha(static_cast<unsigned char>(res[start - 1])) || res[start - 1] == '_')) {
+                while (start > 0 && (std::isalnum(static_cast<unsigned char>(res[start - 1])) || res[start - 1] == '_')) --start;
+            }
+        } else if (std::isalnum(static_cast<unsigned char>(last)) || last == '_' || last == '.') {
+            while (start > 0 && (std::isalnum(static_cast<unsigned char>(res[start - 1])) || res[start - 1] == '_' || res[start - 1] == '.')) --start;
+        } else { res += s[i]; continue; }
+        const std::string operand = res.substr(start, end - start);
+        res.replace(start, res.size() - start, "fact(" + operand + ")");
     }
     return res;
 }
@@ -608,7 +598,7 @@ inline std::string replaceLogicalWords(const std::string& s) {
                 continue;
             }
             if (i + 3 <= n && s.substr(i, 3) == "xor" && (i + 3 == n || !is_word_char(s[i + 3]))) {
-                res += "!=";
+                res += "^^";
                 i += 3;
                 continue;
             }
@@ -663,6 +653,17 @@ inline double evaluateRelational(const std::string& expr, std::string& err) {
         return (lval != 0.0 || rval != 0.0) ? 1.0 : 0.0;
     }
     
+    // Logical XOR compares truth values, not the numeric operands themselves.
+    pos = findOp("^^");
+    if (pos != std::string::npos) {
+        std::string err_l, err_r;
+        double lval = evaluate(expr.substr(0, pos), err_l);
+        if (!err_l.empty()) { err = err_l; return 0.0; }
+        double rval = evaluate(expr.substr(pos + 2), err_r);
+        if (!err_r.empty()) { err = err_r; return 0.0; }
+        return (lval != 0.0) != (rval != 0.0) ? 1.0 : 0.0;
+    }
+
     // Check &&
     pos = findOp("&&");
     if (pos == std::string::npos) pos = findOp(" and ");
@@ -1175,10 +1176,9 @@ double evaluate(const std::string& expr_str, std::string& err) {
     subbed = preprocessInlineConditionalsAndLoops(subbed, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
     
-    std::string preprocessed = preprocessExpression(subbed);
+    std::string preprocessed = preprocessExpression(replaceLogicalWords(subbed));
     preprocessed = preprocessPercentage(preprocessed);
     preprocessed = preprocessFactorial(preprocessed);
-    preprocessed = replaceLogicalWords(preprocessed);
     preprocessed = preprocessLen(preprocessed);
     preprocessed = preprocessVectorStats(preprocessed);
 

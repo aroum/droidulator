@@ -16,6 +16,10 @@ public class CardulatorEngine {
     for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
     String all=e.nativeGetVariables(); if (!all.contains("e3 = 3") || !all.contains("e130 = 130") || all.contains("e2 = 2\n")) throw new AssertionError(all);
     if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
+    for (String[] tc : new String[][]{{"3!+4!", "30"}, {"(2+1)!*2!", "12"}, {"2 xor 3", "0"}, {"0 xor 3", "1"}}) {
+      String output = e.nativeEvaluate(tc[0]);
+      if (output.startsWith("ERROR") || e.nativeGetLastNumericVal() != Double.parseDouble(tc[1])) throw new AssertionError(tc[0] + ": " + output);
+    }
     e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false); if (!e.nativeGetVariables().contains("x = inf")) throw new AssertionError("infinity");
     e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN}); if (!e.nativeGetVariables().contains("arr = [1, nan]")) throw new AssertionError("array");
     e.nativeRestoreScriptFunction(new String[]{"abc","1","x","return x*2"}); if(e.nativeGetScriptFunctions().length != 1) throw new AssertionError("function");

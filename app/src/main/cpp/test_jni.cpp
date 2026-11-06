@@ -40,6 +40,18 @@ int main() {
     std::cout << "1k + 500 = " << res2 << std::endl;
     assert(res2 == 1500.0);
 
+    for (const auto& tc : std::vector<std::pair<std::string, double>>{
+             {"3!+4!", 30}, {"(2+1)!*2!", 12}, {"3!!", 720},
+             {"3! != 4!", 1}, {"2 xor 3", 0}, {"1 xor 1", 0},
+             {"0 xor 0", 0}, {"0 xor 3", 1}, {"1 xor 0 and 0", 1}}) {
+        std::string testError;
+        double actual = evaluate(tc.first, testError);
+        if (!testError.empty() || actual != tc.second) {
+            std::cerr << "Expression failed: " << tc.first << " = " << actual << " " << testError << std::endl;
+            assert(false);
+        }
+    }
+
     // 3. Units adapter test (conversion to explicit target unit)
     //    The path is resolved relative to the binary's working dir.
     std::string units_dat = std::string(UNITS_DAT_PATH);
