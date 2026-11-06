@@ -8,3 +8,7 @@
 /captures
 .externalNativeBuild
 .cxx
+/PROBLEM.md
+
+# Legacy checkout retained locally when migrating the GNU Units submodule.
+/app/src/main/cpp/gnu-units/

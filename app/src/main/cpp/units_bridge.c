@@ -1,5 +1,5 @@
 /*
- * units_bridge.c  –  compiled as pure C so gnu-units/units.h K&R
+ * units_bridge.c  –  compiled as pure C so gnu-units-2.27/units.h K&R
  * declarations do not conflict with C++ system headers.
  * This file lives in the main cpp directory, not inside the gnu-units submodule.
  */
@@ -12,7 +12,7 @@
 /* Suppress old-style K&R re-declarations that live inside units.h. */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wincompatible-library-redeclaration"
-#include "gnu-units/units.h"
+#include "gnu-units-2.27/units.h"
 #pragma clang diagnostic pop
 
 #include "units_bridge.h"
@@ -22,7 +22,7 @@ extern int   completereduce(struct unittype *unit);
 extern int   readunits(char *file, FILE *errfile,
                        int *unitcount, int *prefixcount, int *funccount,
                        int depth);
-extern char *findunitsfile(void);
+extern char *findunitsfile(int print);
 extern int   unit2num(struct unittype *input);
 /* mylocale is normally set by units.c main(); init before readunits(). */
 extern char *mylocale;
@@ -43,7 +43,7 @@ int bridge_init(const char *units_dat_path)
     if (units_dat_path) {
         err = readunits((char *)units_dat_path, stderr, &ucount, &pcount, &fcount, 0);
     } else {
-        char *path = findunitsfile();
+        char *path = findunitsfile(0);
         err = readunits(path, stderr, &ucount, &pcount, &fcount, 0);
     }
 

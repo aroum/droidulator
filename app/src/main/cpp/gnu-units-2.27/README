@@ -1,0 +1,248 @@
+Overview
+========
+GNU 'units' program converts quantities expressed in various systems of
+measurement to their equivalents in other systems of measurement.  Like
+many similar programs, it can handle multiplicative scale changes; but
+it can also handle nonlinear conversions such as Fahrenheit to Celsius
+(which may appear to be linear but is actually affine).  The program can
+also perform conversions from and to sums of units, such as converting
+between meters and feet plus inches.
+
+Basic operation is simple: at the 'You have:' prompt, enter the unit
+from which you want to convert; at the subsequent 'You want:' prompt,
+enter the unit to which you want to convert. For example,
+
+  You have: ft
+  You want: m
+          * 0.3048
+          / 3.2808399
+
+In other words, 1 foot is equal to 0.3048 meter (exactly), and 1 meter
+is equal to approximately 3.2808339 feet.
+
+To quit the program, enter either 'quit' or 'exit' at either the 'You
+have:' or 'You want:' prompt.  You can also quit by entering Ctrl-C at
+any time.
+
+The program's features are described in detail in the user manual. 
+
+Building and Installation
+=========================
+General installation instructions appear in the file 'INSTALL'.  You
+should be able to run './configure' followed by 'make'.  If you give
+no options to configure, it will compile units to look for the units
+data file in a standard location (probably /usr/local/share) and the
+currency file in /usr/local/com.
+
+To check that currency conversion update script works, and to verify
+that units works properly, run 'make check'.
+
+To install the program, run 'make install'.  
+
+If you want to use the program without installing, you will need to use
+the '-f' option; if you plan to use the program frequently without
+installing, you can avoid having to do this by setting
+'UNITSFILE=definitions.units' in the environment.  You can also avoid
+having to do this by building for a relocatable installation, described
+below.
+
+If you wish to change the locations of the files you can invoke
+'./configure' with the option '--prefix=<your_prefix>' to set a
+different installation location.  You may also choose to use
+'--sharedstatedir=<directory>' to change the location for the currency
+file.  
+
+Building for a Relocatable Installation
+---------------------------------------
+By default, the location of the units data file is compiled into the
+program as an absolute path name, so its location cannot be changed.  If
+you invoke configure by typing './configure --enable-relocation', the
+data file location will be compiled into the program as
+'definitions.units', and units will search for the data file in the
+following places:
+
+ *  In the directory that contains the units executable, typical for
+    installations on Windows.
+
+ *  In <anypath>/bin/../share/units, where <anypath>/bin is the
+    directory that contains the units executable, typical for
+    installations on Unix-like systems.  For example, the default
+    installation typically places the executable in /usr/local/bin and
+    the data file in /usr/local/share/units; if you wished, you could
+    change these locations to /usr/me/bin and /usr/me/share/units
+    without recompiling the program.
+
+If configure is run with '--enable-relocation', you can run units
+without installing without giving the '-f' option.
+
+If units is invoked with the '-f' option or the environment variable
+UNITSFILE is set, that path is used, and it makes no difference whether
+configure was run with the '--enable-relocation' option.
+
+GNU readline Library
+--------------------
+For full functionality you should have the GNU readline library
+installed to provide history and editing of data entry.
+
+Note that MacOS comes with editline, which is similar to GNU readline,
+but not similar enough.  When compiling under MacOS the configure
+script looks for GNU readline in /opt/local.  If you have installed it
+somewhere else then invoke configure as follows:
+       ./configure -I<path_to_includes> -L<path_to_libs>
+Then the configure script should detect readline and compile it in.        
+
+If you are installing on Windows, readline may not be available;
+however, command history and intraline editing are available via the
+standard Windows console facilities described in the documentation for
+doskey.
+
+Currency Conversion Updates
+---------------------------
+You can update currency conversions using the units_cur Python script;
+see the user manual for details.
+
+Building on Windows
+===================
+units can be built from the Windows command prompt using Visual Studio;
+see UnitsWin.pdf for details.
+
+units can also be built from the MKS Korn shell using Visual Studio;
+see UnitsMKS.pdf for details.
+
+Documentation
+=============
+The documentation is provided in texinfo, roff, and text format.  The
+roff manual page source units.man is generated automatically from the
+texinfo documentation; this produces a readable man page when run
+through nroff, but most equations are not included.  The manual page
+formats well for printing or as PDF with groff.  A printed manual can
+also be generated using 'units.dvi'; use this if you encounter problems
+with groff.
+
+Icons
+=====
+The distribution includes three icons that may be useful for
+installation in a GUI.  Use the icotool command to extract the png files
+from the .ico files.  The icon_ms.png file is suitable for use as a
+small button.
+
+Incompatibilities with Unix 'units'
+===================================
+This program has the following incompatibilities with unix 'units':
+  * The '-' character is a subtraction operator rather than a multiply
+      operator by default.
+  * Exponentiation in numbers requires an 'e', so you must write 2.5e-2
+      instead of 2.5-2.
+  * Prefixes are listed in the units file.
+  * GNU 'units' tries the -s, -es, and -ies plural forms.
+  * The default output format is slightly different.
+  * The units database is much larger and more informative, but with some
+      differences. (e.g. 'g' is for gravity in unix 'units' and grams in
+      GNU 'units'.)  The comment character has been changed to '#'.
+
+GNU 'units' Extensions
+======================
+GNU 'units' includes the following extensions:
+  * Multiplication can be written with a '*' if desired.
+  * Exponents can be written with '^' or '**' in units.
+  * Exponents can be larger than 9 if written with '^' or '**'.
+  * Sums of units can be converted.
+  * The units data file is extensively commented. 
+  * Units which measure reciprocal dimensions can be converted.
+  * Parentheses for grouping are supported.
+  * Functions such as sin, cos, and log are supported.
+  * Roots of units and rational exponents can be computed.
+  * Nonlinear units conversions are supported. 
+  * Conversion to lists of units (e.g. feet and inches) is supported
+
+Windows Binary Distribution
+===========================
+A binary distribution for Windows is available at
+http://ftp.gnu.org/gnu/units/windows/. The executable was built with
+Microsoft Visual Studio using Makefile.Win and the same source
+files included in the source distribution.  The binary version is
+usually the same as that of the current source distribution.  There is
+currently no support for UTF-8 or readline; however, command history and
+intraline editing are available via the standard Windows console
+facilities described in the documentation for doskey.
+
+Other Ports
+===========
+A port of units 1.87 to Windows is available from the
+http://gnuwin32.sourceforge.net/packages/units.htm 
+This port includes readline support.
+
+A Java version of units by Roman Redziejowski <roman.redz@swipnet.se>
+is available on SourceForge at http://units-in-java.sourceforge.net/
+
+Two versions are available for Android.  Steve Pomeroy has a version
+based on the above Java version that you can obtain at http://
+staticfree.info/projects/units/ and Keith Flowers has compiled the C
+code for Android: http://apps.keithflower.org/?page_id=6
+
+A Perl version was written by Bob Walton <bob@bwalton.com> and can be
+accessed either as a units converting web form or as perl source code
+from:  http://bwalton.com/cgi-bin/myunitscgi.pl
+
+A project called Frink uses a (modified) version of the units
+database to supply a units-aware programming language.
+https://futureboy.us/frinkdocs/
+
+Jillian England has created a units definition file that changes
+energy to mass and seconds to meters:
+https://github.com/NinerXrayBravoTwoTwo/MassEnergyUnits
+
+-----------------------------------------------------------------------------
+
+When updating from 1.x to 2.x:
+
+The name of the personal units file has changed from $HOME/units.dat
+to $HOME/.units ($HOME/unitdef.units under Windows).
+
+The format for nonlinear unit definitions has changed.  Run 'units -c'
+and add the "units=" keyword in front of any bracketed unit
+specifications.  
+
+-----------------------------------------------------------------------------
+ 
+Ideas the future (may or may not happen):
+
+  * Bundle up the units conversion stuff into a library. 
+  * Inflation adjusted currency?
+  * Allow multiple definitions of the same unit and resolve the
+      correct definition by a conformability check.  (This has
+      exponential growth behavior in the number of units typed in!)
+  * When a nonconformable units error is given list units the user
+      might have meant (e.g. britainpound for pound) by a
+      conformability check and string pattern match of some sort. 
+      "spelling advice"
+  * Allow some way of having units like '$' that don't require a trailing
+      space so you can write '$5'.  This could be handled by having a 
+      command in the units database that specifies units which automatically
+      get a space inserted  after their name.   
+  * Have a metacommand in the units datafile that specifies how plurals should
+      be tried for this file.  This would allow expansion into other 
+      languages.  (Of course, the real work of expanding into other languages
+      is writing a units file that is appropriate for the language in question
+      and includes local units.  It's not just a translation task.)
+      Another thing that could be accomplished here would be translation of
+      English words like "cubic" and "per" into their symbolic meanings.
+      A command in the units file could indicate that "per" should be 
+      substituted into a '/' and "cubic" means the cube the next unit.
+      As it stands, "per" is hard coded into the parser.
+  * Represent uncertainties in values in the database.
+
+Acknowledgements
+================
+    This program owes a lot to Jeff Conrad who made many helpful suggestions,
+    found numerous bugs, and helped me to find the definitions of obscure
+    units.  Chris Madsen also made some valuable contributions. 
+
+    The documentation has greatly benefited from the suggestions made by
+    Robert Chassell who kindly read several drafts.
+
+    The following people have been particularly helpful in fixing portability
+    problems: Kaveh Ghazi, Eric Backus, and Marcus Daniels.
+
+Bug reports and suggestions for improvements should be sent to the author:
+Adrian Mariano (adrianm@gnu.org).  

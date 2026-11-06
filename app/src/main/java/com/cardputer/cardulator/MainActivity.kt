@@ -143,14 +143,18 @@ class MainActivity : AppCompatActivity() {
         CardulatorEngine.nativeInit()
         loadUserDataFromStorage()
 
-        // Extract units.dat from assets to internal storage so the C bridge can read it
-        val unitsDatFile = java.io.File(filesDir, "units.dat")
-        if (!unitsDatFile.exists()) {
-            assets.open("units.dat").use { input ->
-                unitsDatFile.outputStream().use { output -> input.copyTo(output) }
+        // Keep each upstream database version separate so app updates replace old data.
+        val unitsDir = java.io.File(filesDir, "gnu-units-2.27")
+        check(unitsDir.isDirectory || unitsDir.mkdirs()) { "Unable to create units database directory" }
+        for (name in listOf("currency.units", "crypto.units", "metal_prices.units", "cpi.units", "elements.units", "units.dat")) {
+            val destination = java.io.File(unitsDir, name)
+            if (!destination.exists()) {
+                val temporary = java.io.File(unitsDir, "$name.tmp")
+                assets.open(name).use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
+                check(temporary.renameTo(destination)) { "Unable to install units database: $name" }
             }
         }
-        CardulatorEngine.nativeInitUnits(unitsDatFile.absolutePath)
+        CardulatorEngine.nativeInitUnits(java.io.File(unitsDir, "units.dat").absolutePath)
 
         // Bind Views
         mainRoot = findViewById(R.id.main_root)

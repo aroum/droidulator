@@ -1345,7 +1345,8 @@ double evaluate(const std::string& expr_str, std::string& err) {
     
     // 3. Register history variables (e1, e2, e3...)
     if (!history.empty() && preprocessed.find('e') != std::string::npos) {
-        size_t start_h = (history.size() > 30) ? (history.size() - 30) : 0;
+        constexpr size_t max_history_variables = 128;
+        size_t start_h = (history.size() > max_history_variables) ? (history.size() - max_history_variables) : 0;
         for (size_t i = start_h; i < history.size(); ++i) {
             add_dyn_var("e" + std::to_string(i + 1), &history[i]);
         }

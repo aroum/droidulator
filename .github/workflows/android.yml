@@ -8,6 +8,7 @@ on:
     tags:
       - '[0-9][0-9].[0-9][0-9].[0-9][0-9]*'
       - 'v*'
+  pull_request:
   workflow_dispatch:
 
 concurrency:
@@ -31,10 +32,17 @@ jobs:
 
       - name: Run C++ Engine Unit Tests
         run: |
-          gcc -c -w -Dmain=units_main app/src/main/cpp/units_bridge.c app/src/main/cpp/gnu-units/units.c app/src/main/cpp/gnu-units/parse.tab.c app/src/main/cpp/gnu-units/strfunc.c -Iapp/src/main/cpp/gnu-units
-          g++ -std=c++20 -O2 -Iapp/src/main/cpp -Iapp/src/main/cpp/engine -Iapp/src/main/cpp/tinyexpr-plusplus -Iapp/src/main/cpp/gnu-units -include app/src/main/cpp/engine/tinyexpr_compat.h -DUNITS_DAT_PATH=\"app/src/main/assets/units.dat\" app/src/main/cpp/test_jni.cpp app/src/main/cpp/tinyexpr-plusplus/tinyexpr.cpp units_bridge.o units.o parse.tab.o strfunc.o -w -o /tmp/test_jni
-          /tmp/test_jni
-          rm -f units_bridge.o units.o parse.tab.o strfunc.o /tmp/test_jni
+          cmake -S tests/native -B /tmp/droidulator-native -DCMAKE_BUILD_TYPE=Release
+          cmake --build /tmp/droidulator-native --parallel
+          ctest --test-dir /tmp/droidulator-native --output-on-failure
+
+      - name: Fuzz units bridge
+        run: |
+          CC=clang CXX=clang++ cmake -S tests/native -B /tmp/droidulator-fuzz -DBUILD_UNITS_FUZZER=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build /tmp/droidulator-fuzz --target units_fuzz --parallel
+          # The existing incompatible-units leak is tracked separately in the audit.
+          cp -R tests/native/corpus /tmp/droidulator-corpus
+          ASAN_OPTIONS=detect_leaks=0 /tmp/droidulator-fuzz/units_fuzz /tmp/droidulator-corpus -runs=1000 -max_len=128 -seed=1
 
       - name: set up JDK 17
         uses: actions/setup-java@v4
@@ -45,7 +53,7 @@ jobs:
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
         with:
-          gradle-version: 8.5
+          cache-disabled: false
 
       - name: Create debug keystore
         env:
@@ -74,21 +82,30 @@ jobs:
             RELEASE_TITLE="${TAG_NAME}"
             ARTIFACT_NAME="droidulator-${TAG_NAME}"
             VERSION_NAME="${TAG_NAME}"
+            APK_VARIANT="release"
           else
             RELEASE_TITLE="${BUILD_DATE} (Nightly)"
             ARTIFACT_NAME="droidulator-${BUILD_DATE}-nightly"
             VERSION_NAME="${BUILD_DATE}"
+            APK_VARIANT="ci"
           fi
           
           echo "ARTIFACT_NAME=${ARTIFACT_NAME}" >> $GITHUB_ENV
           echo "RELEASE_TITLE=${RELEASE_TITLE}" >> $GITHUB_ENV
           echo "BUILD_DATE=${BUILD_DATE}" >> $GITHUB_ENV
           echo "VERSION_NAME=${VERSION_NAME}" >> $GITHUB_ENV
+          echo "APK_VARIANT=${APK_VARIANT}" >> $GITHUB_ENV
 
-      - name: Build debug APK
-        run: gradle assembleCi --stacktrace
+      - name: Build APK
+        run: |
+          if [[ "$APK_VARIANT" == release ]]; then
+            ./gradlew assembleRelease --stacktrace
+          else
+            ./gradlew assembleCi --stacktrace
+          fi
         env:
           VERSION_NAME: ${{ env.VERSION_NAME }}
+          VERSION_CODE: ${{ github.run_number }}
           RELEASE_KEYSTORE_PATH: "release.jks"
           RELEASE_KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
           RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
@@ -96,7 +113,7 @@ jobs:
 
       - name: Prepare APK artifact names
         run: |
-          cd app/build/outputs/apk/ci
+          cd "app/build/outputs/apk/${APK_VARIANT}"
           if [[ "${{ github.ref }}" == refs/tags/* ]]; then
             TAG_NAME="${{ github.ref_name }}"
             UNIVERSAL_APK=$(ls *universal*.apk 2>/dev/null | head -n 1 || true)
@@ -140,7 +157,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: ${{ env.ARTIFACT_NAME }}
-          path: app/build/outputs/apk/ci/*.apk
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/*.apk
           retention-days: 3
 
       - name: Create GitHub Release (Tag Release)
@@ -148,12 +165,12 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           name: ${{ env.RELEASE_TITLE }}
-          files: app/build/outputs/apk/ci/*.apk
+          files: app/build/outputs/apk/${{ env.APK_VARIANT }}/*.apk
           generate_release_notes: true
           prerelease: false
 
       - name: Clean up previous Nightly release
-        if: "!startsWith(github.ref, 'refs/tags/')"
+        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -161,13 +178,13 @@ jobs:
           sleep 2
 
       - name: Create Nightly GitHub Release
-        if: "!startsWith(github.ref, 'refs/tags/')"
+        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
           target_commitish: ${{ github.sha }}
           name: ${{ env.RELEASE_TITLE }}
           body: "Automated nightly build (${{ env.BUILD_DATE }}) from main branch."
-          files: app/build/outputs/apk/ci/*.apk
+          files: app/build/outputs/apk/${{ env.APK_VARIANT }}/*.apk
           prerelease: true
           make_latest: false

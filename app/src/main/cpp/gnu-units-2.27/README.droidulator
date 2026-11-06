@@ -1,0 +1,10 @@
+GNU Units 2.27
+
+GNU Units was written by Adrian Mariano <adrianm@gnu.org>. Copyright (C)
+Free Software Foundation, Inc. Distributed under GPL-3.0-or-later; see COPYING.
+
+Source: GNU Units 2.27 release distribution. The units database and its
+included data files are provided in app/src/main/assets.
+
+Local change: use a character NUL instead of a null pointer constant when
+terminating the locale string in units.c, for compatibility with Clang.

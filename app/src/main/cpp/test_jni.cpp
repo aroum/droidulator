@@ -6,7 +6,6 @@
 #include <cmath>
 #include <cstdint>
 
-#define UNIT_TEST 1
 
 #include "engine/app_state.h"
 #include "engine/help_engine.h"
@@ -46,6 +45,15 @@ int main() {
     assert(c1.success);
     assert(std::abs(c1.value - 8.04672) < 0.0001);
     assert(c1.unitStr == "km");
+
+    // GNU Units 2.27 loads definitions from adjacent included data files.
+    assert(bridge_init(units_dat.c_str()) == 0);
+    double included_value = 0.0;
+    char included_unit[256] = {}, included_error[256] = {};
+    assert(bridge_convert(1.0, "BTC", "bitcoin", &included_value,
+                          included_unit, sizeof(included_unit), included_error,
+                          sizeof(included_error)) == 0);
+    assert(std::abs(included_value - 1.0) < 1e-9);
 
     // 4. Units adapter test (conversion to SI base units)
     //    Note: GNU Units uses "hr" for hour, "h" means hectare.
@@ -907,6 +915,17 @@ int main() {
     // Test Case 21: getConvUnitMatches dimension filtering
     auto len_units = getConvUnitMatches("mm", "k");
     assert(!len_units.empty() && len_units[0] == "km");
+
+    // Only the latest 128 history values are registered with the expression parser.
+    history.clear();
+    for (int i = 1; i <= 130; ++i) history.push_back(static_cast<double>(i));
+    err.clear();
+    assert(evaluate("e3", err) == 3.0 && err.empty());
+    err.clear();
+    assert(evaluate("e130", err) == 130.0 && err.empty());
+    err.clear();
+    evaluate("e2", err);
+    assert(!err.empty());
 
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
