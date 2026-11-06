@@ -937,6 +937,10 @@ int main() {
     err.clear(); assert(evaluate("e130", err) == 130.0 && err.empty());
     err.clear(); evaluate("e2", err); assert(!err.empty());
     err.clear(); evaluateInput("e3=99", err, isDef); assert(!err.empty());
+    runScript("e3++");
+    assert(!script_console_output.empty() && script_console_output[0].find("read-only") != std::string::npos);
+    runScript("print(\"e3=1\")");
+    assert(!script_console_output.empty() && script_console_output[0] == "e3=1");
     clearHistory();
     assert(appendHistory(42) == 1);
     double ratio = 0;

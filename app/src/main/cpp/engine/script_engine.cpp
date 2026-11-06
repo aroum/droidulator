@@ -19,8 +19,40 @@ bool script_has_returned = false;
 std::vector<double> script_return_vec;
 bool script_return_is_vec = false;
 
+// History values are read-only in every script assignment, including for headers.
+static bool writesHistoryVariable(const std::string& code) {
+    bool in_comment = false;
+    char quote = 0;
+    for (size_t i = 0; i < code.size(); ++i) {
+        const char c = code[i];
+        if (in_comment) { if (c == '\n') in_comment = false; continue; }
+        if (quote) {
+            if (c == '\\' && i + 1 < code.size()) ++i;
+            else if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '\'' || c == '"') { quote = c; continue; }
+        if (c == '#' || (c == '/' && i + 1 < code.size() && code[i + 1] == '/')) { in_comment = true; continue; }
+        if (c != 'e' || (i && (std::isalnum(static_cast<unsigned char>(code[i - 1])) || code[i - 1] == '_'))) continue;
+        size_t end = i + 1;
+        while (end < code.size() && std::isdigit(static_cast<unsigned char>(code[end]))) ++end;
+        if (end == i + 1 || (end < code.size() && (std::isalnum(static_cast<unsigned char>(code[end])) || code[end] == '_'))) continue;
+        size_t op = end;
+        while (op < code.size() && std::isspace(static_cast<unsigned char>(code[op]))) ++op;
+        if (op >= code.size()) continue;
+        if (code[op] == '=' && (op + 1 >= code.size() || code[op + 1] != '=')) return true;
+        if (op + 1 < code.size() && ((code[op] == '+' || code[op] == '-') && code[op + 1] == code[op])) return true;
+        if (op + 1 < code.size() && (code[op] == '+' || code[op] == '-' || code[op] == '*' || code[op] == '/') && code[op + 1] == '=') return true;
+    }
+    return false;
+}
+
 void runScript(const std::string& code) {
     script_console_output.clear();
+    if (writesHistoryVariable(code)) {
+        script_console_output.push_back("History variables are read-only");
+        return;
+    }
     plot_lines.clear();
     plot_hold = false;
     
