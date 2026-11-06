@@ -43,7 +43,7 @@ inline std::vector<UserFunc> getParsedUserFuncs() {
     return res;
 }
 
-inline double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err) {
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err) {
     auto it = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) {
         return f.name == name;
     });

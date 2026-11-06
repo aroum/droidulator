@@ -50,5 +50,5 @@ if(BUILD_JNI_TESTS)
           "${CMAKE_CURRENT_LIST_DIR}/jni/com/cardputer/cardulator/CardulatorEngine.java"
         DEPENDS jni/com/cardputer/cardulator/NativePlotLine.java jni/com/cardputer/cardulator/CardulatorEngine.java)
     add_custom_target(jni_classes ALL DEPENDS "${JNI_CLASSES}/com/cardputer/cardulator/CardulatorEngine.class")
-    add_test(NAME jni_integration COMMAND ${Java_JAVA_EXECUTABLE} -Xcheck:jni -cp "${JNI_CLASSES}" com.cardputer.cardulator.CardulatorEngine $<TARGET_FILE:host_jni>)
+    add_test(NAME jni_integration COMMAND ${Java_JAVA_EXECUTABLE} -Xcheck:jni -cp "${JNI_CLASSES}" com.cardputer.cardulator.CardulatorEngine $<TARGET_FILE:host_jni> "${CMAKE_CURRENT_LIST_DIR}/../../app/src/main/assets/units.dat")
 endif()

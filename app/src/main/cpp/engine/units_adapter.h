@@ -17,6 +17,7 @@
 
 struct ConvResult {
     bool        success  = false;
+    bool        textOnly = false;
     double      value    = 0.0;
     std::string unitStr;
     std::string errorMsg;
@@ -66,7 +67,7 @@ inline ConvResult handleConv(double value,
                 // Notation like 2R2 -> 2.2, 4R7 -> 4.7, 0R1 -> 0.1
                 temp[rPos] = '.';
             }
-            try { ohms = std::stod(temp); return true; } catch(...) { return false; }
+            try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
         if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
@@ -89,7 +90,7 @@ inline ConvResult handleConv(double value,
             } else {
                 temp[rPos] = '.';
             }
-            try { ohms = std::stod(temp); return true; } catch(...) { return false; }
+            try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
         if (s.size() == 4 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2]) && std::isdigit(s[3])) {
             int base = (s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0');
@@ -295,11 +296,11 @@ inline ConvResult handleConv(double value,
     std::string targetCodeFormat = lb.empty() ? (isUnitANumeric ? la : "") : lb;
     if (targetVal > 0 && (targetCodeFormat == "smd3" || targetCodeFormat == "smd4" || targetCodeFormat == "eia96" || targetCodeFormat == "eia-96")) {
         if (targetCodeFormat == "smd3") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD3(targetVal); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD3(targetVal); return res;
         } else if (targetCodeFormat == "smd4") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD4(targetVal); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD4(targetVal); return res;
         } else if (targetCodeFormat == "eia96" || targetCodeFormat == "eia-96") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToEIA96(targetVal); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToEIA96(targetVal); return res;
         }
     }
 
@@ -334,11 +335,11 @@ inline ConvResult handleConv(double value,
         };
 
         if (lb == "smd3" && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD3(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD3(parsedResOhms); return res;
         } else if (lb == "smd4" && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD4(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD4(parsedResOhms); return res;
         } else if ((lb == "eia96" || lb == "eia-96") && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToEIA96(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToEIA96(parsedResOhms); return res;
         } else if (lb == "ohm" || lb == "ohms" || lb.empty()) {
             if (parseInputCode(unit_a, parsedResOhms)) {
                 res.success = true; res.value = parsedResOhms; res.unitStr = lb.empty() ? "ohm" : unit_b; return res;

@@ -227,9 +227,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         std::string unit_b = (conv_args.size() == 3) ? conv_args[2] : "";
 
         if (!eval_err.empty() || std::isnan(val)) {
+            const std::string raw = conv_args[0];
+            const bool quoted = raw.size() >= 2 && (raw.front() == '\'' || raw.front() == '"') && raw.back() == raw.front();
+            const bool code = !raw.empty() && std::isdigit(static_cast<unsigned char>(raw[0])) &&
+                std::all_of(raw.begin(), raw.end(), [](unsigned char c) { return std::isdigit(c) || c == 'R' || c == 'r' || (c >= 'A' && c <= 'Z'); });
+            if (conv_args.size() != 2 || (!quoted && !code))
+                return toJavaString(env, "ERROR: " + (eval_err.empty() ? std::string("Invalid conversion value") : eval_err));
             val = 0.0;
-            unit_a = conv_args[0];
-            unit_b = (conv_args.size() >= 2) ? conv_args[1] : "";
+            unit_a = raw;
+            unit_b = conv_args[1];
         }
 
         ConvResult c_res = handleConv(val, unit_a, unit_b);
@@ -273,7 +279,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         }
 
         std::string resultStr;
-        if (c_res.value == 0.0 && !c_res.unitStr.empty() && (std::isdigit(c_res.unitStr[0]) || c_res.unitStr.find('R') != std::string::npos)) {
+        if (c_res.textOnly) {
             resultStr = c_res.unitStr;
         } else {
             const auto history_number = appendHistory(c_res.value);
