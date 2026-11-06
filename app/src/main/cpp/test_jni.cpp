@@ -740,6 +740,8 @@ int main() {
         assert(result.success && result.unitStr == std::get<2>(tc));
     }
     assert(!handleConv(1e9, "eia96", "", units_dat).success);
+    assert(!handleConv(9.99e10, "smd3", "", units_dat).success);
+    assert(!handleConv(9.999e11, "smd4", "", units_dat).success);
 
     ConvResult c_acc5 = handleConv(1, "gravity", "ft/s^2", units_dat);
     assert(c_acc5.success && std::abs(c_acc5.value - 32.174) < 0.05);

@@ -157,7 +157,7 @@ inline ConvResult handleConv(double value,
         while (temp >= 100.0 && exp < 9) { temp /= 10.0; exp++; }
         int val = static_cast<int>(std::round(temp));
         if (val >= 100) { val /= 10; exp++; }
-        if (val < 10) return "";
+        if (val < 10 || exp > 9) return "";
         char b[16]; snprintf(b, sizeof(b), "%02d%d", val, exp);
         return std::string(b);
     };
@@ -183,7 +183,7 @@ inline ConvResult handleConv(double value,
         while (temp < 100.0 && exp > 0) { temp *= 10.0; exp--; }
         int val = static_cast<int>(std::round(temp));
         if (val >= 1000) { val /= 10; exp++; }
-        if (val < 100) return "";
+        if (val < 100 || exp > 9) return "";
         char b[16]; snprintf(b, sizeof(b), "%03d%d", val, exp);
         return std::string(b);
     };
