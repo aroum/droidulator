@@ -10,8 +10,19 @@ inline std::vector<std::string> splitPlotArgs(const std::string& args_str) {
     int paren_depth = 0;
     int bracket_depth = 0;
     bool in_quotes = false;
+    bool escaped = false;
     char quote_char = 0;
     for (char c : args_str) {
+        if (in_quotes && escaped) {
+            cur += c;
+            escaped = false;
+            continue;
+        }
+        if (in_quotes && c == '\\') {
+            cur += c;
+            escaped = true;
+            continue;
+        }
         if (c == '"' || c == '\'') {
             if (!in_quotes) {
                 in_quotes = true;

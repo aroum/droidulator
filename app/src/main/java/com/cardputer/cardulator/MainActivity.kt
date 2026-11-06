@@ -652,6 +652,7 @@ class MainActivity : AppCompatActivity() {
             val code = etInput.text.toString().trim()
             if (code.isNotEmpty()) {
                 val log = CardulatorEngine.nativeRunScript(code)
+                saveUserDataToStorage()
                 appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
                 showScriptOutputDialog("Script Output", log)
             } else {
@@ -1036,6 +1037,7 @@ class MainActivity : AppCompatActivity() {
             val activeTab = tabs[currentTabPosition]
             if (activeTab == "Scripts") {
                 val log = CardulatorEngine.nativeRunScript(input)
+                saveUserDataToStorage()
                 appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
                 etInput.setText("")
             } else {
@@ -1325,6 +1327,7 @@ class MainActivity : AppCompatActivity() {
                             dimColor = dimColor,
                             onRun = {
                                 val log = CardulatorEngine.nativeRunScript(scriptCode)
+                                saveUserDataToStorage()
                                 appendRawOutput("> SCRIPT OUTPUT ($scriptName):\n$log\n")
                                 showScriptOutputDialog("Script Output: $scriptName", log)
                             },
@@ -1963,6 +1966,7 @@ class MainActivity : AppCompatActivity() {
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
                     val log = CardulatorEngine.nativeRunScript(newCode)
+                    saveUserDataToStorage()
                     appendRawOutput("> SCRIPT OUTPUT ($newName):\n$log\n")
                     showScriptOutputDialog("Script Output: $newName", log)
                 } else {

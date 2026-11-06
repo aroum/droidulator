@@ -930,6 +930,11 @@ int main() {
     evaluate("e2", err);
     assert(!err.empty());
 
+    const auto split_args = splitPlotArgs("max(1,2), [3,4], \"x,y\"");
+    assert(split_args.size() == 3 && split_args[0] == "max(1,2)" &&
+           split_args[1] == "[3,4]" && split_args[2] == "\"x,y\"");
+    const auto escaped_args = splitPlotArgs("\"a\\\",b\",c");
+    assert(escaped_args.size() == 2 && escaped_args[1] == "c");
     clearHistory();
     for (int i = 1; i <= 130; ++i) assert(appendHistory(i) == static_cast<size_t>(i));
     assert(history.size() == 128 && history_first_number == 3);

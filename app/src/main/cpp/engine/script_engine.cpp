@@ -106,24 +106,7 @@ void runScript(const std::string& code) {
             if (ret_expr.empty()) ret_expr = "0";
             
             // Check if return has multiple expressions separated by commas (outside brackets/quotes)
-            std::vector<std::string> ret_parts;
-            std::string current_part = "";
-            int p_depth = 0, b_depth = 0;
-            for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                char ch = ret_expr[c_i];
-                if (ch == '(') p_depth++;
-                else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                else if (ch == '[') b_depth++;
-                else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                
-                if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                    ret_parts.push_back(current_part);
-                    current_part = "";
-                } else {
-                    current_part += ch;
-                }
-            }
-            if (!current_part.empty()) ret_parts.push_back(current_part);
+            std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
             
             if (ret_parts.size() > 1) {
                 script_return_is_vec = true;
@@ -749,24 +732,7 @@ void runScript(const std::string& code) {
                                     ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
                                     ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
                                     
-                                    std::vector<std::string> ret_parts;
-                                    std::string current_part = "";
-                                    int p_depth = 0, b_depth = 0;
-                                    for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                                        char ch = ret_expr[c_i];
-                                        if (ch == '(') p_depth++;
-                                        else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                                        else if (ch == '[') b_depth++;
-                                        else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                                        
-                                        if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                                            ret_parts.push_back(current_part);
-                                            current_part = "";
-                                        } else {
-                                            current_part += ch;
-                                        }
-                                    }
-                                    if (!current_part.empty()) ret_parts.push_back(current_part);
+                                    std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
                                     
                                     for (const auto& part : ret_parts) {
                                         std::string eval_err;
@@ -1077,24 +1043,7 @@ void runScript(const std::string& code) {
                                     ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
                                     ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
                                     
-                                    std::vector<std::string> ret_parts;
-                                    std::string current_part = "";
-                                    int p_depth = 0, b_depth = 0;
-                                    for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                                        char ch = ret_expr[c_i];
-                                        if (ch == '(') p_depth++;
-                                        else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                                        else if (ch == '[') b_depth++;
-                                        else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                                        
-                                        if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                                            ret_parts.push_back(current_part);
-                                            current_part = "";
-                                        } else {
-                                            current_part += ch;
-                                        }
-                                    }
-                                    if (!current_part.empty()) ret_parts.push_back(current_part);
+                                    std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
                                     
                                     if (ret_parts.size() > 1) {
                                         script_return_is_vec = true;
