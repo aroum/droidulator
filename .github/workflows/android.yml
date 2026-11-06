@@ -48,7 +48,7 @@ jobs:
           cmake --build /tmp/droidulator-fuzz --target units_fuzz --parallel
           # The existing incompatible-units leak is tracked separately in the audit.
           cp -R tests/native/corpus /tmp/droidulator-corpus
-          ASAN_OPTIONS=detect_leaks=0 /tmp/droidulator-fuzz/units_fuzz /tmp/droidulator-corpus -runs=1000 -max_len=128 -seed=1
+          ASAN_OPTIONS=detect_leaks=0 UBSAN_OPTIONS=halt_on_error=1 /tmp/droidulator-fuzz/units_fuzz /tmp/droidulator-corpus -runs=1000 -max_len=128 -seed=1
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3

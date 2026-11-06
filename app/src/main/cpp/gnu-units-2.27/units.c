@@ -46,6 +46,7 @@ under the terms of the GNU General Public License."
 
 #include <ctype.h>
 #include <float.h>
+#include <limits.h>
 
 #include <stdio.h>
 #include <signal.h>
@@ -2882,7 +2883,10 @@ float2rat(double y, int *p, int *q)
   x=y;
   termcount=0;
   while(1){
-    coef[termcount] = (int) floor(x);
+    double coefficient = floor(x);
+    if (!isfinite(coefficient) || coefficient < INT_MIN || coefficient > INT_MAX)
+      return 0;
+    coef[termcount] = (int) coefficient;
     fracpart = x-coef[termcount];
     if (fracpart < .001 || termcount==19) break;
     x = 1/fracpart;
@@ -2894,11 +2898,15 @@ float2rat(double y, int *p, int *q)
   *p=0;
   *q=1;
   for(i=termcount;i>=1;i--) {
+    long long nextq = (long long)coef[i] * *q + *p;
+    if (nextq < INT_MIN || nextq > INT_MAX) return 0;
     saveq=*q;
-    *q = coef[i] * *q + *p;
+    *q = (int)nextq;
     *p = saveq;
   }
-  *p+=*q*coef[0];
+  long long numerator = (long long)*p + (long long)*q * coef[0];
+  if (numerator < INT_MIN || numerator > INT_MAX || *q == 0) return 0;
+  *p = (int)numerator;
   return *q<MAXSUBUNITS && fabs((double)*p / (double)*q - y) < DBL_EPSILON;
 }
 

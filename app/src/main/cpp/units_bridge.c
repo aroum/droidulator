@@ -9,6 +9,7 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <pthread.h>
+#include <setjmp.h>
 
 /* Suppress old-style K&R re-declarations that live inside units.h. */
 #pragma clang diagnostic push
@@ -172,12 +173,31 @@ static int bridge_convert_unlocked(double      value,
     return 0;
 }
 
-/* GNU Units uses shared parser state. Serialize every access through the bridge. */
+/* GNU Units uses shared parser state. Serialize every access through the bridge.
+ * Its CLI-style exit() is redirected here. The jump stays within C frames;
+ * after a fatal error the engine is disabled because its state may be partial. */
 static pthread_mutex_t g_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
+static jmp_buf g_bridge_recovery;
+static int g_bridge_active = 0;
+static int g_bridge_failed = 0;
+
+_Noreturn void gnu_units_abort(int status) {
+    (void)status;
+    if (g_bridge_active) longjmp(g_bridge_recovery, 1);
+    abort(); /* A call outside the bridge violates the integration contract. */
+}
 
 int bridge_init(const char *path) {
     pthread_mutex_lock(&g_bridge_mutex);
+    if (g_bridge_failed) { pthread_mutex_unlock(&g_bridge_mutex); return E_MEMORY; }
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        pthread_mutex_unlock(&g_bridge_mutex);
+        return E_MEMORY;
+    }
     int result = bridge_init_unlocked(path);
+    g_bridge_active = 0;
     pthread_mutex_unlock(&g_bridge_mutex);
     return result;
 }
@@ -186,8 +206,33 @@ int bridge_convert(double value, const char *unit_a, const char *unit_b,
                    double *out_value, char *out_si_unit, int si_unit_len,
                    char *out_err, int err_len) {
     pthread_mutex_lock(&g_bridge_mutex);
+    if (g_bridge_failed) {
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Units engine unavailable after a fatal error");
+        pthread_mutex_unlock(&g_bridge_mutex); return 4;
+    }
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Units engine encountered a fatal error");
+        pthread_mutex_unlock(&g_bridge_mutex); return 4;
+    }
     int result = bridge_convert_unlocked(value, unit_a, unit_b, out_value,
                                          out_si_unit, si_unit_len, out_err, err_len);
+    g_bridge_active = 0;
     pthread_mutex_unlock(&g_bridge_mutex);
     return result;
 }
+
+#ifdef DROIDULATOR_TESTING
+/* Used only by host tests to exercise the fatal-error escape path. */
+int bridge_test_fatal(void) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        pthread_mutex_unlock(&g_bridge_mutex);
+        return 1;
+    }
+    gnu_units_abort(1);
+}
+#endif

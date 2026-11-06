@@ -27,6 +27,9 @@ add_library(
     units_bridge.c
 )
 
+# GNU Units was written as a CLI. Its fatal exits are intercepted by the C bridge.
+set_source_files_properties(gnu-units-2.27/units.c PROPERTIES COMPILE_DEFINITIONS "exit=gnu_units_abort")
+
 target_compile_options(cardulator_jni PRIVATE
     $<$<COMPILE_LANGUAGE:CXX>:-includetinyexpr_compat.h>
     -fdata-sections -ffunction-sections

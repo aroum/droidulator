@@ -24,9 +24,9 @@
 
 
 static std::recursive_mutex g_engine_mutex;
-static void throwJavaException(JNIEnv *env, const char *type, const char *message);
 
 extern "C" {
+static void throwJavaException(JNIEnv *env, const char *type, const char *message);
 
 JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject thiz) try {

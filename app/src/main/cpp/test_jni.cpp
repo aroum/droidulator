@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+extern "C" int bridge_test_fatal();
 
 
 #include "engine/app_state.h"
@@ -942,6 +943,9 @@ int main() {
     assert(std::abs(ratio - 0.01) < 1e-12);
     for (int i = 0; i < 100; ++i)
         assert(bridge_convert(1, "meter", "second", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
+
+    assert(bridge_test_fatal() == 1);
+    assert(bridge_convert(1, "cm", "m", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
 
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;

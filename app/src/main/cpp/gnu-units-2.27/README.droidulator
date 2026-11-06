@@ -8,3 +8,5 @@ included data files are provided in app/src/main/assets.
 
 Local change: use a character NUL instead of a null pointer constant when
 terminating the locale string in units.c, for compatibility with Clang.
+The build redirects GNU Units CLI exit() calls to the bridge fatal-error handler.
+Guard continued-fraction integer conversions and arithmetic against overflow.

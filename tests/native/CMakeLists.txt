@@ -7,8 +7,9 @@ add_library(units STATIC
     "${CPP_DIR}/units_bridge.c" "${CPP_DIR}/gnu-units-2.27/units.c"
     "${CPP_DIR}/gnu-units-2.27/parse.tab.c" "${CPP_DIR}/gnu-units-2.27/strfunc.c")
 set_target_properties(units PROPERTIES POSITION_INDEPENDENT_CODE ON)
+target_compile_definitions(units PRIVATE DROIDULATOR_TESTING=1)
 target_include_directories(units PRIVATE "${CPP_DIR}/gnu-units-2.27")
-set_source_files_properties("${CPP_DIR}/gnu-units-2.27/units.c" PROPERTIES COMPILE_DEFINITIONS "main=units_main")
+set_source_files_properties("${CPP_DIR}/gnu-units-2.27/units.c" PROPERTIES COMPILE_DEFINITIONS "main=units_main;exit=gnu_units_abort")
 add_executable(native_tests "${CPP_DIR}/test_jni.cpp" "${CPP_DIR}/tinyexpr-plusplus/tinyexpr.cpp")
 target_include_directories(native_tests PRIVATE "${CPP_DIR}" "${CPP_DIR}/engine" "${CPP_DIR}/tinyexpr-plusplus" "${CPP_DIR}/gnu-units-2.27")
 target_compile_options(native_tests PRIVATE "-include${CPP_DIR}/engine/tinyexpr_compat.h" -UNDEBUG)
