@@ -152,6 +152,7 @@ class MainActivity : AppCompatActivity() {
     private var convTabCachedMatches: List<String>? = null
 
     companion object {
+        private val unitsInstallLock = Any()
         private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
 
         // Pre-compiled regex patterns for zero-allocation syntax highlighting
@@ -166,6 +167,28 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
+        // File extraction and comparison can be slow on cold start.
+        Thread {
+            try {
+                synchronized(unitsInstallLock) {
+                    installUnitsData().also { CardulatorEngine.nativeInitUnits(it) }
+                }
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) finishStartup()
+                }
+            } catch (error: Exception) {
+                runOnUiThread {
+                    if (!isFinishing && !isDestroyed) {
+                        android.util.Log.e("Droidulator", "Unable to install units data", error)
+                        Toast.makeText(this, "Unable to install units data", Toast.LENGTH_LONG).show()
+                        finish()
+                    }
+                }
+            }
+        }.start()
+    }
+
+    private fun installUnitsData(): String {
         // Keep each upstream database version separate so app updates replace old data.
         val unitsDir = java.io.File(filesDir, "gnu-units-2.27")
         check(unitsDir.isDirectory || unitsDir.mkdirs()) { "Unable to create units database directory" }
@@ -185,7 +208,10 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         }
-        CardulatorEngine.nativeInitUnits(java.io.File(unitsDir, "units.dat").absolutePath)
+        return java.io.File(unitsDir, "units.dat").absolutePath
+    }
+
+    private fun finishStartup() {
         if (!session.initialized) {
             val isNewEngine = CardulatorEngine.initializeOnce()
             loadUserDataFromStorage(isNewEngine)
