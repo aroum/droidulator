@@ -1096,40 +1096,32 @@ class MainActivity : AppCompatActivity() {
 
         isSubmitting = true
         try {
-            val activeTab = tabs[currentTabPosition]
-            if (activeTab == "Scripts") {
-                val log = CardulatorEngine.nativeRunScript(input)
-                saveUserDataToStorage()
-                appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
-                etInput.setText("")
+            etInput.setText("")
+
+            val res = CardulatorEngine.nativeEvaluate(input)
+            val isError = res.startsWith("ERROR: ")
+            if (isError) {
+                val errDetails = res.substring(7)
+                showErrorOverlay(errDetails)
             } else {
-                etInput.setText("")
+                dismissErrorOverlay()
+            }
+            appendOutputEntry(input, res, isError)
 
-                val res = CardulatorEngine.nativeEvaluate(input)
-                val isError = res.startsWith("ERROR: ")
-                if (isError) {
-                    val errDetails = res.substring(7)
-                    showErrorOverlay(errDetails)
-                } else {
-                    dismissErrorOverlay()
-                }
-                appendOutputEntry(input, res, isError)
+            // Always add to history (even if command had an error, so Up Arrow can recall it)
+            if (replHistory.isEmpty() || replHistory.last() != input) {
+                replHistory.add(input)
+                if (replHistory.size > 500) replHistory.removeAt(0)
+            }
+            replHistoryIndex = -1
 
-                // Always add to history (even if command had an error, so Up Arrow can recall it)
-                if (replHistory.isEmpty() || replHistory.last() != input) {
-                    replHistory.add(input)
-                    if (replHistory.size > 500) replHistory.removeAt(0)
-                }
-                replHistoryIndex = -1
-
-                if (!res.startsWith("ERROR: ")) {
-                    saveUserDataToStorage()
-                    // Switch to Plot tab if a plot command was issued successfully
-                    if (input.startsWith("plot(") || input.startsWith("plot.")) {
-                        val plotIdx = tabs.indexOf("Plot")
-                        if (plotIdx != -1) {
-                            spinnerTabs.setSelection(plotIdx)
-                        }
+            if (!res.startsWith("ERROR: ")) {
+                saveUserDataToStorage()
+                // Switch to Plot tab if a plot command was issued successfully
+                if (input.startsWith("plot(") || input.startsWith("plot.")) {
+                    val plotIdx = tabs.indexOf("Plot")
+                    if (plotIdx != -1) {
+                        spinnerTabs.setSelection(plotIdx)
                     }
                 }
             }
