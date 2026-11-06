@@ -19,6 +19,7 @@
         <!-- Top Dropdown Spinner Mode Switcher -->
         <Spinner
             android:id="@+id/spinner_tabs"
+            android:contentDescription="@string/access_spinner_tabs"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:background="@null"
@@ -29,6 +30,7 @@
         <!-- Add Item Button (+) -->
         <Button
             android:id="@+id/btn_add_item"
+            android:contentDescription="@string/access_btn_add_item"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:text="+"
@@ -44,6 +46,7 @@
         <!-- Delete All Items Button (Red ✕) -->
         <Button
             android:id="@+id/btn_delete_all"
+            android:contentDescription="@string/access_btn_delete_all"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:text="✕"
@@ -59,6 +62,7 @@
         <!-- Toggle e-history variables (#) -->
         <Button
             android:id="@+id/btn_toggle_evars"
+            android:contentDescription="@string/access_btn_toggle_evars"
             android:layout_width="36dp"
             android:layout_height="36dp"
             android:text="#"
@@ -80,6 +84,7 @@
         <!-- Format Mode Spinner (NORM, FLT, FIX, SCI, ENG) -->
         <Spinner
             android:id="@+id/spinner_fmt_mode"
+            android:contentDescription="@string/access_spinner_fmt_mode"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:background="@null"
@@ -91,6 +96,7 @@
         <!-- Precision Spinner (0dp .. 12dp) -->
         <Spinner
             android:id="@+id/spinner_fmt_prec"
+            android:contentDescription="@string/access_spinner_fmt_prec"
             android:layout_width="wrap_content"
             android:layout_height="36dp"
             android:background="@null"
@@ -389,6 +395,7 @@
         <!-- Navigation Arrow Buttons -->
         <Button
             android:id="@+id/btn_nav_left"
+            android:contentDescription="@string/access_btn_nav_left"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="◀"
@@ -399,6 +406,7 @@
 
         <Button
             android:id="@+id/btn_nav_right"
+            android:contentDescription="@string/access_btn_nav_right"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="▶"
@@ -410,6 +418,7 @@
 
         <Button
             android:id="@+id/btn_nav_up"
+            android:contentDescription="@string/access_btn_nav_up"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="▲"
@@ -421,6 +430,7 @@
 
         <Button
             android:id="@+id/btn_nav_down"
+            android:contentDescription="@string/access_btn_nav_down"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="▼"
@@ -452,6 +462,7 @@
         <!-- Clear Input / History Button -->
         <Button
             android:id="@+id/btn_clear"
+            android:contentDescription="@string/access_btn_clear"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="@string/btn_clear"

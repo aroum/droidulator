@@ -11,4 +11,15 @@
     <string name="hint_input">Enter expression or command...</string>
     <string name="btn_tab">Tab</string>
     <string name="btn_clear">✕</string>
+    <string name="access_spinner_tabs">Select section</string>
+    <string name="access_btn_add_item">Add item</string>
+    <string name="access_btn_delete_all">Delete all items</string>
+    <string name="access_btn_toggle_evars">Toggle history variables</string>
+    <string name="access_spinner_fmt_mode">Number format</string>
+    <string name="access_spinner_fmt_prec">Number precision</string>
+    <string name="access_btn_nav_left">Move cursor left</string>
+    <string name="access_btn_nav_right">Move cursor right</string>
+    <string name="access_btn_nav_up">Previous command</string>
+    <string name="access_btn_nav_down">Next command</string>
+    <string name="access_btn_clear">Clear input; long press to clear session</string>
 </resources>
