@@ -725,6 +725,11 @@ int main() {
     assert(c_acc3.success && std::abs(c_acc3.value - 1.0) < 1e-3);
     auto grams = handleConv(1, "g", "kg", units_dat);
     assert(grams.success && std::abs(grams.value - 0.001) < 1e-9);
+    auto fps2 = handleConv(1, "fps2", "m/s^2", units_dat);
+    assert(fps2.success && std::abs(fps2.value - 0.3048) < 1e-9);
+    assert(handleConv(1, "mps", "km/hr", units_dat).success);
+    assert(handleConv(1, "psf", "Pa", units_dat).success);
+    assert(handleConv(1, "gpa", "Pa", units_dat).success);
 
     ConvResult c_acc4 = handleConv(100, "Gal", "m/s^2", units_dat);
     assert(c_acc4.success && std::abs(c_acc4.value - 1.0) < 1e-3);

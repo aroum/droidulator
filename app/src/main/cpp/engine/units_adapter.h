@@ -592,6 +592,10 @@ inline ConvResult handleConv(double value,
         if (low == "inhg") return "inHg";
         if (u == "pa")   return "Pa";
         if (u == "kpa")  return "kPa";
+        if (u == "gpa")  return "GPa";
+        if (u == "psf")  return "lbf / ft^2";
+        if (u == "mps")  return "m / s";
+        if (u == "fps2") return "ft / s^2";
         if (low == "mbar") return "mbar";
         if (low == "hz")   return "Hz";
         if (low == "khz")  return "kHz";
