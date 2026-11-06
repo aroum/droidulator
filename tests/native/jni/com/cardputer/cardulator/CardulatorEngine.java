@@ -2,6 +2,7 @@ package com.cardputer.cardulator;
 public class CardulatorEngine {
 
   native void nativeInit(); native void nativeInitUnits(String path); native String nativeEvaluate(String s);
+  native double nativeGetLastNumericVal();
   native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
   native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
@@ -22,6 +23,13 @@ public class CardulatorEngine {
     if (zero.startsWith("ERROR") || !zero.contains("0")) throw new AssertionError(zero);
     String bad=e.nativeEvaluate("conv(unknown_variable, \"m\", \"cm\")");
     if (!bad.startsWith("ERROR")) throw new AssertionError(bad);
+    String numeric=e.nativeEvaluate("conv(104, \"pf\")");
+    double numericValue=e.nativeGetLastNumericVal();
+    String marking=e.nativeEvaluate("conv(\"104\", \"pf\")");
+    double markingValue=e.nativeGetLastNumericVal();
+    if (numeric.startsWith("ERROR") || marking.startsWith("ERROR") || Math.abs(numericValue - 104e-12) > 1e-18 || Math.abs(markingValue - 100000) > 1e-6) throw new AssertionError(numeric + " / " + marking);
+    String mega=e.nativeEvaluate("conv(1, \"Mm\", \"m\")");
+    if (mega.startsWith("ERROR") || Math.abs(e.nativeGetLastNumericVal() - 1e6) > 1e-6) throw new AssertionError(mega);
     String p=e.nativeEvaluate("plot([0,1], [1234567.89,2])"); if (p.startsWith("ERROR")) throw new AssertionError(p);
     NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 5) throw new AssertionError("plot");
     System.out.println("JNI tests passed");
