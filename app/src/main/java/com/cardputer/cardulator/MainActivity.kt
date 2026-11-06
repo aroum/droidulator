@@ -582,17 +582,7 @@ class MainActivity : AppCompatActivity() {
                         convTabMatchIdx++
                         val match = cached[convTabMatchIdx % cached.size]
 
-                        val prefix = fullText.substring(0, splitPos).trimEnd()
-                        var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
-                        if (endArgPos == -1) endArgPos = fullText.length
-                        val suffix = fullText.substring(endArgPos)
-
-                        val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
-                        val newArg = "\"$match\""
-                        val newText = "$formattedPrefix$newArg$suffix"
-
-                        etInput.setText(newText)
-                        etInput.setSelection(formattedPrefix.length + newArg.length)
+                        insertConvCompletion(fullText, caret, splitPos, match)
                         return@setOnClickListener
                     }
                 }
@@ -626,19 +616,7 @@ class MainActivity : AppCompatActivity() {
                     convTabCachedMatches = matches
                     val match = matches[0]
 
-                    val prefix = fullText.substring(0, splitPos).trimEnd()
-                    var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
-                    if (endArgPos == -1) {
-                        endArgPos = fullText.length
-                    }
-                    val suffix = fullText.substring(endArgPos)
-
-                    val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
-                    val newArg = "\"$match\""
-                    val newText = "$formattedPrefix$newArg$suffix"
-
-                    etInput.setText(newText)
-                    etInput.setSelection(formattedPrefix.length + newArg.length)
+                    insertConvCompletion(fullText, caret, splitPos, match)
                     return@setOnClickListener
                 } else {
                     convTabOrigPrefix = null
@@ -793,6 +771,15 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             refreshTabContent("Variables")
         }
+    }
+
+    private fun insertConvCompletion(text: String, caret: Int, splitPos: Int, match: String) {
+        val prefix = text.substring(0, splitPos).trimEnd()
+        val end = text.indexOfAny(charArrayOf(',', ')'), caret).let { if (it < 0) text.length else it }
+        val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
+        val newArg = "\"$match\""
+        etInput.setText(formattedPrefix + newArg + text.substring(end))
+        etInput.setSelection(formattedPrefix.length + newArg.length)
     }
 
     private fun setupNavigationButtons() {
@@ -1976,10 +1963,13 @@ class MainActivity : AppCompatActivity() {
             setTextColor(fgColor)
             setHintTextColor(fgDim)
             addTextChangedListener(object : TextWatcher {
+                private var pending: Runnable? = null
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     if (!isHighlighting && s != null) {
-                        applySyntaxHighlighting(editableText)
+                        pending?.let { removeCallbacks(it) }
+                        pending = Runnable { if (dialog.isShowing) applySyntaxHighlighting(editableText) }
+                        postDelayed(pending!!, 150)
                     }
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -2362,9 +2352,33 @@ class MainActivity : AppCompatActivity() {
         val keywordColor = ThemePalette.red
         val opColor = ThemePalette.orange
         val errColor = ThemePalette.red
+        val masked = text.toCharArray()
+        var quote: Char? = null
+        var escaped = false
+        var stringStart = -1
+        for (i in text.indices) {
+            val c = text[i]
+            if (quote == null && (c == '"' || c == '\'')) {
+                quote = c
+                stringStart = i
+            } else if (quote != null) {
+                if (escaped) escaped = false
+                else if (c == '\\') escaped = true
+                else if (c == quote) {
+                    ssb.setSpan(ForegroundColorSpan(ThemePalette.green), startOffset + stringStart, startOffset + i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    quote = null
+                }
+            }
+            if (quote != null || stringStart >= 0) {
+                masked[i] = ' '
+                if (quote == null) stringStart = -1
+            }
+        }
+        if (quote != null) ssb.setSpan(ForegroundColorSpan(ThemePalette.green), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        val code = String(masked)
 
         // 1. Highlight numbers
-        for (match in NUMBER_REGEX.findAll(text)) {
+        for (match in NUMBER_REGEX.findAll(code)) {
             ssb.setSpan(
                 ForegroundColorSpan(numColor),
                 startOffset + match.range.first,
@@ -2374,7 +2388,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 2. Highlight control flow keywords
-        for (match in KEYWORD_REGEX.findAll(text)) {
+        for (match in KEYWORD_REGEX.findAll(code)) {
             ssb.setSpan(
                 ForegroundColorSpan(keywordColor),
                 startOffset + match.range.first,
@@ -2384,7 +2398,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 3. Highlight functions
-        for (match in FUNC_REGEX.findAll(text)) {
+        for (match in FUNC_REGEX.findAll(code)) {
             ssb.setSpan(
                 ForegroundColorSpan(funcColor),
                 startOffset + match.range.first,
@@ -2394,7 +2408,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 4. Highlight built-in constants & history variables
-        for (match in CONST_REGEX.findAll(text)) {
+        for (match in CONST_REGEX.findAll(code)) {
             ssb.setSpan(
                 ForegroundColorSpan(constColor),
                 startOffset + match.range.first,
@@ -2404,7 +2418,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // 5. Highlight operators
-        for (match in OP_REGEX.findAll(text)) {
+        for (match in OP_REGEX.findAll(code)) {
             ssb.setSpan(
                 ForegroundColorSpan(opColor),
                 startOffset + match.range.first,
@@ -2422,7 +2436,7 @@ class MainActivity : AppCompatActivity() {
         val posStack = IntArray(maxStack)
 
         for (i in text.indices) {
-            val c = text[i]
+            val c = code[i]
             val absPos = startOffset + i
             if (c == '(' || c == '[' || c == '{') {
                 val color = colors[stackSize % numColors]
