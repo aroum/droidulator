@@ -142,6 +142,7 @@ class MainActivity : AppCompatActivity() {
 
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
+    private val highlightingEditables = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Editable, Boolean>())
     private var isSubmitting = false
     private var autocompleteEditor: EditText? = null
 
@@ -516,7 +517,7 @@ class MainActivity : AppCompatActivity() {
                 if (!isSubmitting) {
                     dismissErrorOverlay()
                 }
-                if (isHighlighting || s == null) return
+                if (isHighlighting || s == null || (s is Editable && highlightingEditables.contains(s))) return
 
                 val currentText = s.toString()
                 // A pasted multiline expression must remain intact. Enter actions
@@ -557,7 +558,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             override fun afterTextChanged(s: Editable?) {
-                if (isHighlighting || s == null) return
+                if (isHighlighting || s == null || (s is Editable && highlightingEditables.contains(s))) return
                 applySyntaxHighlighting(s)
             }
         })
@@ -1909,7 +1910,7 @@ class MainActivity : AppCompatActivity() {
             addTextChangedListener(object : TextWatcher {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!isHighlighting && s != null) {
+                    if (!isHighlighting && s != null && !(s is Editable && highlightingEditables.contains(s))) {
                         applySyntaxHighlighting(editableText)
                     }
                 }
@@ -1966,7 +1967,7 @@ class MainActivity : AppCompatActivity() {
                 private var pending: Runnable? = null
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!isHighlighting && s != null) {
+                    if (!isHighlighting && s != null && !(s is Editable && highlightingEditables.contains(s))) {
                         pending?.let { removeCallbacks(it) }
                         pending = Runnable { if (dialog.isShowing) applySyntaxHighlighting(editableText) }
                         postDelayed(pending!!, 150)
@@ -2473,7 +2474,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun applySyntaxHighlighting(editable: Editable) {
-        isHighlighting = true
+        if (!highlightingEditables.add(editable)) return
         try {
             val existingSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
             for (span in existingSpans) {
@@ -2481,7 +2482,7 @@ class MainActivity : AppCompatActivity() {
             }
             applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
         } finally {
-            isHighlighting = false
+            highlightingEditables.remove(editable)
         }
     }
 
