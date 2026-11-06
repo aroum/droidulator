@@ -1,0 +1,22 @@
+package com.cardputer.cardulator;
+public class CardulatorEngine {
+
+  native void nativeInit(); native String nativeEvaluate(String s);
+  native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
+  native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
+  native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
+  public static void main(String[] args) {
+    System.load(args[0]);
+    CardulatorEngine e = new CardulatorEngine(); e.nativeInit();
+    String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);
+    for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
+    String all=e.nativeGetVariables(); if (!all.contains("e3 = 3") || !all.contains("e130 = 130") || all.contains("e2 = 2\n")) throw new AssertionError(all);
+    if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
+    e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false); if (!e.nativeGetVariables().contains("x = inf")) throw new AssertionError("infinity");
+    e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN}); if (!e.nativeGetVariables().contains("arr = [1, nan]")) throw new AssertionError("array");
+    e.nativeRestoreScriptFunction(new String[]{"abc","1","x","return x*2"}); if(e.nativeGetScriptFunctions().length != 1) throw new AssertionError("function");
+    String p=e.nativeEvaluate("plot([0,1], [1234567.89,2])"); if (p.startsWith("ERROR")) throw new AssertionError(p);
+    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 5) throw new AssertionError("plot");
+    System.out.println("JNI tests passed");
+  }
+}

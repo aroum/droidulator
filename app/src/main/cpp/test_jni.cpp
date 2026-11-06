@@ -927,6 +927,22 @@ int main() {
     evaluate("e2", err);
     assert(!err.empty());
 
+    clearHistory();
+    for (int i = 1; i <= 130; ++i) assert(appendHistory(i) == static_cast<size_t>(i));
+    assert(history.size() == 128 && history_first_number == 3);
+    err.clear(); assert(evaluate("e3", err) == 3.0 && err.empty());
+    err.clear(); assert(evaluate("e130", err) == 130.0 && err.empty());
+    err.clear(); evaluate("e2", err); assert(!err.empty());
+    err.clear(); evaluateInput("e3=99", err, isDef); assert(!err.empty());
+    clearHistory();
+    assert(appendHistory(42) == 1);
+    double ratio = 0;
+    char si_unit[64] = {}, conversion_error[128] = {};
+    assert(bridge_convert(1, "cm", "m", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) == 0);
+    assert(std::abs(ratio - 0.01) < 1e-12);
+    for (int i = 0; i < 100; ++i)
+        assert(bridge_convert(1, "meter", "second", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
+
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;
 }

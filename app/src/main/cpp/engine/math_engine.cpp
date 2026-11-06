@@ -1348,7 +1348,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         constexpr size_t max_history_variables = 128;
         size_t start_h = (history.size() > max_history_variables) ? (history.size() - max_history_variables) : 0;
         for (size_t i = start_h; i < history.size(); ++i) {
-            add_dyn_var("e" + std::to_string(i + 1), &history[i]);
+            add_dyn_var("e" + std::to_string(history_first_number + i), &history[i]);
         }
     }
     
@@ -1467,6 +1467,10 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             return std::numeric_limits<double>::quiet_NaN();
         }
         if (lhs.find('(') == std::string::npos) {
+            if (isHistoryName(lhs)) {
+                err = "History variables are read-only";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             if (!std::isalpha(lhs[0]) && lhs[0] != '_') {
                 err = "Invalid Name";
                 return std::numeric_limits<double>::quiet_NaN();
@@ -2010,7 +2014,7 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
         for (const auto& w : autocomplete_words) {
             if (w != "pi" && w != "e" && w != "phi") check_candidate(w);
         }
-        for (size_t i = 0; i < history.size(); ++i) check_candidate("e" + std::to_string(i + 1));
+        for (size_t i = 0; i < history.size(); ++i) check_candidate("e" + std::to_string(history_first_number + i));
 
         // 3. User formulas & scripts
         for (const auto& func : user_funcs) {

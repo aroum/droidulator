@@ -1,7 +1,24 @@
 #include "app_state.h"
+#include <algorithm>
+#include <cctype>
 
 // Unified shared state definitions for Droidulator engine
 std::vector<double> history;
+size_t history_first_number = 1;
+size_t appendHistory(double value) {
+    if (history.size() >= MAX_HISTORY_VALUES) {
+        const size_t excess = history.size() - MAX_HISTORY_VALUES + 1;
+        history.erase(history.begin(), history.begin() + excess);
+        history_first_number += excess;
+    }
+    history.push_back(value);
+    return history_first_number + history.size() - 1;
+}
+void clearHistory() { history.clear(); history_first_number = 1; }
+bool isHistoryName(const std::string& name) {
+    return name.size() > 1 && name[0] == 'e' &&
+        std::all_of(name.begin() + 1, name.end(), [](unsigned char c) { return std::isdigit(c); });
+}
 std::vector<UserArg> user_args;
 std::vector<UserConst> user_consts;
 std::vector<std::string> user_funcs;
@@ -10,7 +27,6 @@ std::map<std::string, std::vector<double>> user_arrays;
 std::map<std::string, std::string> user_named_scripts;
 std::vector<std::string> script_console_output;
 bool use_thousands_sep = false;
-bool sticky_mode = false;
 bool degreesMode = true;
 bool auto_brackets = true;
 

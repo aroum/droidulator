@@ -14,7 +14,6 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
     
     if (trimmed == "plot.show()" || trimmed == "plot.show( )") {
-        appState = STATE_PLOT;
         result = 0.0;
         return true;
     }
@@ -22,7 +21,6 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         plot_lines.clear();
         plot_hold = false;
         plot_manual_limits = false;
-        appState = STATE_CALC;
         result = 0.0;
         return true;
     }
@@ -239,9 +237,6 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         }
         
         plot_lines.push_back({ x_vec, y_vec, color_val, style_str });
-        plot_center_x = 0.0;
-        plot_center_y = 0.0;
-        plot_scale = 1.0;
         plot_manual_limits = false;
         result = 1.0;
         return true;

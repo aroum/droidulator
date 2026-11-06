@@ -109,48 +109,16 @@ class PlotView @JvmOverloads constructor(
         cursorTextPaint.color = ThemePalette.fgText
     }
 
-    fun updatePlotData(rawPlotData: String) {
-        val lines = rawPlotData.trim().split("\n")
-        if (lines.size < 3) {
-            plotLines = emptyList()
-            invalidate()
-            return
+    fun updatePlotData(lines: Array<NativePlotLine>, limits: DoubleArray) {
+        if (limits.size >= 5) {
+            manualLimits = limits[0] != 0.0
+            xMinManual = limits[1]
+            xMaxManual = limits[2]
+            yMinManual = limits[3]
+            yMaxManual = limits[4]
         }
-
-        try {
-            val count = lines[0].trim().toIntOrNull() ?: 0
-            manualLimits = lines[1].trim() == "1"
-            val lims = lines[2].trim().split(" ")
-            if (lims.size >= 4) {
-                xMinManual = lims[0].toDoubleOrNull() ?: 0.0
-                xMaxManual = lims[1].toDoubleOrNull() ?: 0.0
-                yMinManual = lims[2].toDoubleOrNull() ?: 0.0
-                yMaxManual = lims[3].toDoubleOrNull() ?: 0.0
-            }
-
-            val parsedLines = mutableListOf<LineData>()
-            var idx = 3
-            for (i in 0 until count) {
-                if (idx + 2 >= lines.size) break
-                val meta = lines[idx].trim().split(";")
-                val colorRgb565 = meta.getOrNull(0)?.toIntOrNull() ?: 0x07E0
-                val linestyle = meta.getOrNull(1) ?: "-"
-                val size = meta.getOrNull(2)?.toIntOrNull() ?: 0
-
-                val xStr = lines[idx + 1].trim().split(" ")
-                val yStr = lines[idx + 2].trim().split(" ")
-
-                val xArr = DoubleArray(size) { j -> xStr.getOrNull(j)?.toDoubleOrNull() ?: Double.NaN }
-                val yArr = DoubleArray(size) { j -> yStr.getOrNull(j)?.toDoubleOrNull() ?: Double.NaN }
-
-                val androidColor = rgb565ToColor(colorRgb565)
-                parsedLines.add(LineData(xArr, yArr, androidColor, linestyle))
-                idx += 3
-            }
-            plotLines = parsedLines
-        } catch (e: Exception) {
-            e.printStackTrace()
-            plotLines = emptyList()
+        plotLines = lines.map { line ->
+            LineData(line.x, line.y, rgb565ToColor(line.color), line.linestyle)
         }
         invalidate()
     }

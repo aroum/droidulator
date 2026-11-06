@@ -2,12 +2,6 @@
 #include "math_funcs.h"
 #include "plot_engine.h"
 #include <iostream>
-#if defined(ARDUINO) || defined(ESP32) || defined(ESP_PLATFORM)
-#include <Arduino.h>
-#endif
-#if defined(ESP32) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
-#include <esp_task_wdt.h>
-#endif
 
 extern double evaluate(const std::string& expr_str, std::string& err);
 extern double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
@@ -59,22 +53,10 @@ void runScript(const std::string& code) {
     };
     std::vector<BlockState> blocks;
     
-    uint32_t last_wdt_yield = 0;
     while (ip < lines.size() && step_count < max_steps) {
         if (script_has_returned) break;
         step_count++;
-        #if defined(ESP32) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
-        uint32_t now_ms = millis();
-        if ((step_count & 63) == 0 || (now_ms - last_wdt_yield > 15)) {
-            esp_task_wdt_reset();
-            delay(1);
-            last_wdt_yield = now_ms;
-        }
-        #elif defined(ARDUINO)
-        if ((step_count & 63) == 0) {
-            delay(1);
-        }
-        #endif
+
         
         std::string line = lines[ip];
         line.erase(0, line.find_first_not_of(" \t\r"));
@@ -235,13 +217,6 @@ void runScript(const std::string& code) {
 
         // sleep(ms)
         else if (line.rfind("sleep(", 0) == 0 && line.back() == ')') {
-            std::string ms_str = line.substr(6, line.size() - 7);
-            int ms = std::atoi(ms_str.c_str());
-            if (ms > 0) {
-                #if defined(ARDUINO) || defined(ESP32) || defined(ESP_PLATFORM)
-                delay(ms);
-                #endif
-            }
             ip++;
         }
         // if (cond) {

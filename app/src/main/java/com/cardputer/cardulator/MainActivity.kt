@@ -18,8 +18,48 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+
+
+data class ReplDisplayItem(
+        val input: String,
+        val rawOutput: String,
+        val isError: Boolean,
+        val hasNum: Boolean = false,
+        val numVal: Double = 0.0,
+        val prefix: String = "",
+        val suffix: String = "",
+        val isRawText: Boolean = false
+    )
+
+class CalculatorSession : ViewModel() {
+    var initialized = false
+    var storageLoadFailed = false
+    val userScripts = mutableListOf(
+        Pair("fibonacci", "x = 1\ny = 1\nfor (i = 1; i <= 10; i++) {\n  print(x)\n  tmp = x + y\n  x = y\n  y = tmp\n}"),
+        Pair("factorial_test", "n = 5\nres = 1\nfor (i = 1; i <= n; i++) {\n  res = res * i\n}\nprint(res)")
+    )
+
+    val replHistory = mutableListOf<String>()
+    val replDisplayItems = mutableListOf<ReplDisplayItem>()
+}
 
 class MainActivity : AppCompatActivity() {
+
+    private val activeDialogs = mutableSetOf<Dialog>()
+
+    private fun trackDialog(dialog: Dialog): Dialog {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener { activeDialogs.remove(dialog) }
+        return dialog
+    }
+
+    override fun onDestroy() {
+        activeDialogs.toList().forEach { it.dismiss() }
+        activeDialogs.clear()
+        super.onDestroy()
+    }
 
     private lateinit var mainRoot: LinearLayout
     private lateinit var topHeaderBar: LinearLayout
@@ -84,11 +124,8 @@ class MainActivity : AppCompatActivity() {
     private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings")
     private val tabsDisplay = arrayOf("REPL ▼", "Scripts ▼", "Formulas ▼", "Constants ▼", "Variables ▼", "Plot ▼", "Settings ▼")
 
-    // Built-in scripts storage for Scripts menu tab
-    private val userScripts = mutableListOf(
-        Pair("fibonacci", "x = 1\ny = 1\nfor (i = 1; i <= 10; i++) {\n  print(x)\n  tmp = x + y\n  x = y\n  y = tmp\n}"),
-        Pair("factorial_test", "n = 5\nres = 1\nfor (i = 1; i <= n; i++) {\n  res = res * i\n}\nprint(res)")
-    )
+    private val session by lazy { ViewModelProvider(this)[CalculatorSession::class.java] }
+    private val userScripts get() = session.userScripts
 
     // Theme Mode: 0 = Auto (System), 1 = Dark, 2 = Light
     private var themeMode = 0
@@ -99,18 +136,8 @@ class MainActivity : AppCompatActivity() {
     private var showEVars = false
 
     // REPL History management
-    private data class ReplDisplayItem(
-        val input: String,
-        val rawOutput: String,
-        val isError: Boolean,
-        val hasNum: Boolean = false,
-        val numVal: Double = 0.0,
-        val prefix: String = "",
-        val suffix: String = "",
-        val isRawText: Boolean = false
-    )
-    private val replHistory = mutableListOf<String>()
-    private val replDisplayItems = mutableListOf<ReplDisplayItem>()
+    private val replHistory get() = session.replHistory
+    private val replDisplayItems get() = session.replDisplayItems
     private var replHistoryIndex = -1
     private var tempReplInput = ""
 
@@ -139,22 +166,31 @@ class MainActivity : AppCompatActivity() {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
 
-        // Initialize C++ Engine
-        CardulatorEngine.nativeInit()
-        loadUserDataFromStorage()
-
         // Keep each upstream database version separate so app updates replace old data.
         val unitsDir = java.io.File(filesDir, "gnu-units-2.27")
         check(unitsDir.isDirectory || unitsDir.mkdirs()) { "Unable to create units database directory" }
         for (name in listOf("currency.units", "crypto.units", "metal_prices.units", "cpi.units", "elements.units", "units.dat")) {
-            val destination = java.io.File(unitsDir, name)
-            if (!destination.exists()) {
-                val temporary = java.io.File(unitsDir, "$name.tmp")
-                assets.open(name).use { input -> temporary.outputStream().use { output -> input.copyTo(output) } }
-                check(temporary.renameTo(destination)) { "Unable to install units database: $name" }
+            val destination = android.util.AtomicFile(java.io.File(unitsDir, name))
+            val expected = assets.open(name).use { it.readBytes() }
+            val current = try { destination.openRead().use { it.readBytes() } }
+                catch (_: java.io.FileNotFoundException) { null }
+            if (current == null || !current.contentEquals(expected)) {
+                val stream = destination.startWrite()
+                try {
+                    stream.write(expected)
+                    destination.finishWrite(stream)
+                } catch (error: Exception) {
+                    destination.failWrite(stream)
+                    throw error
+                }
             }
         }
         CardulatorEngine.nativeInitUnits(java.io.File(unitsDir, "units.dat").absolutePath)
+        if (!session.initialized) {
+            val isNewEngine = CardulatorEngine.initializeOnce()
+            loadUserDataFromStorage(isNewEngine)
+            session.initialized = true
+        }
 
         // Bind Views
         mainRoot = findViewById(R.id.main_root)
@@ -247,8 +283,9 @@ class MainActivity : AppCompatActivity() {
         setupErrorOverlayHandlers()
         setupSettingsHandlers()
 
-        // Apply theme upon creation
+        // Apply theme upon creation and restore the retained REPL output.
         applyTheme()
+        rebuildReplOutput()
     }
 
     private fun setupTabSpinner() {
@@ -632,7 +669,8 @@ class MainActivity : AppCompatActivity() {
             val activeTab = tabs[currentTabPosition]
             val fgColor = ThemePalette.fgText
             val tvMsg = TextView(this).apply {
-                text = "Are you sure you want to delete all $activeTab?"
+                text = if (activeTab == "Variables") "Delete all user variables? Calculation history will be kept."
+                    else "Are you sure you want to delete all $activeTab?"
                 setTextColor(fgColor)
                 textSize = 14f
                 typeface = android.graphics.Typeface.MONOSPACE
@@ -644,7 +682,7 @@ class MainActivity : AppCompatActivity() {
                         val lines = varsRaw.split("\n").filter { it.contains("=") }
                         for (line in lines) {
                             val varName = line.split("=", limit = 2)[0].trim()
-                            CardulatorEngine.nativeDeleteVariable(varName)
+                            if (!varName.matches(Regex("e[0-9]+"))) CardulatorEngine.nativeDeleteVariable(varName)
                         }
                     }
                     "Formulas" -> {
@@ -1020,6 +1058,7 @@ class MainActivity : AppCompatActivity() {
                 replHistoryIndex = -1
 
                 if (!res.startsWith("ERROR: ")) {
+                    saveUserDataToStorage()
                     // Switch to Plot tab if a plot command was issued successfully
                     if (input.startsWith("plot(") || input.startsWith("plot.")) {
                         val plotIdx = tabs.indexOf("Plot")
@@ -1069,8 +1108,7 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
 
-                val rawData = CardulatorEngine.nativeGetPlotLines()
-                plotView.updatePlotData(rawData)
+                plotView.updatePlotData(CardulatorEngine.nativeGetPlotLines(), CardulatorEngine.nativeGetPlotLimits())
             }
             "Settings" -> {
                 scrollView.visibility = View.GONE
@@ -1152,20 +1190,21 @@ class MainActivity : AppCompatActivity() {
                         val name = parts[0].trim()
                         val value = if (parts.size > 1) parts[1].trim() else ""
 
+                        val isHistory = name.matches(Regex("e[0-9]+"))
                         val cardView = createMenuItemCard(
                             title = name,
                             subtitle = "= $value",
                             cardBgColor = cardBgColor,
                             textColor = textColor,
                             dimColor = dimColor,
-                            onEdit = {
+                            onEdit = if (isHistory) null else fun() {
                                 showDefinitionEditorDialog("Edit Variable '$name'", "$name = $value", "$name = $value") { newExpr ->
                                     CardulatorEngine.nativeEvaluate(newExpr)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
                                 }
                             },
-                            onDelete = {
+                            onDelete = if (isHistory) null else fun() {
                                 showConfirmDeleteDialog(name) {
                                     CardulatorEngine.nativeDeleteVariable(name)
                                     saveUserDataToStorage()
@@ -1523,7 +1562,7 @@ class MainActivity : AppCompatActivity() {
         customButtons: List<View>? = null,
         onPositive: (() -> Unit)? = null
     ): Dialog {
-        val dialog = Dialog(this, androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar)
+        val dialog = trackDialog(Dialog(this, androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar))
         val bgColor = ThemePalette.bg
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
@@ -1832,7 +1871,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showFullScriptEditorDialog(initialName: String, initialCode: String, onSave: (String, String) -> Unit) {
-        val dialog = Dialog(this, R.style.GruvboxFullscreenDialog)
+        val dialog = trackDialog(Dialog(this, R.style.GruvboxFullscreenDialog))
         dialog.setContentView(R.layout.dialog_script_editor)
 
         val root = dialog.findViewById<LinearLayout>(R.id.script_editor_root)
@@ -1923,7 +1962,6 @@ class MainActivity : AppCompatActivity() {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    onSave(newName, newCode)
                     val log = CardulatorEngine.nativeRunScript(newCode)
                     appendRawOutput("> SCRIPT OUTPUT ($newName):\n$log\n")
                     showScriptOutputDialog("Script Output: $newName", log)
@@ -1995,7 +2033,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun saveUserDataToStorage() {
         try {
-            val file = java.io.File(filesDir, "user_data.json")
+            if (session.storageLoadFailed) return
             val json = org.json.JSONObject()
 
             // Save variables
@@ -2031,6 +2069,14 @@ class MainActivity : AppCompatActivity() {
             }
             json.put("constants", constsArray)
 
+            val functionsArray = org.json.JSONArray()
+            for (function in CardulatorEngine.nativeGetScriptFunctions()) {
+                val fields = org.json.JSONArray()
+                function.forEach { fields.put(it) }
+                functionsArray.put(fields)
+            }
+            json.put("scriptFunctions", functionsArray)
+
             // Save scripts
             val scriptsArray = org.json.JSONArray()
             for (s in userScripts) {
@@ -2041,30 +2087,57 @@ class MainActivity : AppCompatActivity() {
             }
             json.put("scripts", scriptsArray)
 
-            file.writeText(json.toString())
+            UserDataStorage(this).write(json.toString())
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
-    private fun loadUserDataFromStorage() {
-        try {
-            val file = java.io.File(filesDir, "user_data.json")
-            if (!file.exists()) return
+    private fun parseStoredNumber(text: String): Double = when (text.trim().lowercase()) {
+        "nan", "+nan", "-nan" -> Double.NaN
+        "inf", "+inf", "infinity", "+infinity" -> Double.POSITIVE_INFINITY
+        "-inf", "-infinity" -> Double.NEGATIVE_INFINITY
+        else -> text.trim().toDouble()
+    }
 
-            val json = org.json.JSONObject(file.readText())
+    private fun restoreStoredVariable(line: String, isConstant: Boolean) {
+        val parts = line.split("=", limit = 2)
+        require(parts.size == 2) { "Invalid saved variable" }
+        val name = parts[0].trim()
+        val value = parts[1].trim()
+        if (!isConstant && value.startsWith("[") && value.endsWith("]")) {
+            val body = value.substring(1, value.length - 1).trim()
+            val values = if (body.isEmpty()) doubleArrayOf() else body.split(",").map(::parseStoredNumber).toDoubleArray()
+            CardulatorEngine.nativeRestoreArray(name, values)
+        } else {
+            CardulatorEngine.nativeRestoreScalar(name, parseStoredNumber(value), isConstant)
+        }
+    }
+
+    private fun loadUserDataFromStorage(restoreEngine: Boolean) {
+        try {
+            val contents = UserDataStorage(this).read() ?: return
+            val json = org.json.JSONObject(contents)
+
+            val functions = json.optJSONArray("scriptFunctions")
+            if (restoreEngine && functions != null) {
+                for (i in 0 until functions.length()) {
+                    val fields = functions.getJSONArray(i)
+                    CardulatorEngine.nativeRestoreScriptFunction(Array(fields.length()) { fields.getString(it) })
+                }
+            }
 
             // Restore variables
-            if (json.has("variables")) {
+            if (restoreEngine && json.has("variables")) {
                 val varsArray = json.getJSONArray("variables")
                 for (i in 0 until varsArray.length()) {
                     val line = varsArray.getString(i)
-                    CardulatorEngine.nativeEvaluate(line)
+                    restoreStoredVariable(line, false)
                 }
             }
 
             // Restore formulas
-            if (json.has("formulas")) {
+            if (restoreEngine && json.has("formulas")) {
                 val formulasArray = json.getJSONArray("formulas")
                 for (i in 0 until formulasArray.length()) {
                     val line = formulasArray.getString(i)
@@ -2073,16 +2146,11 @@ class MainActivity : AppCompatActivity() {
             }
 
             // Restore constants
-            if (json.has("constants")) {
+            if (restoreEngine && json.has("constants")) {
                 val constsArray = json.getJSONArray("constants")
                 for (i in 0 until constsArray.length()) {
                     val line = constsArray.getString(i)
-                    val parts = line.split("=", limit = 2)
-                    if (parts.size >= 2) {
-                        val name = parts[0].trim()
-                        val valStr = parts[1].trim()
-                        CardulatorEngine.nativeEvaluate("const $name = $valStr")
-                    }
+                    restoreStoredVariable(line, true)
                 }
             }
 
@@ -2100,7 +2168,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
         } catch (e: Exception) {
-            e.printStackTrace()
+            session.storageLoadFailed = true
+            android.util.Log.e("Droidulator", "Unable to load saved data", e)
+            Toast.makeText(this, "Saved data could not be loaded; automatic saving is disabled", Toast.LENGTH_LONG).show()
         }
     }
 

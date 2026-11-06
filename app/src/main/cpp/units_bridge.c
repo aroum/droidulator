@@ -8,6 +8,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <pthread.h>
 
 /* Suppress old-style K&R re-declarations that live inside units.h. */
 #pragma clang diagnostic push
@@ -29,7 +30,7 @@ extern char *mylocale;
 
 static int g_initialized = 0;
 
-int bridge_init(const char *units_dat_path)
+static int bridge_init_unlocked(const char *units_dat_path)
 {
     if (g_initialized) return 0;
 
@@ -54,7 +55,7 @@ int bridge_init(const char *units_dat_path)
     return err;
 }
 
-int bridge_convert(double      value,
+static int bridge_convert_unlocked(double      value,
                    const char *unit_a,
                    const char *unit_b,
                    double     *out_value,
@@ -151,16 +152,42 @@ int bridge_convert(double      value,
         return 3;
     }
 
+    err = completereduce(&diff);
+    if (err) {
+        if (out_err) snprintf(out_err, (size_t)err_len, "Reduce error");
+        freeunit(&have_unit); freeunit(&want_unit); freeunit(&diff);
+        return 3;
+    }
     double ratio = diff.factor;
     err = unit2num(&diff);   /* also calls completereduce; frees diff on success */
     if (err) {
         if (out_err) snprintf(out_err, (size_t)err_len,
                               "Incompatible units: %s and %s", unit_a, unit_b);
-        freeunit(&have_unit); freeunit(&want_unit);
+        freeunit(&have_unit); freeunit(&want_unit); freeunit(&diff);
         return 3;
     }
 
     *out_value = ratio;
     freeunit(&have_unit); freeunit(&want_unit);
     return 0;
+}
+
+/* GNU Units uses shared parser state. Serialize every access through the bridge. */
+static pthread_mutex_t g_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
+
+int bridge_init(const char *path) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    int result = bridge_init_unlocked(path);
+    pthread_mutex_unlock(&g_bridge_mutex);
+    return result;
+}
+
+int bridge_convert(double value, const char *unit_a, const char *unit_b,
+                   double *out_value, char *out_si_unit, int si_unit_len,
+                   char *out_err, int err_len) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    int result = bridge_convert_unlocked(value, unit_a, unit_b, out_value,
+                                         out_si_unit, si_unit_len, out_err, err_len);
+    pthread_mutex_unlock(&g_bridge_mutex);
+    return result;
 }

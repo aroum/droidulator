@@ -4,6 +4,9 @@
 #include <map>
 #include <sstream>
 #include <iomanip>
+#include <new>
+#include <exception>
+#include <mutex>
 #include <android/log.h>
 
 #define LOG_TAG "CardulatorJNI"
@@ -20,11 +23,15 @@
 #include "units_adapter.h"
 
 
+static std::recursive_mutex g_engine_mutex;
+static void throwJavaException(JNIEnv *env, const char *type, const char *message);
+
 extern "C" {
 
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject thiz) {
-    history.clear();
+Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    clearHistory();
     user_args.clear();
     user_funcs.clear();
     user_script_funcs.clear();
@@ -33,23 +40,85 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject t
     script_console_output.clear();
     degreesMode = true;
     LOGI("Cardulator Native Engine Initialized.");
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
-static inline std::string toCppString(JNIEnv *env, jstring jstr) {
-    if (!jstr) return "";
-    const char *cstr = env->GetStringUTFChars(jstr, nullptr);
-    std::string s(cstr ? cstr : "");
-    env->ReleaseStringUTFChars(jstr, cstr);
-    return s;
+static std::string toCppString(JNIEnv *env, jstring value) {
+    if (!value) return {};
+    const jsize length = env->GetStringLength(value);
+    if (length == 0) return {};
+    std::vector<jchar> utf16(static_cast<size_t>(length));
+    env->GetStringRegion(value, 0, length, utf16.data());
+    if (env->ExceptionCheck()) return {};
+    std::string result;
+    for (jsize i = 0; i < length; ++i) {
+        uint32_t code = utf16[i];
+        if (code >= 0xd800 && code <= 0xdbff && i + 1 < length && utf16[i + 1] >= 0xdc00 && utf16[i + 1] <= 0xdfff)
+            code = 0x10000 + ((code - 0xd800) << 10) + (utf16[++i] - 0xdc00);
+        else if (code >= 0xd800 && code <= 0xdfff) code = 0xfffd;
+        if (code < 0x80) result.push_back(static_cast<char>(code));
+        else if (code < 0x800) {
+            result.push_back(static_cast<char>(0xc0 | (code >> 6)));
+            result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+        } else if (code < 0x10000) {
+            result.push_back(static_cast<char>(0xe0 | (code >> 12)));
+            result.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+            result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+        } else {
+            result.push_back(static_cast<char>(0xf0 | (code >> 18)));
+            result.push_back(static_cast<char>(0x80 | ((code >> 12) & 0x3f)));
+            result.push_back(static_cast<char>(0x80 | ((code >> 6) & 0x3f)));
+            result.push_back(static_cast<char>(0x80 | (code & 0x3f)));
+        }
+    }
+    return result;
+}
+
+static jstring toJavaString(JNIEnv *env, const char *value) {
+    std::vector<jchar> output;
+    const auto *p = reinterpret_cast<const unsigned char *>(value);
+    while (*p) {
+        uint32_t code = *p++;
+        if (code >= 0x80) {
+            unsigned n = code >= 0xf0 && code <= 0xf4 ? 3 : code >= 0xe0 && code <= 0xef ? 2 : code >= 0xc2 && code <= 0xdf ? 1 : 0;
+            uint32_t acc = code & (n == 3 ? 0x07 : n == 2 ? 0x0f : 0x1f);
+            unsigned read = 0;
+            while (read < n && p[read] && (p[read] & 0xc0) == 0x80) { acc = (acc << 6) | (p[read] & 0x3f); ++read; }
+            if (n && read == n && acc >= (n == 1 ? 0x80u : n == 2 ? 0x800u : 0x10000u) && acc <= 0x10ffff && !(acc >= 0xd800 && acc <= 0xdfff)) {
+                code = acc; p += n;
+            } else code = 0xfffd;
+        }
+        if (code <= 0xffff) output.push_back(static_cast<jchar>(code));
+        else { code -= 0x10000; output.push_back(static_cast<jchar>(0xd800 | (code >> 10))); output.push_back(static_cast<jchar>(0xdc00 | (code & 0x3ff))); }
+    }
+    return env->NewString(output.data(), static_cast<jsize>(output.size()));
+}
+
+static void throwJavaException(JNIEnv *env, const char *type, const char *message) {
+    if (env->ExceptionCheck()) return;
+    jclass cls = env->FindClass(type);
+    if (cls) env->ThrowNew(cls, message);
 }
 
 static std::string g_units_dat_path;
 
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeInitUnits(JNIEnv *env, jobject thiz, jstring path_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeInitUnits(JNIEnv *env, jobject thiz, jstring path_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_units_dat_path = toCppString(env, path_jstr);
     bridge_init(g_units_dat_path.empty() ? nullptr : g_units_dat_path.c_str());
     LOGI("GNU Units initialised: %s", g_units_dat_path.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
 static bool g_last_has_num = false;
@@ -59,25 +128,33 @@ static std::string g_last_suffix;
 
 // Preview evaluation — evaluates formula without adding to history (used for live formula dialog preview)
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluatePreview(JNIEnv *env, jobject thiz, jstring input_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluatePreview(JNIEnv *env, jobject thiz, jstring input_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::string expression = toCppString(env, input_jstr);
-    if (expression.empty()) return env->NewStringUTF("");
+    if (expression.empty()) return toJavaString(env, "");
 
     std::string err;
     double val = evaluateWithoutHistory(expression, err);
-    if (!err.empty()) return env->NewStringUTF(("ERROR: " + err).c_str());
-    return env->NewStringUTF(fmtNum(val).c_str());
+    if (!err.empty()) return toJavaString(env, ("ERROR: " + err).c_str());
+    return toJavaString(env, fmtNum(val).c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobject thiz, jstring input_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobject thiz, jstring input_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_last_has_num = false;
     g_last_num_val = 0.0;
     g_last_prefix.clear();
     g_last_suffix.clear();
 
     std::string expression = toCppString(env, input_jstr);
-    if (expression.empty()) return env->NewStringUTF("");
+    if (expression.empty()) return toJavaString(env, "");
 
     std::string err;
     bool isDef = false;
@@ -93,9 +170,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         std::string print_body = trimmed_expr.substr(6, trimmed_expr.size() - 7);
         std::string print_res = formatPrintString(print_body, err);
         if (!err.empty()) {
-            return env->NewStringUTF(("ERROR: " + err).c_str());
+            return toJavaString(env, ("ERROR: " + err).c_str());
         }
-        return env->NewStringUTF(print_res.c_str());
+        return toJavaString(env, print_res.c_str());
     }
 
     // 1b. Handle conv(value, "unit_a", ["unit_b"]) or [val, unit] = conv(...)
@@ -140,7 +217,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         std::string body = conv_expr.substr(5, conv_expr.size() - 6);
         std::vector<std::string> conv_args = splitPlotArgs(body);
         if (conv_args.size() < 2 || conv_args.size() > 3) {
-            return env->NewStringUTF("ERROR: conv requires 2 or 3 arguments: conv(val, \"unit_a\", [\"unit_b\"])");
+            return toJavaString(env, "ERROR: conv requires 2 or 3 arguments: conv(val, \"unit_a\", [\"unit_b\"])");
         }
 
         std::string eval_err;
@@ -156,10 +233,13 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
 
         ConvResult c_res = handleConv(val, unit_a, unit_b);
         if (!c_res.success) {
-            return env->NewStringUTF(("ERROR: " + c_res.errorMsg).c_str());
+            return toJavaString(env, ("ERROR: " + c_res.errorMsg).c_str());
         }
 
         if (is_assign) {
+            // History names are reserved for computed results.
+            if (isHistoryName(assign_var1) || isHistoryName(assign_var2))
+                return toJavaString(env, "ERROR: History variables are read-only");
             // Save value to first variable
             if (!assign_var1.empty()) {
                 auto it = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
@@ -188,28 +268,28 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 g_last_suffix = c_res.unitStr.empty() ? "" : (" (" + c_res.unitStr + ")");
                 ss << g_last_prefix << fmtNum(c_res.value) << g_last_suffix;
             }
-            return env->NewStringUTF(ss.str().c_str());
+            return toJavaString(env, ss.str().c_str());
         }
 
         std::string resultStr;
         if (c_res.value == 0.0 && !c_res.unitStr.empty() && (std::isdigit(c_res.unitStr[0]) || c_res.unitStr.find('R') != std::string::npos)) {
             resultStr = c_res.unitStr;
         } else {
-            history.push_back(c_res.value);
+            const auto history_number = appendHistory(c_res.value);
             g_last_has_num = true;
             g_last_num_val = c_res.value;
-            g_last_prefix = "e" + std::to_string(history.size()) + " = ";
+            g_last_prefix = "e" + std::to_string(history_number) + " = ";
             g_last_suffix = c_res.unitStr.empty() ? "" : (" (" + c_res.unitStr + ")");
             resultStr = g_last_prefix + fmtNum(c_res.value) + g_last_suffix;
         }
-        return env->NewStringUTF(resultStr.c_str());
+        return toJavaString(env, resultStr.c_str());
     }
 
     // 2. Handle help / help()
     if (trimmed_expr == "help()" || trimmed_expr == "help" || trimmed_expr.rfind("help(", 0) == 0) {
         std::string help_res;
         preprocessHelp(trimmed_expr, help_res);
-        return env->NewStringUTF(help_res.c_str());
+        return toJavaString(env, help_res.c_str());
     }
 
     // 2b. Handle run("script_name") or run(script_name) command
@@ -231,17 +311,17 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             } else {
                 out << "Done";
             }
-            return env->NewStringUTF(out.str().c_str());
+            return toJavaString(env, out.str().c_str());
         }
-        return env->NewStringUTF(("ERROR: Script '" + sname + "' not found").c_str());
+        return toJavaString(env, ("ERROR: Script '" + sname + "' not found").c_str());
     }
 
     // 3. Handle plot commands
     if (handlePlotCommands(expression, err, result)) {
         if (!err.empty()) {
-            return env->NewStringUTF(("ERROR: " + err).c_str());
+            return toJavaString(env, ("ERROR: " + err).c_str());
         }
-        return env->NewStringUTF("Plot");
+        return toJavaString(env, "Plot");
     }
 
     // 4. Handle multi-statement lines separated by ';' or function definitions
@@ -297,13 +377,13 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         }
 
         if (!err.empty()) {
-            return env->NewStringUTF(("ERROR: " + err).c_str());
+            return toJavaString(env, ("ERROR: " + err).c_str());
         } else {
             if (!last_is_def) {
-                history.push_back(last_res);
+                const auto history_number = appendHistory(last_res);
                 g_last_has_num = true;
                 g_last_num_val = last_res;
-                g_last_prefix = "e" + std::to_string(history.size()) + " = ";
+                g_last_prefix = "e" + std::to_string(history_number) + " = ";
                 if (g_last_result_angle == AngleUnit::DEG) {
                     g_last_suffix = " (deg)";
                 } else if (g_last_result_angle == AngleUnit::RAD) {
@@ -311,14 +391,14 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 }
                 resultStr = g_last_prefix + fmtNum(last_res) + g_last_suffix;
             }
-            return env->NewStringUTF(resultStr.c_str());
+            return toJavaString(env, resultStr.c_str());
         }
     }
 
     // 5. Standard single-statement evaluation
     result = evaluateInput(expression, err, isDef);
     if (!err.empty()) {
-        return env->NewStringUTF(("ERROR: " + err).c_str());
+        return toJavaString(env, ("ERROR: " + err).c_str());
     }
 
     if (isDef) {
@@ -393,22 +473,27 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             g_last_prefix = label + " = ";
             resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
         } else {
-            history.push_back(result);
-            g_last_prefix = "e" + std::to_string(history.size()) + " = ";
+            const auto history_number = appendHistory(result);
+            g_last_prefix = "e" + std::to_string(history_number) + " = ";
             resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
         }
     }
 
-    return env->NewStringUTF(resultStr.c_str());
+    return toJavaString(env, resultStr.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeAutocomplete(JNIEnv *env, jobject thiz, jstring input_jstr, jint caret_pos, jintArray out_cursor) {
-    if (!input_jstr) return env->NewStringUTF("");
+Java_com_cardputer_cardulator_CardulatorEngine_nativeAutocomplete(JNIEnv *env, jobject thiz, jstring input_jstr, jint caret_pos, jintArray out_cursor) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    if (!input_jstr) return toJavaString(env, "");
 
-    const char *input_cstr = env->GetStringUTFChars(input_jstr, nullptr);
-    std::string text(input_cstr ? input_cstr : "");
-    env->ReleaseStringUTFChars(input_jstr, input_cstr);
+    std::string text = toCppString(env, input_jstr);
 
     int cursor_pos = static_cast<int>(caret_pos);
     handleTabCompletion(text, cursor_pos);
@@ -418,16 +503,21 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeAutocomplete(JNIEnv *env, j
         env->SetIntArrayRegion(out_cursor, 0, 1, &res_pos);
     }
 
-    return env->NewStringUTF(text.c_str());
+    return toJavaString(env, text.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeRunScript(JNIEnv *env, jobject thiz, jstring code_jstr) {
-    if (!code_jstr) return env->NewStringUTF("");
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRunScript(JNIEnv *env, jobject thiz, jstring code_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    if (!code_jstr) return toJavaString(env, "");
 
-    const char *code_cstr = env->GetStringUTFChars(code_jstr, nullptr);
-    std::string code(code_cstr ? code_cstr : "");
-    env->ReleaseStringUTFChars(code_jstr, code_cstr);
+    std::string code = toCppString(env, code_jstr);
 
     script_console_output.clear();
     runScript(code);
@@ -438,28 +528,42 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRunScript(JNIEnv *env, jobj
         if (i + 1 < script_console_output.size()) out << "\n";
     }
 
-    return env->NewStringUTF(out.str().c_str());
+    return toJavaString(env, out.str().c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, jobject thiz) {
-    history.clear();
+Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    clearHistory();
     user_args.clear();
     user_arrays.clear();
     script_console_output.clear();
     resetTabState();
     LOGI("History and variables cleared.");
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, jobject thiz) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::ostringstream out;
-    out << std::setprecision(15);
+    out << std::setprecision(17);
     if (user_args.empty() && user_arrays.empty() && history.empty()) {
         out << "No user variables defined.";
     } else {
         for (size_t i = 0; i < history.size(); ++i) {
-            out << "e" << (i + 1) << " = " << history[i] << "\n";
+            out << "e" << (history_first_number + i) << " = " << history[i] << "\n";
         }
         for (const auto& arg : user_args) {
             out << arg.name << " = " << arg.val << "\n";
@@ -472,11 +576,18 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, j
             out << "]\n";
         }
     }
-    return env->NewStringUTF(out.str().c_str());
+    return toJavaString(env, out.str().c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetFormulas(JNIEnv *env, jobject thiz) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetFormulas(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::ostringstream out;
     if (user_funcs.empty()) {
         out << "No custom formulas defined.";
@@ -485,31 +596,38 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetFormulas(JNIEnv *env, jo
             out << fn << "\n";
         }
     }
-    return env->NewStringUTF(out.str().c_str());
+    return toJavaString(env, out.str().c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConstants(JNIEnv *env, jobject thiz) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConstants(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::ostringstream out;
-    out << std::setprecision(15);
+    out << std::setprecision(17);
     out << "pi = 3.141592653589793\n";
     out << "e  = 2.718281828459045\n";
     for (const auto& c : user_consts) {
         out << c.name << " = " << c.val << "\n";
     }
-    return env->NewStringUTF(out.str().c_str());
+    return toJavaString(env, out.str().c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetHelp(JNIEnv *env, jobject thiz, jstring topic_jstr) {
-    std::string topic;
-    if (topic_jstr) {
-        const char *cstr = env->GetStringUTFChars(topic_jstr, nullptr);
-        if (cstr) {
-            topic = cstr;
-            env->ReleaseStringUTFChars(topic_jstr, cstr);
-        }
-    }
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetHelp(JNIEnv *env, jobject thiz, jstring topic_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    std::string topic = toCppString(env, topic_jstr);
 
     std::string helpText;
     preprocessHelp(topic, helpText);
@@ -521,27 +639,46 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetHelp(JNIEnv *env, jobjec
                    "Type function name for details e.g. help(sin)";
     }
 
-    return env->NewStringUTF(helpText.c_str());
+    return toJavaString(env, helpText.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeSetDegRad(JNIEnv *env, jobject thiz, jboolean is_deg) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeSetDegRad(JNIEnv *env, jobject thiz, jboolean is_deg) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     degreesMode = is_deg;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeSetFormatSettings(JNIEnv *env, jobject thiz, jint mode, jint precision, jboolean group_digits) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeSetFormatSettings(JNIEnv *env, jobject thiz, jint mode, jint precision, jboolean group_digits) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     fmt_mode = mode;
     fmt_precision = precision;
     use_thousands_sep = group_digits;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env, jobject thiz, jstring name_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env, jobject thiz, jstring name_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     if (!name_jstr) return JNI_FALSE;
-    const char *name_cstr = env->GetStringUTFChars(name_jstr, nullptr);
-    std::string name(name_cstr ? name_cstr : "");
-    env->ReleaseStringUTFChars(name_jstr, name_cstr);
+    std::string name = toCppString(env, name_jstr);
 
     auto it = std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == name; });
     if (it != user_args.end()) {
@@ -553,14 +690,19 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env,
         return JNI_TRUE;
     }
     return JNI_FALSE;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return 0;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return 0;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return 0;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteConstant(JNIEnv *env, jobject thiz, jstring name_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteConstant(JNIEnv *env, jobject thiz, jstring name_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     if (!name_jstr) return JNI_FALSE;
-    const char *name_cstr = env->GetStringUTFChars(name_jstr, nullptr);
-    std::string name(name_cstr ? name_cstr : "");
-    env->ReleaseStringUTFChars(name_jstr, name_cstr);
+    std::string name = toCppString(env, name_jstr);
 
     auto it = std::remove_if(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; });
     if (it != user_consts.end()) {
@@ -568,14 +710,19 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteConstant(JNIEnv *env,
         return JNI_TRUE;
     }
     return JNI_FALSE;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return 0;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return 0;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return 0;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteFormula(JNIEnv *env, jobject thiz, jstring name_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteFormula(JNIEnv *env, jobject thiz, jstring name_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     if (!name_jstr) return JNI_FALSE;
-    const char *name_cstr = env->GetStringUTFChars(name_jstr, nullptr);
-    std::string name(name_cstr ? name_cstr : "");
-    env->ReleaseStringUTFChars(name_jstr, name_cstr);
+    std::string name = toCppString(env, name_jstr);
 
     auto it = std::remove_if(user_funcs.begin(), user_funcs.end(), [&](const std::string& fn) {
         size_t open = fn.find('(');
@@ -589,66 +736,144 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteFormula(JNIEnv *env, 
         return JNI_TRUE;
     }
     return JNI_FALSE;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return 0;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return 0;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return 0;
 }
 
-JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLines(JNIEnv *env, jobject thiz) {
-    std::stringstream ss;
-    ss << plot_lines.size() << "\n";
-    ss << (plot_manual_limits ? 1 : 0) << "\n";
-    ss << plot_xlim_min << " " << plot_xlim_max << " " << plot_ylim_min << " " << plot_ylim_max << "\n";
-    for (const auto& line : plot_lines) {
-        ss << line.color << ";" << line.linestyle << ";" << line.x.size() << "\n";
-        for (size_t i = 0; i < line.x.size(); ++i) {
-            if (i > 0) ss << " ";
-            ss << line.x[i];
+JNIEXPORT jobjectArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLines(JNIEnv *env, jobject) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    jclass cls = env->FindClass("com/cardputer/cardulator/NativePlotLine");
+    if (!cls) return nullptr;
+    jmethodID constructor = env->GetMethodID(cls, "<init>", "([D[DILjava/lang/String;)V");
+    if (!constructor) return nullptr;
+    jobjectArray lines = env->NewObjectArray(static_cast<jsize>(plot_lines.size()), cls, nullptr);
+    if (!lines) return nullptr;
+    for (size_t i = 0; i < plot_lines.size(); ++i) {
+        const auto& line = plot_lines[i];
+        if (line.x.size() != line.y.size() || line.x.size() > 100000) {
+            throwJavaException(env, "java/lang/IllegalStateException", "Invalid plot size"); return nullptr;
         }
-        ss << "\n";
-        for (size_t i = 0; i < line.y.size(); ++i) {
-            if (i > 0) ss << " ";
-            ss << line.y[i];
+        const jsize size = static_cast<jsize>(line.x.size());
+        jdoubleArray x = env->NewDoubleArray(size);
+        jdoubleArray y = env->NewDoubleArray(size);
+        if (!x || !y) return nullptr;
+        if (size) {
+            env->SetDoubleArrayRegion(x, 0, size, line.x.data());
+            env->SetDoubleArrayRegion(y, 0, size, line.y.data());
         }
-        ss << "\n";
+        jstring style = toJavaString(env, line.linestyle.c_str());
+        if (!style || env->ExceptionCheck()) return nullptr;
+        jobject object = env->NewObject(cls, constructor, x, y, static_cast<jint>(line.color), style);
+        if (!object) return nullptr;
+        env->SetObjectArrayElement(lines, static_cast<jsize>(i), object);
+        env->DeleteLocalRef(object); env->DeleteLocalRef(style);
+        env->DeleteLocalRef(x); env->DeleteLocalRef(y);
+        if (env->ExceptionCheck()) return nullptr;
     }
-    return env->NewStringUTF(ss.str().c_str());
+    return lines;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unable to get plot data"); return nullptr;
+}
+
+JNIEXPORT jdoubleArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLimits(JNIEnv *env, jobject) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    const jdouble limits[] = {plot_manual_limits ? 1.0 : 0.0, plot_xlim_min, plot_xlim_max, plot_ylim_min, plot_ylim_max};
+    jdoubleArray result = env->NewDoubleArray(5);
+    if (result) env->SetDoubleArrayRegion(result, 0, 5, limits);
+    return result;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unable to get plot limits"); return nullptr;
 }
 
 // Register a named script so it can be called from run(name)
 JNIEXPORT void JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeRegisterScript(JNIEnv *env, jobject thiz, jstring name_jstr, jstring code_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRegisterScript(JNIEnv *env, jobject thiz, jstring name_jstr, jstring code_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::string name = toCppString(env, name_jstr);
     std::string code = toCppString(env, code_jstr);
     if (name.empty()) return;
     user_named_scripts[name] = code;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeFormatNumber(JNIEnv *env, jobject thiz, jdouble val) {
-    return env->NewStringUTF(fmtNum(static_cast<double>(val)).c_str());
+Java_com_cardputer_cardulator_CardulatorEngine_nativeFormatNumber(JNIEnv *env, jobject thiz, jdouble val) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    return toJavaString(env, fmtNum(static_cast<double>(val)).c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jboolean JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeHasLastNumeric(JNIEnv *env, jobject thiz) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeHasLastNumeric(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     return g_last_has_num ? JNI_TRUE : JNI_FALSE;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return 0;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return 0;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return 0;
 }
 
 JNIEXPORT jdouble JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericVal(JNIEnv *env, jobject thiz) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericVal(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     return static_cast<jdouble>(g_last_num_val);
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return 0;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return 0;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return 0;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericPrefix(JNIEnv *env, jobject thiz) {
-    return env->NewStringUTF(g_last_prefix.c_str());
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericPrefix(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    return toJavaString(env, g_last_prefix.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericSuffix(JNIEnv *env, jobject thiz) {
-    return env->NewStringUTF(g_last_suffix.c_str());
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetLastNumericSuffix(JNIEnv *env, jobject thiz) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    return toJavaString(env, g_last_suffix.c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
 }
 
 JNIEXPORT jstring JNICALL
-Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConvUnits(JNIEnv *env, jobject thiz, jstring from_jstr, jstring prefix_jstr) {
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConvUnits(JNIEnv *env, jobject thiz, jstring from_jstr, jstring prefix_jstr) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::string from_unit = toCppString(env, from_jstr);
     std::string prefix = toCppString(env, prefix_jstr);
     auto matches = getConvUnitMatches(from_unit, prefix);
@@ -657,7 +882,110 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConvUnits(JNIEnv *env, j
         if (i > 0) oss << "\n";
         oss << matches[i];
     }
-    return env->NewStringUTF(oss.str().c_str());
+    return toJavaString(env, oss.str().c_str());
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
+}
+
+// The first two fields are name and parameter count; the remainder holds
+// parameters followed by statement strings. No source-code reparsing is needed.
+JNIEXPORT jobjectArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeGetScriptFunctions(JNIEnv *env, jobject) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    jclass stringClass = env->FindClass("java/lang/String");
+    jclass arrayClass = env->FindClass("[Ljava/lang/String;");
+    if (!stringClass || !arrayClass) return nullptr;
+    jobjectArray functions = env->NewObjectArray(static_cast<jsize>(user_script_funcs.size()), arrayClass, nullptr);
+    if (!functions) return nullptr;
+    for (size_t i = 0; i < user_script_funcs.size(); ++i) {
+        const auto& fn = user_script_funcs[i];
+        const auto count = 2 + fn.params.size() + fn.statements.size();
+        jobjectArray fields = env->NewObjectArray(static_cast<jsize>(count), stringClass, nullptr);
+        if (!fields) return nullptr;
+        std::vector<std::string> values{fn.name, std::to_string(fn.params.size())};
+        values.insert(values.end(), fn.params.begin(), fn.params.end());
+        values.insert(values.end(), fn.statements.begin(), fn.statements.end());
+        for (size_t j = 0; j < values.size(); ++j) {
+            jstring value = toJavaString(env, values[j].c_str());
+            if (!value) return nullptr;
+            env->SetObjectArrayElement(fields, static_cast<jsize>(j), value);
+            env->DeleteLocalRef(value);
+        }
+        env->SetObjectArrayElement(functions, static_cast<jsize>(i), fields);
+        env->DeleteLocalRef(fields);
+    }
+    return functions;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScriptFunction(JNIEnv *env, jobject, jobjectArray fields) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    if (!fields || env->GetArrayLength(fields) < 2) return;
+    const jsize size = env->GetArrayLength(fields);
+    std::vector<std::string> values;
+    for (jsize i = 0; i < size; ++i) {
+        auto value = static_cast<jstring>(env->GetObjectArrayElement(fields, i));
+        if (!value) return;
+        values.push_back(toCppString(env, value));
+        env->DeleteLocalRef(value);
+    }
+    size_t used = 0;
+    const auto count = std::stoul(values[1], &used);
+    if (used != values[1].size() || count > values.size() - 2 || values[0].empty()) return;
+    CustomScriptFunc fn{values[0], {}, {}};
+    fn.params.assign(values.begin() + 2, values.begin() + 2 + count);
+    fn.statements.assign(values.begin() + 2 + count, values.end());
+    user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(),
+        [&](const CustomScriptFunc& existing) { return existing.name == fn.name; }), user_script_funcs.end());
+    user_script_funcs.push_back(std::move(fn));
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Invalid saved script function");
+}
+
+JNIEXPORT void JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScalar(JNIEnv *env, jobject, jstring nameValue, jdouble value, jboolean isConstant) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    const std::string name = toCppString(env, nameValue);
+    if (name.empty() || isHistoryName(name)) return;
+    if (isConstant) {
+        auto it = std::find_if(user_consts.begin(), user_consts.end(), [&](const UserConst& item) { return item.name == name; });
+        if (it == user_consts.end()) user_consts.push_back({name, value}); else it->val = value;
+    } else {
+        auto it = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& item) { return item.name == name; });
+        if (it == user_args.end()) user_args.push_back({name, value}); else it->val = value;
+    }
+    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), name) == autocomplete_words.end()) autocomplete_words.push_back(name);
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Invalid saved variable");
+}
+
+JNIEXPORT void JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreArray(JNIEnv *env, jobject, jstring nameValue, jdoubleArray values) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    const std::string name = toCppString(env, nameValue);
+    if (name.empty() || isHistoryName(name) || !values) return;
+    const jsize count = env->GetArrayLength(values);
+    std::vector<double> restored(static_cast<size_t>(count));
+    if (count) env->GetDoubleArrayRegion(values, 0, count, restored.data());
+    if (env->ExceptionCheck()) return;
+    user_arrays[name] = std::move(restored);
+    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), name) == autocomplete_words.end()) autocomplete_words.push_back(name);
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Invalid saved array");
 }
 
 } // extern "C"
