@@ -730,6 +730,10 @@ int main() {
     assert(handleConv(1, "mps", "km/hr", units_dat).success);
     assert(handleConv(1, "psf", "Pa", units_dat).success);
     assert(handleConv(1, "gpa", "Pa", units_dat).success);
+    auto knots = handleConv(1, "kt", "m/s", units_dat);
+    assert(knots.success && std::abs(knots.value - 1852.0 / 3600.0) < 1e-9);
+    auto milesPerHour = handleConv(1, "mi/h", "m/s", units_dat);
+    assert(milesPerHour.success && std::abs(milesPerHour.value - 0.44704) < 1e-9);
 
     ConvResult c_acc4 = handleConv(100, "Gal", "m/s^2", units_dat);
     assert(c_acc4.success && std::abs(c_acc4.value - 1.0) < 1e-3);

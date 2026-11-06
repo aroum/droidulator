@@ -596,6 +596,8 @@ inline ConvResult handleConv(double value,
         if (u == "psf")  return "lbf / ft^2";
         if (u == "mps")  return "m / s";
         if (u == "fps2") return "ft / s^2";
+        if (u == "kt") return "knot";
+        if (u == "mi/h" || u == "mile/h") return "mile / hr";
         if (low == "mbar") return "mbar";
         if (low == "hz")   return "Hz";
         if (low == "khz")  return "kHz";
