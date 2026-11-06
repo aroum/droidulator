@@ -143,8 +143,12 @@ inline ConvResult handleConv(double value,
     };
 
     auto ohmsToSMD3 = [](double ohms) -> std::string {
-        if (ohms < 0) return "";
-        if (ohms < 10) {
+        if (!std::isfinite(ohms) || ohms < 0.01 || ohms >= 1e11) return "";
+        if (ohms < 0.1) {
+            int n = static_cast<int>(std::round(ohms * 100));
+            char b[8]; snprintf(b, sizeof(b), "R%02d", n); return b;
+        }
+        if (ohms < 9.95) {
             char b[16]; snprintf(b, sizeof(b), "%.1f", ohms);
             std::string s(b); size_t p = s.find('.'); if (p != std::string::npos) s[p] = 'R';
             return s;
@@ -159,12 +163,20 @@ inline ConvResult handleConv(double value,
     };
 
     auto ohmsToSMD4 = [](double ohms) -> std::string {
-        if (ohms < 0) return "";
-        if (ohms < 100) {
+        if (!std::isfinite(ohms) || ohms < 0.001 || ohms >= 1e12) return "";
+        if (ohms < 0.1) {
+            int n = static_cast<int>(std::round(ohms * 1000));
+            char b[8]; snprintf(b, sizeof(b), "R%03d", n); return b;
+        }
+        if (ohms < 9.995) {
             char b[16]; snprintf(b, sizeof(b), "%.2f", ohms);
             std::string s(b); size_t p = s.find('.'); if (p != std::string::npos) s[p] = 'R';
             if (s.size() > 4 && s[0] == '0') s = s.substr(1);
             return s;
+        }
+        if (ohms < 99.95) {
+            char b[16]; snprintf(b, sizeof(b), "%.1f", ohms);
+            std::string s(b); s[s.find('.')] = 'R'; return s;
         }
         double temp = ohms; int exp = 0;
         while (temp >= 1000.0 && exp < 9) { temp /= 10.0; exp++; }
@@ -177,7 +189,7 @@ inline ConvResult handleConv(double value,
     };
 
     auto ohmsToEIA96 = [&](double ohms) -> std::string {
-        if (ohms <= 0) return "";
+        if (!std::isfinite(ohms) || ohms < 0.1 || ohms > 976.0 * 1e5) return "";
         static const struct { char c; double m; int exp; } mults[] = {
             {'Z', 0.001, -3}, {'Y', 0.01, -2}, {'X', 0.1, -1}, {'A', 1.0, 0},
             {'B', 10.0, 1}, {'C', 100.0, 2}, {'D', 1000.0, 3}, {'E', 10000.0, 4}, {'F', 100000.0, 5}
@@ -233,7 +245,9 @@ inline ConvResult handleConv(double value,
             if (pos != std::string::npos) {
                 std::string temp = s; temp[pos] = '.';
                 try {
-                    double val = std::stod(temp);
+                    size_t used = 0;
+                    double val = std::stod(temp, &used);
+                    if (used != temp.size()) return false;
                     double mult = (unitChar == 'P') ? 1e-12 : (unitChar == 'N') ? 1e-9 : 1e-6;
                     farads = val * mult;
                     return true;
@@ -259,12 +273,12 @@ inline ConvResult handleConv(double value,
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s; temp[rPos] = '.';
-            try { henries = std::stod(temp) * 1e-6; return true; } catch(...) { return false; }
+            try { size_t used = 0; henries = std::stod(temp, &used) * 1e-6; return used == temp.size(); } catch(...) { return false; }
         }
         size_t nPos = s.find('N');
         if (nPos != std::string::npos) {
             std::string temp = s; temp[nPos] = '.';
-            try { henries = std::stod(temp) * 1e-9; return true; } catch(...) { return false; }
+            try { size_t used = 0; henries = std::stod(temp, &used) * 1e-9; return used == temp.size(); } catch(...) { return false; }
         }
         if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
@@ -293,15 +307,18 @@ inline ConvResult handleConv(double value,
 
     // Target code requests when value is numeric or first arg is numeric string (e.g., conv(200, "smd3") or conv(200, "ohm", "smd3"))
     double targetVal = (isUnitANumeric ? numericVal : value);
-    std::string targetCodeFormat = lb.empty() ? (isUnitANumeric ? la : "") : lb;
+    std::string targetCodeFormat = lb.empty() ? la : lb;
     if (targetVal > 0 && (targetCodeFormat == "smd3" || targetCodeFormat == "smd4" || targetCodeFormat == "eia96" || targetCodeFormat == "eia-96")) {
         if (targetCodeFormat == "smd3") {
-            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD3(targetVal); return res;
+            res.unitStr = ohmsToSMD3(targetVal);
         } else if (targetCodeFormat == "smd4") {
-            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD4(targetVal); return res;
+            res.unitStr = ohmsToSMD4(targetVal);
         } else if (targetCodeFormat == "eia96" || targetCodeFormat == "eia-96") {
-            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToEIA96(targetVal); return res;
+            res.unitStr = ohmsToEIA96(targetVal);
         }
+        res.success = !res.unitStr.empty(); res.textOnly = res.success;
+        if (!res.success) res.errorMsg = "Value is outside the representable code range";
+        return res;
     }
 
     // String code parsing if unit_a is a code string (e.g., conv("01C", "ohm") or conv("104", "farad"))
@@ -491,30 +508,41 @@ inline ConvResult handleConv(double value,
         {"dbu",  "v",  0.774596669, true}   // sqrt(0.6 mW in 600 ohm) ≈ 0.7746 V
     };
 
+    auto linearFactor = [](const std::string& unit, bool voltage, double& factor) {
+        const std::string base = voltage ? "V" : "W";
+        if (unit == base || unit == (voltage ? "volt" : "watt")) { factor = 1; return true; }
+        if (unit == "m" + base) { factor = 1e-3; return true; }
+        if (unit == "u" + base || unit == "µ" + base) { factor = 1e-6; return true; }
+        if (unit == "k" + base) { factor = 1e3; return true; }
+        if (unit == "M" + base) { factor = 1e6; return true; }
+        return false;
+    };
     for (const auto& ref : dbRefs) {
         double factor = ref.isVoltage ? 20.0 : 10.0;
-        // From dBx to target unit (or SI)
-        if (la == ref.name && (lb == ref.targetUnit || lb.empty())) {
+        const double referenceSI = ref.refVal * (ref.targetUnit == "mw" || ref.targetUnit == "mv" ? 1e-3 : ref.targetUnit == "uv" ? 1e-6 : 1.0);
+        double unitFactor = 0;
+        if (la == ref.name && (lb.empty() || linearFactor(unit_b, ref.isVoltage, unitFactor))) {
             res.success = true;
-            res.value = ref.refVal * std::pow(10.0, value / factor);
-            res.unitStr = ref.targetUnit;
+            res.value = (lb.empty() ? ref.refVal : referenceSI / unitFactor) * std::pow(10.0, value / factor);
+            res.unitStr = lb.empty() ? ref.targetUnit : unit_b;
             return res;
         }
-        // From target unit to dBx
-        if (la == ref.targetUnit && lb == ref.name) {
+        if (lb == ref.name && linearFactor(unit_a, ref.isVoltage, unitFactor)) {
             if (value <= 0.0) {
                 res.errorMsg = "Domain Error: dB conversion requires value > 0";
                 return res;
             }
             res.success = true;
-            res.value = factor * std::log10(value / ref.refVal);
+            res.value = factor * std::log10(value * unitFactor / referenceSI);
             res.unitStr = unit_b;
             return res;
         }
     }
 
     // --- 2.5 Built-in Standard Physical Unit Conversions (Offline / Flash fallback) ---
-    {
+    if ((unit_a == la && unit_b == lb) ||
+        ((la == "degc" || la == "degf" || la == "degr" || la == "k" || la == "tempc" || la == "tempf" || la == "tempk" || la == "tempr" || la == "celsius" || la == "fahrenheit" || la == "kelvin" || la == "rankine") &&
+         (lb.empty() || lb == "degc" || lb == "degf" || lb == "degr" || lb == "k" || lb == "tempc" || lb == "tempf" || lb == "tempk" || lb == "tempr" || lb == "celsius" || lb == "fahrenheit" || lb == "kelvin" || lb == "rankine"))) {
         // Length (base: meter)
         auto getLengthFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
             if (u == "m" || u == "meter" || u == "meters") { factor = 1.0; canonical = "m"; return true; }
@@ -539,7 +567,7 @@ inline ConvResult handleConv(double value,
             if (u == "ug") { factor = 1e-9; canonical = "ug"; return true; }
             if (u == "lb" || u == "lbs" || u == "pound" || u == "pounds") { factor = 0.45359237; canonical = "lb"; return true; }
             if (u == "oz" || u == "ounce" || u == "ounces") { factor = 0.028349523125; canonical = "oz"; return true; }
-            if (u == "ton" || u == "tonne" || u == "tonnes") { factor = 1000.0; canonical = "ton"; return true; }
+            if (u == "tonne" || u == "tonnes") { factor = 1000.0; canonical = "tonne"; return true; }
             if (u == "stone") { factor = 6.35029318; canonical = "stone"; return true; }
             if (u == "carat") { factor = 0.0002; canonical = "carat"; return true; }
             return false;
@@ -608,7 +636,7 @@ inline ConvResult handleConv(double value,
         // Acceleration (base: m/s^2)
         auto getAccelerationFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
             if (u == "m/s^2" || u == "m/s2" || u == "m / s^2" || u == "m / s2") { factor = 1.0; canonical = "m/s^2"; return true; }
-            if (u == "cm/s^2" || u == "cm/s2" || u == "cm / s^2" || u == "cm / s2" || u == "gal") { factor = 0.01; canonical = "cm/s^2"; return true; }
+            if (u == "cm/s^2" || u == "cm/s2" || u == "cm / s^2" || u == "cm / s2") { factor = 0.01; canonical = "cm/s^2"; return true; }
             if (u == "km/s^2" || u == "km/s2" || u == "km / s^2" || u == "km / s2") { factor = 1000.0; canonical = "km/s^2"; return true; }
             if (u == "km/h^2" || u == "km/h2" || u == "km/hr^2" || u == "km/hr2" || u == "km / h^2" || u == "km / h2") { factor = 1000.0 / (3600.0 * 3600.0); canonical = "km/h^2"; return true; }
             if (u == "ft/s^2" || u == "ft/s2" || u == "ft / s^2" || u == "ft / s2" || u == "fps2") { factor = 0.3048; canonical = "ft/s^2"; return true; }
@@ -757,17 +785,12 @@ inline ConvResult handleConv(double value,
         std::string low = toLower(u);
         if (low == "mmhg") return "mmHg";
         if (low == "inhg") return "inHg";
-        if (low == "pa")   return "Pa";
-        if (low == "kpa")  return "kPa";
-        if (low == "mpa")  return "MPa";
-        if (low == "gpa")  return "GPa";
+        if (u == "pa")   return "Pa";
+        if (u == "kpa")  return "kPa";
         if (low == "mbar") return "mbar";
         if (low == "hz")   return "Hz";
         if (low == "khz")  return "kHz";
-        if (low == "mhz")  return "MHz";
-        if (low == "ghz")  return "GHz";
         if (low == "g0" || low == "gee") return "gravity";
-        if (low == "gal")  return "Gal";
         if (low == "km/h^2" || low == "km/h2") return "km / hr^2";
         if (low == "km/hr2") return "km / hr^2";
         if (low == "km/h" || low == "kph") return "km / hr";

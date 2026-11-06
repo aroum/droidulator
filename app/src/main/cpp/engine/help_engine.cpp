@@ -54,6 +54,8 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
                        "  conv(30, \"dBm\", \"mW\")     -> 1000 mW\n"
                        "  conv(20, \"dB\", \"times\")   -> 100 times\n"
                        "  conv(24, \"AWG\", \"mm^2\")   -> 0.20473 mm^2\n\n"
+                       "Component markings must be quoted: conv(\"104\", \"pf\") decodes a capacitor marking;\n"
+                       "conv(104, \"pf\") means the numeric value 104 pF.\n\n"
                        "Supported Base Units by Category:\n"
                        "  - Length: m, mile, nmi (nauticalmile), inch (in), ft, yd, fathom, cable, marineleague, angstrom, lightyear, parsec, au\n"
                        "  - Mass: g, lb, oz, ton, tonne, grain, dram, stone, slug, amu\n"

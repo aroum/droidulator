@@ -114,7 +114,10 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeInitUnits(JNIEnv *env, jobject thiz, jstring path_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_units_dat_path = toCppString(env, path_jstr);
-    bridge_init(g_units_dat_path.empty() ? nullptr : g_units_dat_path.c_str());
+    if (bridge_init(g_units_dat_path.empty() ? nullptr : g_units_dat_path.c_str()) != 0) {
+        throwJavaException(env, "java/lang/IllegalStateException", "Unable to initialize the units database");
+        return;
+    }
     LOGI("GNU Units initialised: %s", g_units_dat_path.c_str());
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;

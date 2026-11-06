@@ -33,7 +33,7 @@ add_library(
 )
 
 # GNU Units was written as a CLI. Its fatal exits are intercepted by the C bridge.
-set_source_files_properties(gnu-units-2.27/units.c PROPERTIES COMPILE_DEFINITIONS "exit=gnu_units_abort")
+set_source_files_properties(gnu-units-2.27/units.c PROPERTIES COMPILE_DEFINITIONS "main=units_main;exit=gnu_units_abort" COMPILE_OPTIONS "-fvisibility=hidden")
 
 target_compile_options(cardulator_jni PRIVATE
     -fdata-sections -ffunction-sections

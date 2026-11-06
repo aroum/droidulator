@@ -719,8 +719,27 @@ int main() {
     ConvResult c_acc3 = handleConv(9.80665, "m/s^2", "g", units_dat);
     assert(c_acc3.success && std::abs(c_acc3.value - 1.0) < 1e-3);
 
-    ConvResult c_acc4 = handleConv(100, "gal", "m/s^2", units_dat);
+    ConvResult c_acc4 = handleConv(100, "Gal", "m/s^2", units_dat);
     assert(c_acc4.success && std::abs(c_acc4.value - 1.0) < 1e-3);
+
+    for (const auto& tc : std::vector<std::tuple<double, std::string, std::string, double>>{
+             {1, "Mm", "m", 1e6}, {1, "Mg", "kg", 1000}, {1, "Ms", "s", 1e6},
+             {1, "mPa", "Pa", .001}, {5, "MW", "dBm", 96.989700043},
+             {1, "MV", "dBmV", 180}, {0, "dBm", "W", .001},
+             {10, "dBW", "mW", 10000}, {1, "gal", "in^3", 231}, {1, "ton", "lb", 2000}}) {
+        auto result = handleConv(std::get<0>(tc), std::get<1>(tc), std::get<2>(tc), units_dat);
+        if (!result.success || std::abs(result.value - std::get<3>(tc)) > std::max(1e-6, std::abs(std::get<3>(tc)) * 1e-6)) {
+            std::cerr << "Conversion failed: " << std::get<1>(tc) << " -> " << std::get<2>(tc) << ": " << result.value << " " << result.errorMsg << std::endl;
+            assert(false);
+        }
+    }
+    for (const auto& tc : std::vector<std::tuple<double, std::string, std::string>>{
+             {9.96, "smd3", "100"}, {.04, "smd3", "R04"}, {47, "smd4", "47R0"}, {99.999, "smd4", "1000"}}) {
+        auto result = handleConv(std::get<0>(tc), std::get<1>(tc), "", units_dat);
+        if (!result.success || result.unitStr != std::get<2>(tc)) std::cerr << "Code failed: " << std::get<0>(tc) << " -> " << std::get<1>(tc) << ": " << result.unitStr << " " << result.errorMsg << std::endl;
+        assert(result.success && result.unitStr == std::get<2>(tc));
+    }
+    assert(!handleConv(1e9, "eia96", "", units_dat).success);
 
     ConvResult c_acc5 = handleConv(1, "gravity", "ft/s^2", units_dat);
     assert(c_acc5.success && std::abs(c_acc5.value - 32.174) < 0.05);

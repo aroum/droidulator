@@ -35,10 +35,7 @@ static int bridge_init_unlocked(const char *units_dat_path)
 {
     if (g_initialized) return 0;
 
-    if (!mylocale) {
-        mylocale = getenv("LOCALE");
-        if (!mylocale) mylocale = "en_US";
-    }
+    mylocale = "en_US";
 
     int ucount = 0, pcount = 0, fcount = 0;
     int err;
@@ -50,7 +47,7 @@ static int bridge_init_unlocked(const char *units_dat_path)
         err = readunits(path, stderr, &ucount, &pcount, &fcount, 0);
     }
 
-    if (err == 0 || err == E_UNKNOWNUNIT) {
+    if (err == 0) {
         g_initialized = 1;
         return 0;
     }
@@ -73,6 +70,11 @@ static int bridge_convert_unlocked(double      value,
 
     if (out_err     && err_len    > 0) out_err[0]    = '\0';
     if (out_si_unit && si_unit_len > 0) out_si_unit[0] = '\0';
+
+    if (!unit_a || strlen(unit_a) >= 256 || (unit_b && strlen(unit_b) >= 256)) {
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Unit expression is too long");
+        return 1;
+    }
 
     initializeunit(&have_unit);
     initializeunit(&want_unit);
@@ -198,6 +200,7 @@ int bridge_init(const char *path) {
         return E_MEMORY;
     }
     int result = bridge_init_unlocked(path);
+    if (result != 0) g_bridge_failed = 1;
     g_bridge_active = 0;
     pthread_mutex_unlock(&g_bridge_mutex);
     return result;
