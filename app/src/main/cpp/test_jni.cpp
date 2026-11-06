@@ -57,6 +57,11 @@ int main() {
                           included_unit, sizeof(included_unit), included_error,
                           sizeof(included_error)) == 0);
     assert(std::abs(included_value - 1.0) < 1e-9);
+    std::string long_unit(256, 'm');
+    assert(bridge_convert(1.0, long_unit.c_str(), "m", &included_value,
+                          included_unit, sizeof(included_unit), included_error,
+                          sizeof(included_error)) != 0);
+    assert(std::string(included_error).find("too long") != std::string::npos);
 
     // 4. Units adapter test (conversion to SI base units)
     //    Note: GNU Units uses "hr" for hour, "h" means hectare.
