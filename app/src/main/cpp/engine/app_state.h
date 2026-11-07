@@ -37,6 +37,8 @@ struct PlotLine {
 inline std::vector<PlotLine> plot_lines;
 inline bool plot_hold = false;
 inline bool plot_manual_limits = false;
+inline bool plot_manual_x = false;
+inline bool plot_manual_y = false;
 inline double plot_xlim_min = 0.0;
 inline double plot_xlim_max = 0.0;
 inline double plot_ylim_min = 0.0;

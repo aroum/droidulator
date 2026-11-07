@@ -169,6 +169,7 @@ class MainActivity : AppCompatActivity() {
         private val FUNC_REGEX = Regex("\\b(sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
         private val CONST_REGEX = Regex("\\b(pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
+        private val SYNTAX_REGEX = Regex("(?:${NUMBER_REGEX.pattern})|(?:${KEYWORD_REGEX.pattern})|(?:${FUNC_REGEX.pattern})|(?:${CONST_REGEX.pattern})|(?:${OP_REGEX.pattern})")
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
@@ -286,6 +287,7 @@ class MainActivity : AppCompatActivity() {
         if (!session.initialized) {
             val isNewEngine = CardulatorEngine.initializeOnce()
             loadUserDataFromStorage(isNewEngine)
+            userScripts.forEach { (name, code) -> CardulatorEngine.nativeRegisterScript(name, code) }
             session.initialized = true
         }
 
@@ -520,9 +522,10 @@ class MainActivity : AppCompatActivity() {
                 if (isHighlighting || s == null || (s is Editable && highlightingEditables.contains(s))) return
 
                 val currentText = s.toString()
+                val composing = android.view.inputmethod.BaseInputConnection.getComposingSpanStart(etInput.editableText) >= 0
                 // A pasted multiline expression must remain intact. Enter actions
                 // are handled by the editor/key listeners above.
-                if (isAutoPairEnabled && count == 1 && before == 0 && start < currentText.length) {
+                if (isAutoPairEnabled && !composing && count == 1 && before == 0 && start < currentText.length) {
                     val typed = currentText[start]
                     val next = currentText.getOrNull(start + 1)
                     val closing = when (typed) {
@@ -536,7 +539,7 @@ class MainActivity : AppCompatActivity() {
                     if (next == typed && (typed == ')' || typed == ']' || typed == '}' || typed == '\"' || typed == '\'')) {
                         etInput.post {
                             val text = etInput.editableText
-                            if (start + 1 < text.length && text[start] == typed && text[start + 1] == typed) {
+                            if (etInput.selectionStart == start + 1 && start + 1 < text.length && text[start] == typed && text[start + 1] == typed) {
                                 isHighlighting = true
                                 try { text.delete(start, start + 1); etInput.setSelection(start + 1) }
                                 finally { isHighlighting = false }
@@ -546,7 +549,7 @@ class MainActivity : AppCompatActivity() {
                     } else if (closing != null) {
                         etInput.post {
                             val text = etInput.editableText
-                            if (start < text.length && text[start] == typed) {
+                            if (etInput.selectionStart == start + 1 && start < text.length && text[start] == typed && android.view.inputmethod.BaseInputConnection.getComposingSpanStart(text) < 0) {
                                 isHighlighting = true
                                 try { text.insert(start + 1, closing.toString()); etInput.setSelection(start + 1) }
                                 finally { isHighlighting = false }
@@ -754,6 +757,7 @@ class MainActivity : AppCompatActivity() {
                         }
                     }
                     "Scripts" -> {
+                        userScripts.forEach { CardulatorEngine.nativeUnregisterScript(it.first) }
                         userScripts.clear()
                     }
                 }
@@ -1098,8 +1102,9 @@ class MainActivity : AppCompatActivity() {
         try {
             etInput.setText("")
 
-            val res = CardulatorEngine.nativeEvaluate(input)
-            val isError = res.startsWith("ERROR: ")
+            val evaluation = CardulatorEngine.nativeEvaluateDetailed(input)
+            val res = evaluation[1]
+            val isError = evaluation[0] == "error"
             if (isError) {
                 val errDetails = res.substring(7)
                 showErrorOverlay(errDetails)
@@ -1115,7 +1120,7 @@ class MainActivity : AppCompatActivity() {
             }
             replHistoryIndex = -1
 
-            if (!res.startsWith("ERROR: ")) {
+            if (!isError) {
                 saveUserDataToStorage()
                 // Switch to Plot tab if a plot command was issued successfully
                 if (input.startsWith("plot(") || input.startsWith("plot.")) {
@@ -1251,9 +1256,7 @@ class MainActivity : AppCompatActivity() {
                             dimColor = dimColor,
                             onEdit = if (isHistory) null else fun() {
                                 showDefinitionEditorDialog("Edit Variable '$name'", "$name = $value", "$name = $value") { newExpr ->
-                                    CardulatorEngine.nativeEvaluate(newExpr)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
+                                    saveDefinition(newExpr, tabName)
                                 }
                             },
                             onDelete = if (isHistory) null else fun() {
@@ -1288,9 +1291,7 @@ class MainActivity : AppCompatActivity() {
                             {
                                 showDefinitionEditorDialog("Edit Constant '$name'", "$name = $value", "$name = $value") { newExpr ->
                                     val fullExpr = if (newExpr.startsWith("const ")) newExpr else "const $newExpr"
-                                    CardulatorEngine.nativeEvaluate(fullExpr)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
+                                    saveDefinition(fullExpr, tabName)
                                 }
                             }
                         } else null,
@@ -1336,9 +1337,7 @@ class MainActivity : AppCompatActivity() {
                             },
                             onEdit = {
                                 showDefinitionEditorDialog("Edit Formula '$name'", line, line) { newFormula ->
-                                    CardulatorEngine.nativeEvaluate(newFormula)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
+                                    saveDefinition(newFormula, tabName)
                                 }
                             },
                             onDelete = {
@@ -1383,14 +1382,21 @@ class MainActivity : AppCompatActivity() {
                             },
                             onEdit = {
                                 showFullScriptEditorDialog(scriptName, scriptCode) { newName, newCode ->
+                                    if (userScripts.withIndex().any { it.index != i && it.value.first == newName }) {
+                                        Toast.makeText(this, "A script with this name already exists", Toast.LENGTH_LONG).show()
+                                        return@showFullScriptEditorDialog false
+                                    }
+                                    if (newName != scriptName) CardulatorEngine.nativeUnregisterScript(scriptName)
                                     userScripts[i] = Pair(newName, newCode)
                                     CardulatorEngine.nativeRegisterScript(newName, newCode)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
+                                    true
                                 }
                             },
                             onDelete = {
                                 showConfirmDeleteDialog(scriptName) {
+                                    CardulatorEngine.nativeUnregisterScript(scriptName)
                                     userScripts.removeAt(i)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
@@ -1613,6 +1619,7 @@ class MainActivity : AppCompatActivity() {
         positiveText: String? = "SAVE",
         showCancel: Boolean = true,
         customButtons: List<View>? = null,
+        positiveValidator: (() -> Boolean)? = null,
         onPositive: (() -> Unit)? = null
     ): Dialog {
         val dialog = trackDialog(Dialog(this, androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar))
@@ -1695,6 +1702,7 @@ class MainActivity : AppCompatActivity() {
                     if (showCancel) lp.setMargins(dp(16), 0, 0, 0)
                     layoutParams = lp
                     setOnClickListener {
+                        if (positiveValidator?.invoke() == false) return@setOnClickListener
                         onPositive?.invoke()
                         dialog.dismiss()
                     }
@@ -1820,7 +1828,7 @@ class MainActivity : AppCompatActivity() {
             // Preview: evaluate without modifying REPL history
             val rawRes = CardulatorEngine.nativeEvaluatePreview(currentEvalExpr)
 
-            currentRes = if (rawRes.startsWith("ERROR")) rawRes else rawRes
+            currentRes = rawRes
             tvResultValue.text = "$currentEvalExpr = $currentRes"
         }
 
@@ -1864,8 +1872,9 @@ class MainActivity : AppCompatActivity() {
 
         btnExport.setOnClickListener {
             if (currentEvalExpr.isNotEmpty() && !currentRes.startsWith("Enter")) {
-                val res = CardulatorEngine.nativeEvaluate(currentEvalExpr)
-                val isErr = res.startsWith("ERROR: ")
+                val evaluation = CardulatorEngine.nativeEvaluateDetailed(currentEvalExpr)
+                val res = evaluation[1]
+                val isErr = evaluation[0] == "error"
                 appendOutputEntry(currentEvalExpr, res, isErr)
                 if (replHistory.isEmpty() || replHistory.last() != currentEvalExpr) {
                     replHistory.add(currentEvalExpr)
@@ -1884,7 +1893,19 @@ class MainActivity : AppCompatActivity() {
         )
     }
 
-    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, onSave: (String) -> Unit) {
+    private fun saveDefinition(expression: String, tab: String): Boolean {
+        val evaluation = CardulatorEngine.nativeEvaluateDetailed(expression)
+        val result = evaluation[1]
+        if (evaluation[0] == "error") {
+            Toast.makeText(this, result, Toast.LENGTH_LONG).show()
+            return false
+        }
+        saveUserDataToStorage()
+        refreshTabContent(tab)
+        return true
+    }
+
+    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, onSave: (String) -> Boolean) {
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
         val fgDim = ThemePalette.fgDim
@@ -1914,15 +1935,14 @@ class MainActivity : AppCompatActivity() {
             et.post { applySyntaxHighlighting(et.editableText) }
         }
 
-        showGruvboxCustomDialog(title, et, positiveText = "SAVE") {
+        showGruvboxCustomDialog(title, et, positiveText = "SAVE", positiveValidator = {
             val valStr = et.text.toString().trim()
-            if (valStr.isNotEmpty()) {
-                onSave(valStr)
-            }
-        }
+            if (valStr.isEmpty()) { et.error = "Enter an expression"; false }
+            else onSave(valStr)
+        })
     }
 
-    private fun showFullScriptEditorDialog(initialName: String, initialCode: String, onSave: (String, String) -> Unit) {
+    private fun showFullScriptEditorDialog(initialName: String, initialCode: String, onSave: (String, String) -> Boolean) {
         val dialog = trackDialog(Dialog(this, R.style.GruvboxFullscreenDialog))
         dialog.setContentView(R.layout.dialog_script_editor)
 
@@ -2036,8 +2056,7 @@ class MainActivity : AppCompatActivity() {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    onSave(newName, newCode)
-                    dialog.dismiss()
+                    if (onSave(newName, newCode)) dialog.dismiss()
                 } else {
                     Toast.makeText(this@MainActivity, "Name and code cannot be empty", Toast.LENGTH_SHORT).show()
                 }
@@ -2059,10 +2078,15 @@ class MainActivity : AppCompatActivity() {
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Scripts") {
             showFullScriptEditorDialog("", "") { name, code ->
+                if (userScripts.any { it.first == name }) {
+                    Toast.makeText(this, "A script with this name already exists", Toast.LENGTH_LONG).show()
+                    return@showFullScriptEditorDialog false
+                }
                 userScripts.add(Pair(name, code))
                 CardulatorEngine.nativeRegisterScript(name, code)
                 saveUserDataToStorage()
                 refreshTabContent("Scripts")
+                true
             }
             return
         }
@@ -2075,17 +2099,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         showDefinitionEditorDialog(title, "", hintText) { expr ->
-            when (activeTab) {
-                "Constants" -> {
-                    val fullExpr = if (expr.startsWith("const ")) expr else "const $expr"
-                    CardulatorEngine.nativeEvaluate(fullExpr)
-                }
-                else -> {
-                    CardulatorEngine.nativeEvaluate(expr)
-                }
-            }
-            saveUserDataToStorage()
-            refreshTabContent(activeTab)
+            val fullExpr = if (activeTab == "Constants" && !expr.startsWith("const ")) "const $expr" else expr
+            saveDefinition(fullExpr, activeTab)
         }
     }
 
@@ -2218,7 +2233,10 @@ class MainActivity : AppCompatActivity() {
                 userScripts.clear()
                 for (i in 0 until scriptsArray.length()) {
                     val obj = scriptsArray.getJSONObject(i)
-                    val name = obj.getString("name")
+                    val originalName = obj.getString("name")
+                    var name = originalName
+                    var suffix = 2
+                    while (userScripts.any { it.first == name }) name = "${originalName}_${suffix++}"
                     val code = obj.getString("code")
                     userScripts.add(Pair(name, code))
                     // Register each script so run(name) can find it
@@ -2370,54 +2388,16 @@ class MainActivity : AppCompatActivity() {
         if (quote != null) ssb.setSpan(ForegroundColorSpan(ThemePalette.green), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         val code = String(masked)
 
-        // 1. Highlight numbers
-        for (match in NUMBER_REGEX.findAll(code)) {
-            ssb.setSpan(
-                ForegroundColorSpan(numColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 2. Highlight control flow keywords
-        for (match in KEYWORD_REGEX.findAll(code)) {
-            ssb.setSpan(
-                ForegroundColorSpan(keywordColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 3. Highlight functions
-        for (match in FUNC_REGEX.findAll(code)) {
-            ssb.setSpan(
-                ForegroundColorSpan(funcColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 4. Highlight built-in constants & history variables
-        for (match in CONST_REGEX.findAll(code)) {
-            ssb.setSpan(
-                ForegroundColorSpan(constColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 5. Highlight operators
-        for (match in OP_REGEX.findAll(code)) {
-            ssb.setSpan(
-                ForegroundColorSpan(opColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
+        for (match in SYNTAX_REGEX.findAll(code)) {
+            val color = when {
+                NUMBER_REGEX.matches(match.value) -> numColor
+                KEYWORD_REGEX.matches(match.value) -> keywordColor
+                FUNC_REGEX.matches(match.value) -> funcColor
+                CONST_REGEX.matches(match.value) -> constColor
+                else -> opColor
+            }
+            ssb.setSpan(ForegroundColorSpan(color), startOffset + match.range.first,
+                startOffset + match.range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         }
 
         // 6. Rainbow Bracket Highlighting & Matching

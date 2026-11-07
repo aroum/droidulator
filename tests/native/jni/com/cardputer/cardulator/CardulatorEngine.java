@@ -2,6 +2,8 @@ package com.cardputer.cardulator;
 public class CardulatorEngine {
 
   native void nativeInit(); native void nativeInitUnits(String path); native String nativeEvaluate(String s);
+  native String[] nativeEvaluateDetailed(String s);
+  native void nativeRegisterScript(String name, String code); native void nativeUnregisterScript(String name);
   native double nativeGetLastNumericVal();
   native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
@@ -16,6 +18,18 @@ public class CardulatorEngine {
     for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
     String all=e.nativeGetVariables(); if (!all.contains("e3 = 3") || !all.contains("e130 = 130") || all.contains("e2 = 2\n")) throw new AssertionError(all);
     if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
+    String[] printedError = e.nativeEvaluateDetailed("print(\"ERROR: x\")");
+    if (!printedError[0].equals("ok") || !printedError[1].equals("ERROR: x")) throw new AssertionError("print status");
+    String[] actualError = e.nativeEvaluateDetailed("sqrt(-1)");
+    if (!actualError[0].equals("error")) throw new AssertionError("error status");
+    for (String unit : new String[]{"rad", "rpm", "rem", "rankine"}) {
+      String result = e.nativeEvaluate("conv(0, \"" + unit + "\")");
+      if (result.startsWith("ERROR") || !result.contains("0")) throw new AssertionError(unit + ": " + result);
+    }
+    e.nativeRegisterScript("named_test", "print(42)");
+    if (e.nativeEvaluate("run(\"named_test\")").startsWith("ERROR")) throw new AssertionError("script registration");
+    e.nativeUnregisterScript("named_test");
+    if (!e.nativeEvaluate("run(\"named_test\")").startsWith("ERROR")) throw new AssertionError("script deletion");
     for (String[] tc : new String[][]{{"3!+4!", "30"}, {"(2+1)!*2!", "12"}, {"2 xor 3", "0"}, {"0 xor 3", "1"}}) {
       String output = e.nativeEvaluate(tc[0]);
       if (output.startsWith("ERROR") || e.nativeGetLastNumericVal() != Double.parseDouble(tc[1])) throw new AssertionError(tc[0] + ": " + output);
@@ -35,7 +49,7 @@ public class CardulatorEngine {
     String mega=e.nativeEvaluate("conv(1, \"Mm\", \"m\")");
     if (mega.startsWith("ERROR") || Math.abs(e.nativeGetLastNumericVal() - 1e6) > 1e-6) throw new AssertionError(mega);
     String p=e.nativeEvaluate("plot([0,1], [1234567.89,2])"); if (p.startsWith("ERROR")) throw new AssertionError(p);
-    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 5) throw new AssertionError("plot");
+    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 6) throw new AssertionError("plot");
     System.out.println("JNI tests passed");
   }
 }

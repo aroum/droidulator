@@ -494,9 +494,18 @@ int main() {
     std::string plot_err = "";
     bool handled = handlePlotCommands("plot.xlim([-5, 5])", plot_err, plot_res);
     assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -5.0 && plot_xlim_max == 5.0);
+    assert(plot_manual_x && !plot_manual_y);
+
+    handled = handlePlotCommands("plot.ylim(5, 5)", plot_err, plot_res);
+    assert(handled && !plot_err.empty() && !plot_manual_y);
+    plot_err.clear();
+    handled = handlePlotCommands("plot.xlim(5, -5)", plot_err, plot_res);
+    assert(handled && !plot_err.empty() && plot_xlim_min == -5.0 && plot_xlim_max == 5.0);
+    plot_err.clear();
 
     handled = handlePlotCommands("plot.ylim([-10 10])", plot_err, plot_res);
     assert(handled && plot_err.empty() && plot_manual_limits && plot_ylim_min == -10.0 && plot_ylim_max == 10.0);
+    assert(plot_manual_x && plot_manual_y);
 
     handled = handlePlotCommands("plot.xlim(-2, 2)", plot_err, plot_res);
     assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -2.0 && plot_xlim_max == 2.0);

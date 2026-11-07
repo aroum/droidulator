@@ -21,6 +21,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         plot_lines.clear();
         plot_hold = false;
         plot_manual_limits = false;
+        plot_manual_x = plot_manual_y = false;
         result = 0.0;
         return true;
     }
@@ -48,11 +49,13 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             std::string max_str = arg.substr(sep + 1);
             std::string eval_err;
             double min_v = evaluate(min_str, eval_err);
+            if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && !std::isnan(min_v) && !std::isnan(max_v)) {
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v) {
                 plot_xlim_min = min_v;
                 plot_xlim_max = max_v;
                 plot_manual_limits = true;
+                plot_manual_x = true;
             } else {
                 err = "Limit Eval Error";
             }
@@ -74,11 +77,13 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             std::string max_str = arg.substr(sep + 1);
             std::string eval_err;
             double min_v = evaluate(min_str, eval_err);
+            if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && !std::isnan(min_v) && !std::isnan(max_v)) {
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v) {
                 plot_ylim_min = min_v;
                 plot_ylim_max = max_v;
                 plot_manual_limits = true;
+                plot_manual_y = true;
             } else {
                 err = "Limit Eval Error";
             }
@@ -238,6 +243,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         
         plot_lines.push_back({ x_vec, y_vec, color_val, style_str });
         plot_manual_limits = false;
+        plot_manual_x = plot_manual_y = false;
         result = 1.0;
         return true;
     }

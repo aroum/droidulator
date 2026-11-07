@@ -20,11 +20,13 @@ object CardulatorEngine {
     private external fun nativeInit()
     external fun nativeInitUnits(unitsDataPath: String)
     external fun nativeEvaluate(input: String): String
+    external fun nativeEvaluateDetailed(input: String): Array<String>
     external fun nativeEvaluatePreview(input: String): String
     external fun nativeAutocomplete(input: String, caretPos: Int, outCursor: IntArray): String
     external fun nativeResetAutocomplete()
     external fun nativeRunScript(code: String): String
     external fun nativeRegisterScript(name: String, code: String)
+    external fun nativeUnregisterScript(name: String)
     external fun nativeGetScriptFunctions(): Array<Array<String>>
     external fun nativeRestoreScriptFunction(fields: Array<String>)
     external fun nativeRestoreScalar(name: String, value: Double, isConstant: Boolean)
