@@ -2490,11 +2490,22 @@ class MainActivity : AppCompatActivity() {
     private fun applySyntaxHighlighting(editable: Editable) {
         if (!highlightingEditables.add(editable)) return
         try {
-            val existingSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
-            for (span in existingSpans) {
-                editable.removeSpan(span)
+            val text = editable.toString()
+            val highlighted = android.text.SpannableStringBuilder(text)
+            applyExpressionSyntaxHighlighting(highlighted, 0, text)
+            data class SpanKey(val start: Int, val end: Int, val color: Int)
+            val existing = mutableMapOf<SpanKey, ArrayDeque<ForegroundColorSpan>>()
+            for (span in editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)) {
+                val key = SpanKey(editable.getSpanStart(span), editable.getSpanEnd(span), span.foregroundColor)
+                existing.getOrPut(key) { ArrayDeque() }.addLast(span)
             }
-            applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
+            for (span in highlighted.getSpans(0, highlighted.length, ForegroundColorSpan::class.java)) {
+                val key = SpanKey(highlighted.getSpanStart(span), highlighted.getSpanEnd(span), span.foregroundColor)
+                val reusable = existing[key]
+                if (reusable != null && reusable.isNotEmpty()) reusable.removeFirst()
+                else editable.setSpan(ForegroundColorSpan(key.color), key.start, key.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            }
+            for (spans in existing.values) for (span in spans) editable.removeSpan(span)
         } finally {
             highlightingEditables.remove(editable)
         }
