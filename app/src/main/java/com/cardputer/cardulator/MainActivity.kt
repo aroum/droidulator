@@ -294,6 +294,7 @@ class MainActivity : AppCompatActivity() {
         if (!session.initialized) {
             val isNewEngine = CardulatorEngine.initializeOnce()
             loadUserDataFromStorage(isNewEngine)
+            if (isNewEngine) PlotStateStorage(this).restore()
             userScripts.forEach { (name, code) -> CardulatorEngine.nativeRegisterScript(name, code) }
             session.initialized = true
         }
@@ -1129,6 +1130,7 @@ class MainActivity : AppCompatActivity() {
 
             if (!isError) {
                 saveUserDataToStorage()
+                if (input.startsWith("plot(") || input.startsWith("plot.") || input.startsWith("run(")) savePlotState()
                 // Switch to Plot tab if a plot command was issued successfully
                 if (input.startsWith("plot(") || input.startsWith("plot.")) {
                     val plotIdx = tabs.indexOf("Plot")
@@ -1383,6 +1385,7 @@ class MainActivity : AppCompatActivity() {
                             dimColor = dimColor,
                             onRun = {
                                 val log = CardulatorEngine.nativeRunScript(scriptCode)
+                                savePlotState()
                                 saveUserDataToStorage()
                                 appendRawOutput("> SCRIPT OUTPUT ($scriptName):\n$log\n")
                                 showScriptOutputDialog("Script Output: $scriptName", log)
@@ -2047,6 +2050,7 @@ class MainActivity : AppCompatActivity() {
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
                     val log = CardulatorEngine.nativeRunScript(newCode)
+                    savePlotState()
                     saveUserDataToStorage()
                     appendRawOutput("> SCRIPT OUTPUT ($newName):\n$log\n")
                     showScriptOutputDialog("Script Output: $newName", log)
@@ -2109,6 +2113,14 @@ class MainActivity : AppCompatActivity() {
         showDefinitionEditorDialog(title, "", hintText) { expr ->
             val fullExpr = if (activeTab == "Constants" && !expr.startsWith("const ")) "const $expr" else expr
             saveDefinition(fullExpr, activeTab)
+        }
+    }
+
+    private fun savePlotState() {
+        try {
+            PlotStateStorage(this).save(CardulatorEngine.nativeGetPlotLines(), CardulatorEngine.nativeGetPlotLimits())
+        } catch (error: Exception) {
+            android.util.Log.e("Droidulator", "Unable to snapshot plot", error)
         }
     }
 

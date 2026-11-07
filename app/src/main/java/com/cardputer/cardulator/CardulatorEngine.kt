@@ -44,6 +44,7 @@ object CardulatorEngine {
     external fun nativeDeleteFormula(name: String): Boolean
     external fun nativeGetPlotLines(): Array<NativePlotLine>
     external fun nativeGetPlotLimits(): DoubleArray
+    external fun nativeRestorePlot(lines: Array<NativePlotLine>, limits: DoubleArray)
     external fun nativeFormatNumber(value: Double): String
     external fun nativeHasLastNumeric(): Boolean
     external fun nativeGetLastNumericVal(): Double

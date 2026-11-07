@@ -37,6 +37,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject t
     user_script_funcs.clear();
     user_consts.clear();
     user_arrays.clear();
+    user_named_scripts.clear();
     script_console_output.clear();
     resetAutocompleteWords();
     resetTabState();
@@ -846,14 +847,61 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLines(JNIEnv *env, j
 JNIEXPORT jdoubleArray JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLimits(JNIEnv *env, jobject) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    const jdouble limits[] = {plot_manual_x ? 1.0 : 0.0, plot_xlim_min, plot_xlim_max, plot_ylim_min, plot_ylim_max, plot_manual_y ? 1.0 : 0.0};
-    jdoubleArray result = env->NewDoubleArray(6);
-    if (result) env->SetDoubleArrayRegion(result, 0, 6, limits);
+    const jdouble limits[] = {plot_manual_x ? 1.0 : 0.0, plot_xlim_min, plot_xlim_max, plot_ylim_min, plot_ylim_max, plot_manual_y ? 1.0 : 0.0, plot_hold ? 1.0 : 0.0};
+    jdoubleArray result = env->NewDoubleArray(7);
+    if (result) env->SetDoubleArrayRegion(result, 0, 7, limits);
     return result;
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
 } catch (...) {
     throwJavaException(env, "java/lang/RuntimeException", "Unable to get plot limits"); return nullptr;
+}
+
+JNIEXPORT void JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeRestorePlot(JNIEnv *env, jobject, jobjectArray lines, jdoubleArray limitsArray) try {
+    std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
+    if (!lines || !limitsArray || env->GetArrayLength(lines) > 4 || env->GetArrayLength(limitsArray) != 7) {
+        throwJavaException(env, "java/lang/IllegalArgumentException", "Invalid saved plot"); return;
+    }
+    jdouble limits[7]; env->GetDoubleArrayRegion(limitsArray, 0, 7, limits);
+    if (env->ExceptionCheck()) return;
+    auto validRange = [](double a, double b) { return std::isfinite(a) && std::isfinite(b) && a < b && std::isfinite(b - a); };
+    if ((limits[0] != 0 && !validRange(limits[1], limits[2])) || (limits[5] != 0 && !validRange(limits[3], limits[4]))) {
+        throwJavaException(env, "java/lang/IllegalArgumentException", "Invalid saved plot limits"); return;
+    }
+    jclass cls = env->FindClass("com/cardputer/cardulator/NativePlotLine");
+    if (!cls) return;
+    jfieldID xf = env->GetFieldID(cls, "x", "[D"), yf = env->GetFieldID(cls, "y", "[D");
+    jfieldID cf = env->GetFieldID(cls, "color", "I"), sf = env->GetFieldID(cls, "linestyle", "Ljava/lang/String;");
+    env->DeleteLocalRef(cls);
+    if (!xf || !yf || !cf || !sf || env->ExceptionCheck()) return;
+    std::vector<PlotLine> restored;
+    for (jsize i = 0; i < env->GetArrayLength(lines); ++i) {
+        jobject item = env->GetObjectArrayElement(lines, i);
+        if (!item) { throwJavaException(env, "java/lang/IllegalArgumentException", "Invalid saved plot line"); return; }
+        auto x = static_cast<jdoubleArray>(env->GetObjectField(item, xf));
+        auto y = static_cast<jdoubleArray>(env->GetObjectField(item, yf));
+        auto style = static_cast<jstring>(env->GetObjectField(item, sf));
+        if (!x || !y || !style || env->GetArrayLength(x) != env->GetArrayLength(y) || env->GetArrayLength(x) > 100000) {
+            throwJavaException(env, "java/lang/IllegalArgumentException", "Invalid saved plot points"); return;
+        }
+        const jsize n = env->GetArrayLength(x);
+        PlotLine line; line.x.resize(n); line.y.resize(n);
+        if (n > 0) { env->GetDoubleArrayRegion(x, 0, n, line.x.data()); env->GetDoubleArrayRegion(y, 0, n, line.y.data()); }
+        line.color = static_cast<uint16_t>(env->GetIntField(item, cf)); line.linestyle = toCppString(env, style);
+        env->DeleteLocalRef(x); env->DeleteLocalRef(y); env->DeleteLocalRef(style); env->DeleteLocalRef(item);
+        if (env->ExceptionCheck()) return;
+        restored.push_back(std::move(line));
+    }
+    plot_lines = std::move(restored);
+    plot_manual_x = limits[0] != 0; plot_manual_y = limits[5] != 0;
+    plot_manual_limits = plot_manual_x || plot_manual_y;
+    plot_xlim_min = limits[1]; plot_xlim_max = limits[2]; plot_ylim_min = limits[3]; plot_ylim_max = limits[4];
+    plot_hold = limits[6] != 0;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unable to restore plot");
 }
 
 // Register a named script so it can be called from run(name)

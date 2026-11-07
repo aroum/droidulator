@@ -7,6 +7,7 @@ public class CardulatorEngine {
   native double nativeGetLastNumericVal();
   native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
+  native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
   native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
   public static void main(String[] args) {
     System.load(args[0]);
@@ -49,7 +50,11 @@ public class CardulatorEngine {
     String mega=e.nativeEvaluate("conv(1, \"Mm\", \"m\")");
     if (mega.startsWith("ERROR") || Math.abs(e.nativeGetLastNumericVal() - 1e6) > 1e-6) throw new AssertionError(mega);
     String p=e.nativeEvaluate("plot([0,1], [1234567.89,2])"); if (p.startsWith("ERROR")) throw new AssertionError(p);
-    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 6) throw new AssertionError("plot");
+    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 7) throw new AssertionError("plot");
+    double[] plotLimits = e.nativeGetPlotLimits();
+    e.nativeEvaluate("plot.close()");
+    e.nativeRestorePlot(lines, plotLimits);
+    if (e.nativeGetPlotLines().length != 1 || e.nativeGetPlotLines()[0].y[0] != 1234567.89) throw new AssertionError("restore plot");
     System.out.println("JNI tests passed");
   }
 }
