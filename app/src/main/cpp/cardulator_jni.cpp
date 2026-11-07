@@ -250,8 +250,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
 
         if (is_assign) {
             // History names are reserved for computed results.
-            if (isHistoryName(assign_var1) || isHistoryName(assign_var2))
-                return toJavaString(env, "ERROR: History variables are read-only");
+            if (isReservedName(assign_var1) || isReservedName(assign_var2))
+                return toJavaString(env, "ERROR: Reserved name");
             // Save value to first variable
             if (!assign_var1.empty()) {
                 auto it = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
@@ -352,6 +352,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                     std::string fname = stmt.substr(kw_len, open_paren - kw_len);
                     fname.erase(0, fname.find_first_not_of(" \t"));
                     fname.erase(fname.find_last_not_of(" \t") + 1);
+                    if (isReservedName(fname)) return toJavaString(env, "ERROR: Reserved name: " + fname);
 
                     std::string params_str = stmt.substr(open_paren + 1, close_paren - open_paren - 1);
                     std::vector<std::string> params;
@@ -365,6 +366,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                         if (comma == std::string::npos) break;
                         p_pos = comma + 1;
                     }
+                    if (std::any_of(params.begin(), params.end(), isReservedName)) return toJavaString(env, "ERROR: Reserved parameter");
 
                     std::vector<std::string> body_stmts;
                     size_t j = i + 1;
@@ -973,9 +975,10 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScriptFunction(JNIEn
     }
     size_t used = 0;
     const auto count = std::stoul(values[1], &used);
-    if (used != values[1].size() || count > values.size() - 2 || values[0].empty()) return;
+    if (used != values[1].size() || count > values.size() - 2 || values[0].empty() || isReservedName(values[0])) return;
     CustomScriptFunc fn{values[0], {}, {}};
     fn.params.assign(values.begin() + 2, values.begin() + 2 + count);
+    if (std::any_of(fn.params.begin(), fn.params.end(), isReservedName)) return;
     fn.statements.assign(values.begin() + 2 + count, values.end());
     user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(),
         [&](const CustomScriptFunc& existing) { return existing.name == fn.name; }), user_script_funcs.end());
@@ -990,7 +993,7 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScalar(JNIEnv *env, jobject, jstring nameValue, jdouble value, jboolean isConstant) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     const std::string name = toCppString(env, nameValue);
-    if (name.empty() || isHistoryName(name)) return;
+    if (name.empty() || isReservedName(name)) return;
     if (isConstant) {
         auto it = std::find_if(user_consts.begin(), user_consts.end(), [&](const UserConst& item) { return item.name == name; });
         if (it == user_consts.end()) user_consts.push_back({name, value}); else it->val = value;
@@ -1009,7 +1012,7 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreArray(JNIEnv *env, jobject, jstring nameValue, jdoubleArray values) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     const std::string name = toCppString(env, nameValue);
-    if (name.empty() || isHistoryName(name) || !values) return;
+    if (name.empty() || isReservedName(name) || !values) return;
     const jsize count = env->GetArrayLength(values);
     std::vector<double> restored(static_cast<size_t>(count));
     if (count) env->GetDoubleArrayRegion(values, 0, count, restored.data());

@@ -40,6 +40,60 @@ int main() {
     std::cout << "1k + 500 = " << res2 << std::endl;
     assert(res2 == 1500.0);
 
+    auto expectNumber = [](const std::string& expression, double expected) {
+        std::string error;
+        double actual = evaluate(expression, error);
+        if (!error.empty() || std::abs(actual - expected) > std::max(1e-10, std::abs(expected) * 1e-9)) {
+            std::cerr << "Unexpected result: " << expression << " = " << actual << "; " << error << std::endl;
+            assert(false);
+        }
+    };
+    expectNumber("1 / 1e5", 1e-5);
+    expectNumber("1 / 10k", 1e-4);
+    fmt_mode = 4; fmt_precision = 2;
+    assert(fmtNum(999.999) == "1.00e+03");
+    fmt_mode = 0; fmt_precision = 6;
+    for (const auto& expression : {"gcd(1e30,2)", "lcm(4000000000,4000000001)", "sum(i,-5e18,5e18,1)", "sum(i,1,400,sum(j,1,400,1))"}) {
+        std::string error;
+        evaluate(expression, error);
+        if (error.empty()) { std::cerr << "Expected error: " << expression << std::endl; assert(false); }
+    }
+    {
+        std::string error; bool isArray = false;
+        parseArrayExpr("0:1:1e10", isArray, error);
+        assert(!error.empty());
+        bool isDefinition = false;
+        evaluateInput("oversized=[0:1:1e10]", error, isDefinition); assert(!error.empty());
+        evaluateInput("a=[1,2,3]", error, isDefinition); assert(error.empty());
+        evaluateInput("f(x)=x^2", error, isDefinition); assert(error.empty());
+        auto values = parseArrayExpr("f(a)", isArray, error);
+        assert(error.empty() && isArray && values.size() == 3 && values[1] == 4);
+        evaluateInput("b=f(a)", error, isDefinition); assert(error.empty());
+        expectNumber("b[2]", 4);
+        std::string longArrayExpression = "a";
+        for (int i = 0; i < 30; ++i) longArrayExpression += "+a";
+        evaluateInput("many=" + longArrayExpression, error, isDefinition); assert(error.empty());
+        expectNumber("many[2]", 62);
+        parseArrayExpr("foo(a)", isArray, error); assert(!error.empty());
+        user_arrays.clear(); user_funcs.clear();
+        for (const auto& expression : {"pi=3", "sin=2", "sqrt(x)=5", "pow=3", "f(pi)=2"}) {
+            evaluateInput(expression, error, isDefinition); assert(!error.empty());
+        }
+        runScript("for (sin=1; sin<2; sin++) { print(sin) }");
+        assert(!script_console_output.empty() && script_console_output.front().find("Reserved name") != std::string::npos);
+        runScript("print(\"sin=2\")");
+        assert(!script_console_output.empty() && script_console_output.front().find("Reserved name") == std::string::npos);
+        evaluateInput("g(x)=x*2", error, isDefinition); assert(error.empty());
+        expectNumber("log(100)", 2);
+        evaluateInput("n(x)=x+1", error, isDefinition); assert(error.empty());
+        expectNumber("sin(0)", 0);
+        evaluateInput("d(x,y)=x-y", error, isDefinition); assert(error.empty());
+        user_args.push_back({"x",2}); user_args.push_back({"y",5});
+        expectNumber("d(y,x)", 3);
+        expectNumber("g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)", 22);
+        user_args.clear(); user_funcs.clear();
+    }
+
     for (const auto& tc : std::vector<std::pair<std::string, double>>{
              {"3!+4!", 30}, {"(2+1)!*2!", 12}, {"3!!", 720},
              {"3! != 4!", 1}, {"2 xor 3", 0}, {"1 xor 1", 0},

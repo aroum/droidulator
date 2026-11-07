@@ -59,6 +59,7 @@ constexpr size_t MAX_HISTORY_VALUES = 128;
 size_t appendHistory(double value);
 void clearHistory();
 bool isHistoryName(const std::string& name);
+bool isReservedName(const std::string& name);
 extern std::vector<UserArg> user_args;
 extern std::vector<UserConst> user_consts;
 extern std::vector<std::string> user_funcs;

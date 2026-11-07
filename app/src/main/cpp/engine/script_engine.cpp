@@ -47,10 +47,38 @@ static bool writesHistoryVariable(const std::string& code) {
     return false;
 }
 
+static std::string reservedAssignment(const std::string& code) {
+    char quote = 0;
+    bool comment = false;
+    for (size_t i = 0; i < code.size();) {
+        const char c = code[i];
+        if (comment) { if (c == '\n') comment = false; ++i; continue; }
+        if (quote) { if (c == '\\' && i + 1 < code.size()) i += 2; else { if (c == quote) quote = 0; ++i; } continue; }
+        if (c == '\'' || c == '"') { quote = c; ++i; continue; }
+        if (c == '#' || (c == '/' && i + 1 < code.size() && code[i + 1] == '/')) { comment = true; ++i; continue; }
+        if (!std::isalpha(static_cast<unsigned char>(c)) && c != '_') { ++i; continue; }
+        const size_t start = i++;
+        while (i < code.size() && (std::isalnum(static_cast<unsigned char>(code[i])) || code[i] == '_')) ++i;
+        const auto name = code.substr(start, i - start);
+        if (!isReservedName(name)) continue;
+        size_t op = i;
+        while (op < code.size() && std::isspace(static_cast<unsigned char>(code[op]))) ++op;
+        if (op >= code.size()) continue;
+        if (code[op] == '=' && (op + 1 >= code.size() || code[op + 1] != '=')) return name;
+        if (op + 1 < code.size() && ((code[op] == '+' || code[op] == '-') && code[op + 1] == code[op])) return name;
+        if (op + 1 < code.size() && (code[op] == '+' || code[op] == '-' || code[op] == '*' || code[op] == '/') && code[op + 1] == '=') return name;
+    }
+    return {};
+}
+
 void runScript(const std::string& code) {
     script_console_output.clear();
     if (writesHistoryVariable(code)) {
         script_console_output.push_back("History variables are read-only");
+        return;
+    }
+    if (auto name = reservedAssignment(code); !name.empty()) {
+        script_console_output.push_back("Reserved name: " + name);
         return;
     }
     plot_lines.clear();
@@ -161,6 +189,12 @@ void runScript(const std::string& code) {
                 std::string fname = line.substr(kw_len, open_paren - kw_len);
                 fname.erase(0, fname.find_first_not_of(" \t"));
                 fname.erase(fname.find_last_not_of(" \t") + 1);
+                if (isReservedName(fname)) {
+                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + fname);
+                    const size_t end = findMatchingBlockEnd(lines, ip);
+                    ip = end == std::string::npos ? lines.size() : end + 1;
+                    continue;
+                }
                 
                 std::string params_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
                 std::vector<std::string> params;
@@ -173,6 +207,12 @@ void runScript(const std::string& code) {
                     if (!p.empty()) params.push_back(p);
                     if (comma == std::string::npos) break;
                     p_pos = comma + 1;
+                }
+                if (std::any_of(params.begin(), params.end(), isReservedName)) {
+                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved parameter");
+                    const size_t end = findMatchingBlockEnd(lines, ip);
+                    ip = end == std::string::npos ? lines.size() : end + 1;
+                    continue;
                 }
 
                 size_t end_ip = findMatchingBlockEnd(lines, ip);
@@ -613,6 +653,7 @@ void runScript(const std::string& code) {
             std::string var_name = line.substr(0, line.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
+            if (isReservedName(var_name)) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + var_name); ip++; continue; }
             char op = line[line.size() - 1];
             bool found = false;
             for (auto& arg : user_args) {
@@ -683,6 +724,9 @@ void runScript(const std::string& code) {
                     if (comma == std::string::npos) break;
                     v_pos = comma + 1;
                 }
+                bool reserved = false;
+                for (const auto& name : lhs_vars) if (isReservedName(name)) { reserved = true; break; }
+                if (reserved) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name"); ip++; continue; }
                 
                 // Evaluate RHS expression
                 bool is_arr = false;
@@ -786,6 +830,7 @@ void runScript(const std::string& code) {
                 continue;
             }
             
+            if (isReservedName(lhs)) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + lhs); ip++; continue; }
             bool is_const_assign = false;
             for (const auto& cn : user_consts) {
                 if (cn.name == lhs) {

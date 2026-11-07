@@ -55,6 +55,22 @@ std::vector<std::string> autocomplete_words = {
     "Cnk(", "sum(", "prod(", "min(", "max(", "if(", "iff("
 };
 static const std::vector<std::string> builtin_autocomplete_words = autocomplete_words;
+bool isReservedName(const std::string& name) {
+    if (isHistoryName(name)) return true;
+    // TinyExpr also provides built-ins that are not offered by autocomplete.
+    static const std::vector<std::string> extraBuiltins = {
+        "and", "or", "not", "xor", "average", "bitand", "bitor", "bitxor", "bitlshift", "bitrshift",
+        "bitlrotate8", "bitrrotate8", "bitlrotate16", "bitrrotate16", "bitlrotate32", "bitrrotate32",
+        "bitlrotate64", "bitrrotate64", "bitlrotate", "bitrrotate", "bitnot8", "bitnot16", "bitnot32",
+        "bitnot64", "bitnot", "clamp", "combin", "cumipmt", "cumprinc", "db", "effect", "even",
+        "fac", "false", "fv", "iserr", "iserror", "iseven", "isna", "isnan", "isodd", "ifs", "ipmt",
+        "maxint", "na", "nan", "ncr", "nominal", "nper", "npr", "odd", "permut", "pmt", "pow",
+        "power", "ppmt", "pv", "rand", "sign", "sqr", "supports32bit", "supports64bit", "tgamma", "true"
+    };
+    if (std::find(extraBuiltins.begin(), extraBuiltins.end(), name) != extraBuiltins.end()) return true;
+    return std::find(builtin_autocomplete_words.begin(), builtin_autocomplete_words.end(), name) != builtin_autocomplete_words.end() ||
+        std::find(builtin_autocomplete_words.begin(), builtin_autocomplete_words.end(), name + "(") != builtin_autocomplete_words.end();
+}
 
 void resetAutocompleteWords() { autocomplete_words = builtin_autocomplete_words; }
 void removeUserAutocompleteWord(const std::string& word) {

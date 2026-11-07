@@ -5,8 +5,13 @@
 #include <iomanip>
 
 std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
+static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err, const std::vector<double>& op1_arr, bool is_op1_arr, const std::vector<double>& op2_arr, bool is_op2_arr);
+
 std::string preprocessLen(const std::string& s);
 std::string preprocessVectorStats(const std::string& s);
+static thread_local size_t loopEvaluationDepth = 0;
+static thread_local size_t loopIterationsRemaining = 100000;
+static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
 
 inline std::vector<UserFunc> getParsedUserFuncs() {
     std::vector<UserFunc> res;
@@ -222,13 +227,16 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
     if (user_funcs.empty()) return expr;
     auto funcs = getParsedUserFuncs();
     bool changed = true;
-    int limit = 10;
+    int limit = 64;
+    size_t substitutions = 0;
     while (changed && limit-- > 0) {
         changed = false;
         for (const auto& f : funcs) {
             std::string search = f.name + "(";
             size_t pos = 0;
             while ((pos = expr.find(search, pos)) != std::string::npos) {
+                if (pos > 0 && (std::isalnum(static_cast<unsigned char>(expr[pos - 1])) || expr[pos - 1] == '_')) { pos += search.size(); continue; }
+                if (++substitutions > 10000) { err = "Formula expansion limit exceeded"; return expr; }
                 size_t start = pos + search.size();
                 int depth = 1;
                 size_t end = start;
@@ -271,29 +279,26 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                     return expr;
                 }
                 
-                std::string body_subbed = f.body;
-                for (size_t i = 0; i < f.params.size(); ++i) {
-                    std::string param = f.params[i];
-                    std::string arg_val = "(" + args[i] + ")";
-                    size_t p_pos = 0;
-                    while ((p_pos = body_subbed.find(param, p_pos)) != std::string::npos) {
-                        bool prev_ok = (p_pos == 0 || (!std::isalnum(body_subbed[p_pos - 1]) && body_subbed[p_pos - 1] != '_'));
-                        bool next_ok = (p_pos + param.size() == body_subbed.size() || (!std::isalnum(body_subbed[p_pos + param.size()]) && body_subbed[p_pos + param.size()] != '_'));
-                        if (prev_ok && next_ok) {
-                            body_subbed.replace(p_pos, param.size(), arg_val);
-                            p_pos += arg_val.size();
-                        } else {
-                            p_pos += param.size();
-                        }
-                    }
+                std::string body_subbed;
+                for (size_t i = 0; i < f.body.size();) {
+                    if (std::isalpha(static_cast<unsigned char>(f.body[i])) || f.body[i] == '_') {
+                        size_t end = i + 1;
+                        while (end < f.body.size() && (std::isalnum(static_cast<unsigned char>(f.body[end])) || f.body[end] == '_')) ++end;
+                        const auto token = f.body.substr(i, end - i);
+                        auto param = std::find(f.params.begin(), f.params.end(), token);
+                        if (param == f.params.end()) body_subbed += token;
+                        else body_subbed += "(" + args[static_cast<size_t>(param - f.params.begin())] + ")";
+                        i = end;
+                    } else body_subbed += f.body[i++];
                 }
                 
                 expr.replace(pos, (end + 1) - pos, "(" + body_subbed + ")");
                 changed = true;
-                break;
+                pos += body_subbed.size() + 2;
             }
         }
     }
+    if (changed) err = "Formula expansion limit exceeded";
     return expr;
 }
 
@@ -318,7 +323,8 @@ inline std::string preprocessExpression(const std::string& s) {
             
             if (i < n) {
                 if (i + 1 < n && s_clean[i] == 'd' && s_clean[i+1] == 'a') {
-                    res += " * 1e1";
+                    res.insert(res.size() - num.size(), "(");
+                    res += " * 1e1)";
                     i += 2;
                     continue;
                 }
@@ -333,6 +339,7 @@ inline std::string preprocessExpression(const std::string& s) {
                         is_exp = true;
                     }
                     if (is_exp) {
+                        res.insert(res.size() - num.size(), "(");
                         res += " * 10^(";
                         if (s_clean[i+1] == '+' || s_clean[i+1] == '-') {
                             res += s_clean[i+1];
@@ -343,7 +350,7 @@ inline std::string preprocessExpression(const std::string& s) {
                         while (i < n && std::isdigit(s_clean[i])) {
                             res += s_clean[i++];
                         }
-                        res += ")";
+                        res += "))";
                         continue;
                     }
                 }
@@ -395,7 +402,8 @@ inline std::string preprocessExpression(const std::string& s) {
                             if (!dec_part.empty()) {
                                 res += "." + dec_part;
                             }
-                            res += " * " + mult;
+                            res.insert(res.size() - num.size() - (dec_part.empty() ? 0 : dec_part.size() + 1), "(");
+                            res += " * " + mult + ")";
                         }
                         continue;
                     }
@@ -965,9 +973,14 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 if (!err.empty()) return res;
                 double end_d = evaluate(args[2], err);
                 if (!err.empty()) return res;
+                const double int64Limit = std::ldexp(1.0, 63);
+                if (!std::isfinite(start_d) || !std::isfinite(end_d) || start_d < -int64Limit || start_d >= int64Limit || end_d < -int64Limit || end_d >= int64Limit) {
+                    err = "Overflow Error: invalid loop bounds"; return res;
+                }
                 int64_t i_start = static_cast<int64_t>(std::llround(start_d));
                 int64_t i_end = static_cast<int64_t>(std::llround(end_d));
-                if (i_end - i_start > 100000) {
+                const long double count = i_end < i_start ? 0 : static_cast<long double>(i_end) - static_cast<long double>(i_start) + 1;
+                if (count > loopIterationsRemaining) {
                     err = "Overflow Error: loop limit exceeded";
                     return res;
                 }
@@ -985,7 +998,9 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 else if (fname == "min") acc = std::numeric_limits<double>::infinity();
                 else if (fname == "max") acc = -std::numeric_limits<double>::infinity();
 
-                for (int64_t idx = i_start; idx <= i_end; ++idx) {
+                for (int64_t idx = i_start; idx <= i_end;) {
+                    if (loopIterationsRemaining == 0) { user_args = old_args; err = "Overflow Error: loop limit exceeded"; return res; }
+                    --loopIterationsRemaining;
                     user_args[var_idx].val = static_cast<double>(idx);
                     double step_v = evaluate(args[3], err);
                     if (!err.empty()) {
@@ -996,6 +1011,8 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     else if (fname == "prod") acc *= step_v;
                     else if (fname == "min") { if (step_v < acc) acc = step_v; }
                     else if (fname == "max") { if (step_v > acc) acc = step_v; }
+                    if (idx == i_end) break;
+                    ++idx;
                 }
                 user_args = old_args;
                 if (i_start > i_end && (fname == "min" || fname == "max")) acc = 0.0;
@@ -1153,6 +1170,10 @@ std::string preprocessVectorStats(const std::string& s) {
 static bool s_in_array_fallback = false;
 
 double evaluate(const std::string& expr_str, std::string& err) {
+    struct LoopBudgetScope {
+        LoopBudgetScope() { if (loopEvaluationDepth++ == 0) loopIterationsRemaining = 100000; }
+        ~LoopBudgetScope() { --loopEvaluationDepth; }
+    } loopBudgetScope;
     err = "";
     g_math_domain_err = "";
     g_last_result_angle = AngleUnit::NONE;
@@ -1464,6 +1485,12 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             err = "Invalid Name";
             return std::numeric_limits<double>::quiet_NaN();
         }
+        std::string definitionName = lhs.substr(0, lhs.find('('));
+        definitionName.erase(definitionName.find_last_not_of(" \t") + 1);
+        if (isReservedName(definitionName)) {
+            err = "Reserved name: " + definitionName;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
         if (lhs.find('(') == std::string::npos) {
             if (isHistoryName(lhs)) {
                 err = "History variables are read-only";
@@ -1512,6 +1539,14 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             std::string target_fname = lhs.substr(0, open_p);
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
             target_fname.erase(target_fname.find_last_not_of(" \t") + 1);
+            const size_t close_p = lhs.find(')', open_p);
+            std::stringstream parameterStream(lhs.substr(open_p + 1, close_p - open_p - 1));
+            std::string parameter;
+            while (std::getline(parameterStream, parameter, ',')) {
+                parameter.erase(0, parameter.find_first_not_of(" \t"));
+                parameter.erase(parameter.find_last_not_of(" \t") + 1);
+                if (isReservedName(parameter)) { err = "Reserved parameter: " + parameter; return std::numeric_limits<double>::quiet_NaN(); }
+            }
 
             // If a function with the same name exists, remove it first so editing updates it in-place
             user_funcs.erase(std::remove_if(user_funcs.begin(), user_funcs.end(), [&](const std::string& fn) {
@@ -2190,7 +2225,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
             bool is_scalar = false;
             double scalar_res = 0;
             std::string bin_err;
-            std::vector<double> res = evaluateArrayBinaryOp(b_op1, b_op, b_op2, is_scalar, scalar_res, bin_err);
+            std::vector<double> res = evaluateArrayBinaryOpParsed(b_op1, b_op, b_op2, is_scalar, scalar_res, bin_err, a1, is1_arr, a2, is2_arr);
             if (!bin_err.empty()) {
                 if (is1_arr || is2_arr || b_op == ".*" || b_op == "./" || !err1.empty() || !err2.empty()) {
                     err = bin_err;
@@ -2350,7 +2385,11 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                     else if (func_name == "sgn") res[i] = (val > 0.0 ? 1.0 : (val < 0.0 ? -1.0 : 0.0));
                     else if (func_name == "fact") res[i] = custom_fact(val);
                     else if (func_name == "fib") res[i] = custom_fib(val);
-                    else res[i] = val;
+                    else {
+                        std::string elementError;
+                        res[i] = evaluate(func_name + "(" + fmtInternal(val) + ")", elementError);
+                        if (!elementError.empty()) { err = elementError; return {}; }
+                    }
                     if (!g_math_domain_err.empty()) {
                         err = g_math_domain_err;
                         return {};
@@ -2441,15 +2480,15 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         if (!prep_err.empty()) { err = prep_err; return {}; }
         
         std::vector<double> res;
-        double eps = 1e-9;
-        if (step_val > 0) {
-            for (double v = start_val; v <= end_val + eps; v += step_val) {
-                res.push_back(v);
-            }
-        } else if (step_val < 0) {
-            for (double v = start_val; v >= end_val - eps; v += step_val) {
-                res.push_back(v);
-            }
+        if (!std::isfinite(start_val) || !std::isfinite(step_val) || !std::isfinite(end_val) || step_val == 0) {
+            err = "Invalid range bounds or step"; return {};
+        }
+        long double span = (static_cast<long double>(end_val) - start_val) / step_val;
+        if (span >= 0) {
+            if (!std::isfinite(span) || span >= MAX_ARRAY_ELEMENTS) { err = "Overflow Error: array range limit exceeded"; return {}; }
+            const size_t count = static_cast<size_t>(std::floor(span + 1e-12L)) + 1;
+            res.reserve(count);
+            for (size_t i = 0; i < count; ++i) res.push_back(start_val + step_val * static_cast<double>(i));
         }
         return res;
         }
@@ -2474,6 +2513,10 @@ std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std:
     std::vector<double> op2_arr = parseArrayExpr(op2_str, is_op2_arr, err);
     if (!err.empty()) return {};
     
+    return evaluateArrayBinaryOpParsed(op1_str, op_str, op2_str, is_scalar_result, scalar_val, err, op1_arr, is_op1_arr, op2_arr, is_op2_arr);
+}
+
+static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err, const std::vector<double>& op1_arr, bool is_op1_arr, const std::vector<double>& op2_arr, bool is_op2_arr) {
     double op1_scalar = 0;
     double op2_scalar = 0;
     if (!is_op1_arr) {

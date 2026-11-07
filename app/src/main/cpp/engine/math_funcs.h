@@ -315,13 +315,35 @@ inline double custom_P(double n, double k) {
 }
 #include <numeric>
 
+inline bool checkedIntegerMagnitude(double value, int64_t& out) {
+    if (!std::isfinite(value) || std::trunc(value) != value || std::abs(value) >= std::ldexp(1.0, 63)) {
+        g_math_domain_err = "Domain Error: gcd/lcm require integers within int64 range";
+        return false;
+    }
+    out = static_cast<int64_t>(std::abs(value));
+    return true;
+}
+inline bool checkedLcm(int64_t a, int64_t b, int64_t& out) {
+    if (a == 0 || b == 0) { out = 0; return true; }
+    const int64_t reduced = a / std::gcd(a, b);
+    if (reduced > std::numeric_limits<int64_t>::max() / b) {
+        g_math_domain_err = "Overflow Error: lcm exceeds int64 range";
+        return false;
+    }
+    out = reduced * b;
+    return true;
+}
 inline double custom_gcd(double a, double b) {
     g_last_result_angle = AngleUnit::NONE;
-    return (double)std::gcd((int64_t)std::abs((int64_t)a), (int64_t)std::abs((int64_t)b));
+    int64_t x, y;
+    if (!checkedIntegerMagnitude(a, x) || !checkedIntegerMagnitude(b, y)) return std::numeric_limits<double>::quiet_NaN();
+    return static_cast<double>(std::gcd(x, y));
 }
 inline double custom_lcm(double a, double b) {
     g_last_result_angle = AngleUnit::NONE;
-    return (double)std::lcm((int64_t)std::abs((int64_t)a), (int64_t)std::abs((int64_t)b));
+    int64_t x, y, result;
+    if (!checkedIntegerMagnitude(a, x) || !checkedIntegerMagnitude(b, y) || !checkedLcm(x, y, result)) return std::numeric_limits<double>::quiet_NaN();
+    return static_cast<double>(result);
 }
 inline double custom_fib(double n) {
     if (n < 0.0) {
@@ -524,7 +546,8 @@ inline double variadic_gcd(double a1, double a2, double a3, double a4, double a5
     int count = 0;
     for (int i = 0; i < 24; ++i) {
         if (!std::isnan(arr[i])) {
-            int64_t v = std::abs(static_cast<int64_t>(arr[i]));
+            int64_t v;
+            if (!checkedIntegerMagnitude(arr[i], v)) return std::numeric_limits<double>::quiet_NaN();
             res = (count == 0) ? v : std::gcd(res, v);
             count++;
         }
@@ -541,8 +564,10 @@ inline double variadic_lcm(double a1, double a2, double a3, double a4, double a5
     int count = 0;
     for (int i = 0; i < 24; ++i) {
         if (!std::isnan(arr[i])) {
-            int64_t v = std::abs(static_cast<int64_t>(arr[i]));
-            res = (count == 0) ? v : std::lcm(res, v);
+            int64_t v;
+            if (!checkedIntegerMagnitude(arr[i], v)) return std::numeric_limits<double>::quiet_NaN();
+            if (count == 0) res = v;
+            else if (!checkedLcm(res, v, res)) return std::numeric_limits<double>::quiet_NaN();
             count++;
         }
     }
@@ -613,6 +638,11 @@ inline std::string fmtNum(double v) {
             int exp_val = static_cast<int>(std::floor(std::log10(abs_v)));
             int eng_exp = std::floor(exp_val / 3.0) * 3;
             double mantissa = v / std::pow(10.0, eng_exp);
+            const double scale = std::pow(10.0, prec);
+            if (std::round(std::abs(mantissa) * scale) >= 1000.0 * scale) {
+                mantissa /= 1000.0;
+                eng_exp += 3;
+            }
             char sign_c = (eng_exp >= 0) ? '+' : '-';
             snprintf(buf, sizeof(buf), "%.*fe%c%02d", prec, mantissa, sign_c, std::abs(eng_exp));
         }
