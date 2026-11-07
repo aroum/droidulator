@@ -143,6 +143,13 @@ class MainActivity : AppCompatActivity() {
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
     private val highlightingEditables = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Editable, Boolean>())
+    private val pendingHighlight = java.util.WeakHashMap<EditText, Runnable>()
+    private fun scheduleSyntaxHighlighting(editor: EditText) {
+        pendingHighlight.remove(editor)?.let { editor.removeCallbacks(it) }
+        val task = Runnable { pendingHighlight.remove(editor); applySyntaxHighlighting(editor.editableText) }
+        pendingHighlight[editor] = task
+        editor.postDelayed(task, 120)
+    }
     private var isSubmitting = false
     private var autocompleteEditor: EditText? = null
 
@@ -562,7 +569,7 @@ class MainActivity : AppCompatActivity() {
 
             override fun afterTextChanged(s: Editable?) {
                 if (isHighlighting || s == null || (s is Editable && highlightingEditables.contains(s))) return
-                applySyntaxHighlighting(s)
+                scheduleSyntaxHighlighting(etInput)
             }
         })
     }
@@ -1639,9 +1646,9 @@ class MainActivity : AppCompatActivity() {
             setBackgroundDrawable(dialogDrawable)
             setDimAmount(0.6f)
             addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            statusBarColor = bgSoft
+            if (android.os.Build.VERSION.SDK_INT < 35) statusBarColor = bgSoft
             val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
-            controller.isAppearanceLightStatusBars = isLightThemeActive
+            controller.isAppearanceLightStatusBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgSoft) > 0.5
         }
 
         val root = LinearLayout(this).apply {
@@ -1924,7 +1931,7 @@ class MainActivity : AppCompatActivity() {
                 override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
                 override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
                     if (!isHighlighting && s != null && !(s is Editable && highlightingEditables.contains(s))) {
-                        applySyntaxHighlighting(editableText)
+                        scheduleSyntaxHighlighting(this@apply)
                     }
                 }
                 override fun afterTextChanged(s: Editable?) {}
@@ -2068,9 +2075,10 @@ class MainActivity : AppCompatActivity() {
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
             setBackgroundDrawable(ColorDrawable(bgColor))
-            statusBarColor = bgSoft
+            if (android.os.Build.VERSION.SDK_INT < 35) statusBarColor = bgColor
             val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
-            controller.isAppearanceLightStatusBars = isLightThemeActive
+            controller.isAppearanceLightStatusBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgColor) > 0.5
+            controller.isAppearanceLightNavigationBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgColor) > 0.5
         }
     }
 
@@ -2306,6 +2314,28 @@ class MainActivity : AppCompatActivity() {
         // Root & Top Bar
         mainRoot.setBackgroundColor(bgColor)
         topHeaderBar.setBackgroundColor(bgSoftColor)
+        window?.let { activityWindow ->
+            if (android.os.Build.VERSION.SDK_INT < 35) {
+                activityWindow.statusBarColor = bgColor
+                activityWindow.navigationBarColor = bgColor
+            }
+            val controller = androidx.core.view.WindowCompat.getInsetsController(activityWindow, activityWindow.decorView)
+            val lightBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgColor) > 0.5
+            controller.isAppearanceLightStatusBars = lightBars
+            controller.isAppearanceLightNavigationBars = lightBars
+        }
+        val themedButtons = listOf(
+            btnAddItem to ThemePalette.yellow, btnDeleteAll to ThemePalette.red, btnToggleEVars to ThemePalette.aqua,
+            btnNavLeft to ThemePalette.blue, btnNavRight to ThemePalette.blue,
+            btnNavUp to ThemePalette.purple, btnNavDown to ThemePalette.purple,
+            btnTab to ThemePalette.yellow, btnClear to ThemePalette.red,
+            btnLoadCustomTheme to ThemePalette.aqua, btnSettingsEnterAction to ThemePalette.blue,
+            btnSettingsClearHistory to ThemePalette.red
+        )
+        for ((button, color) in themedButtons) {
+            button.backgroundTintList = ColorStateList.valueOf(color)
+            button.setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(color) > 0.4) Color.BLACK else Color.WHITE)
+        }
         spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
         (spinnerFmtMode.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()

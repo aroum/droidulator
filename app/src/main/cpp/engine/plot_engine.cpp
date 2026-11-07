@@ -51,7 +51,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             double min_v = evaluate(min_str, eval_err);
             if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v) {
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v && std::isfinite(max_v - min_v)) {
                 plot_xlim_min = min_v;
                 plot_xlim_max = max_v;
                 plot_manual_limits = true;
@@ -79,7 +79,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             double min_v = evaluate(min_str, eval_err);
             if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v) {
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v && std::isfinite(max_v - min_v)) {
                 plot_ylim_min = min_v;
                 plot_ylim_max = max_v;
                 plot_manual_limits = true;

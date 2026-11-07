@@ -99,6 +99,8 @@ class PlotView @JvmOverloads constructor(
     private var isTouching = false
     private var touchX = 0f
     private var touchY = 0f
+    private data class Probe(val x: Double, val y: Double, val px: Float, val py: Float, val color: Int, val label: String)
+    private var currentProbe: Probe? = null
 
     init {
         updateBounds()
@@ -134,6 +136,7 @@ class PlotView @JvmOverloads constructor(
             LineData(line.x, line.y, rgb565ToColor(line.color), line.linestyle)
         }
         updateBounds()
+        if (isTouching) updateProbe()
         invalidate()
     }
 
@@ -153,6 +156,7 @@ class PlotView @JvmOverloads constructor(
                 isTouching = true
                 touchX = event.x
                 touchY = event.y
+                updateProbe()
                 invalidate()
                 return true
             }
@@ -197,6 +201,72 @@ class PlotView @JvmOverloads constructor(
         boundsLabelY = String.format(Locale.ROOT, "Y: [%.3g, %.3g]", minY, maxY)
         xTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minX + (maxX - minX) * it / 4) }
         yTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minY + (maxY - minY) * it / 4) }
+    }
+
+    private fun updateProbe() {
+        val w = width.toFloat(); val h = height.toFloat()
+        if (w <= 0f || h <= 0f) { currentProbe = null; return }
+        val minX = cachedMinX; val maxX = cachedMaxX
+        val minY = cachedMinY; val maxY = cachedMaxY
+        val rangeX = maxX - minX; val rangeY = maxY - minY
+        val clampedTouchX = touchX.coerceIn(0f, w)
+        val valX = minX + (clampedTouchX / w) * rangeX
+
+        // Find closest point on curves
+        var closestX = valX
+        var closestY = Double.NaN
+        var closestDistSq = Double.MAX_VALUE
+        var closestPx = clampedTouchX
+        var closestPy = touchY.coerceIn(0f, h)
+        var pointColor = cursorPointPaint.color
+
+        for (line in plotLines) {
+            var prevX = Double.NaN
+            var prevY = Double.NaN
+            for (i in 0 until minOf(line.x.size, line.y.size)) {
+                val xv = line.x[i]
+                val yv = line.y[i]
+                if (!xv.isFinite() || !yv.isFinite()) { prevX = Double.NaN; prevY = Double.NaN; continue }
+                val px = ((xv - minX) / rangeX * w).toFloat()
+                val py = (h - ((yv - minY) / rangeY * h)).toFloat()
+                var candidateX = xv
+                var candidateY = yv
+                var candidatePx = px
+                var candidatePy = py
+                val crossesOutside = (prevY < minY && yv > maxY) || (prevY > maxY && yv < minY) ||
+                    (prevY * yv < 0 && abs(yv - prevY) > rangeY * 0.8)
+                if (prevX.isFinite() && !crossesOutside) {
+                    val ax = ((prevX - minX) / rangeX * w).toFloat()
+                    val ay = (h - ((prevY - minY) / rangeY * h)).toFloat()
+                    val dx = px - ax; val dy = py - ay
+                    val length = dx * dx + dy * dy
+                    if (length.isFinite() && length > 0f) {
+                        val t = (((touchX - ax) * dx + (touchY - ay) * dy) / length).coerceIn(0f, 1f)
+                        candidatePx = ax + t * dx; candidatePy = ay + t * dy
+                        candidateX = prevX + (xv - prevX) * t
+                        candidateY = prevY + (yv - prevY) * t
+                    }
+                }
+                val distSq = (candidatePx - touchX) * (candidatePx - touchX) + (candidatePy - touchY) * (candidatePy - touchY)
+                if (distSq < closestDistSq) {
+                    closestDistSq = distSq.toDouble()
+                    closestX = candidateX
+                    closestY = candidateY
+                    closestPx = candidatePx
+                    closestPy = candidatePy
+                    pointColor = line.color
+                }
+                prevX = xv; prevY = yv
+            }
+        }
+        val label = if (closestY.isFinite()) String.format(Locale.ROOT, "x: %.3f | y: %.3f", closestX, closestY)
+                    else String.format(Locale.ROOT, "x: %.3f", valX)
+        currentProbe = Probe(closestX, closestY, closestPx, closestPy, pointColor, label)
+    }
+
+    override fun onSizeChanged(w: Int, h: Int, oldw: Int, oldh: Int) {
+        super.onSizeChanged(w, h, oldw, oldh)
+        if (isTouching) updateProbe()
     }
 
     override fun onDraw(canvas: Canvas) {
@@ -285,56 +355,11 @@ class PlotView @JvmOverloads constructor(
 
         // Draw interactive touch cursor
         if (isTouching) {
-            val clampedTouchX = touchX.coerceIn(0f, w)
-            val valX = minX + (clampedTouchX / w) * rangeX
-
-            // Find closest point on curves
-            var closestX = valX
-            var closestY = Double.NaN
-            var closestDistSq = Double.MAX_VALUE
-            var closestPx = clampedTouchX
-            var closestPy = touchY.coerceIn(0f, h)
-            var pointColor = cursorPointPaint.color
-
-            for (line in plotLines) {
-                var prevX = Double.NaN
-                var prevY = Double.NaN
-                for (i in 0 until minOf(line.x.size, line.y.size)) {
-                    val xv = line.x[i]
-                    val yv = line.y[i]
-                    if (!xv.isFinite() || !yv.isFinite()) { prevX = Double.NaN; prevY = Double.NaN; continue }
-                    val px = ((xv - minX) / rangeX * w).toFloat()
-                    val py = (h - ((yv - minY) / rangeY * h)).toFloat()
-                    var candidateX = xv
-                    var candidateY = yv
-                    var candidatePx = px
-                    var candidatePy = py
-                    val crossesOutside = (prevY < minY && yv > maxY) || (prevY > maxY && yv < minY) ||
-                        (prevY * yv < 0 && abs(yv - prevY) > rangeY * 0.8)
-                    if (prevX.isFinite() && !crossesOutside) {
-                        val ax = ((prevX - minX) / rangeX * w).toFloat()
-                        val ay = (h - ((prevY - minY) / rangeY * h)).toFloat()
-                        val dx = px - ax; val dy = py - ay
-                        val length = dx * dx + dy * dy
-                        if (length.isFinite() && length > 0f) {
-                            val t = (((touchX - ax) * dx + (touchY - ay) * dy) / length).coerceIn(0f, 1f)
-                            candidatePx = ax + t * dx; candidatePy = ay + t * dy
-                            candidateX = prevX + (xv - prevX) * t
-                            candidateY = prevY + (yv - prevY) * t
-                        }
-                    }
-                    val distSq = (candidatePx - touchX) * (candidatePx - touchX) + (candidatePy - touchY) * (candidatePy - touchY)
-                    if (distSq < closestDistSq) {
-                        closestDistSq = distSq.toDouble()
-                        closestX = candidateX
-                        closestY = candidateY
-                        closestPx = candidatePx
-                        closestPy = candidatePy
-                        pointColor = line.color
-                    }
-                    prevX = xv; prevY = yv
-                }
-            }
+            val probe = currentProbe ?: return
+            val closestPx = probe.px
+            val closestPy = probe.py
+            val pointColor = probe.color
+            val infoText = probe.label
 
             // Draw crosshairs
             canvas.drawLine(closestPx, 0f, closestPx, h, cursorLinePaint)
@@ -345,12 +370,6 @@ class PlotView @JvmOverloads constructor(
             canvas.drawCircle(closestPx, closestPy, dp(5f), cursorPointPaint)
 
             // Draw inspection tooltip banner
-            val infoText = if (!closestY.isNaN()) {
-                String.format(Locale.ROOT, "x: %.3f | y: %.3f", closestX, closestY)
-            } else {
-                String.format(Locale.ROOT, "x: %.3f", valX)
-            }
-
             val textWidth = cursorTextPaint.measureText(infoText)
             val boxPadding = dp(8f)
             val boxW = textWidth + boxPadding * 2
