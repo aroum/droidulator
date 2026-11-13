@@ -477,7 +477,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             }
         }
         if (label.empty() && trimmed.size() > 1 && trimmed[0] == 'e' &&
-            std::all_of(trimmed.begin() + 1, trimmed.end(), ::isdigit)) {
+            std::all_of(trimmed.begin() + 1, trimmed.end(), [](unsigned char c) { return std::isdigit(c); })) {
             label = trimmed;
         }
 

@@ -1842,7 +1842,7 @@ static uint32_t get_unit_dimension_mask(const std::string& raw_unit) {
     if (first == std::string::npos) return DIM_NONE;
     size_t last = u.find_last_not_of(" \t\"'");
     u = u.substr(first, last - first + 1);
-    std::transform(u.begin(), u.end(), u.begin(), ::tolower);
+    std::transform(u.begin(), u.end(), u.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
     uint32_t dims = DIM_NONE;
     auto in_set = [&](const std::initializer_list<const char*>& items) {
@@ -1867,7 +1867,7 @@ static uint32_t get_unit_dimension_mask(const std::string& raw_unit) {
     if (in_set({"ohm", "ohms", "mohm", "kohm", "smd3", "smd4", "eia96"})) {
         dims |= DIM_RESISTANCE;
     } else if (!u.empty()) {
-        bool all_digits = std::all_of(u.begin(), u.end(), ::isdigit);
+        bool all_digits = std::all_of(u.begin(), u.end(), [](unsigned char c) { return std::isdigit(c); });
         if ((u.size() == 3 || u.size() == 4) && all_digits) {
             dims |= DIM_RESISTANCE;
         } else if (u.find('r') != std::string::npos || u.find('k') != std::string::npos) {
