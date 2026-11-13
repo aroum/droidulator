@@ -330,8 +330,8 @@ void runScript(const std::string& code) {
             }
         }
         // } else if (cond) { / else if (cond) { / } elif (cond) { / elif (cond) {
-        else if ((line.rfind("} else if (", 0) == 0 || line.rfind("else if (", 0) == 0 ||
-                  line.rfind("} elif (", 0) == 0 || line.rfind("elif (", 0) == 0) && line.back() == '{') {
+        else if ((line.rfind("} else if", 0) == 0 || line.rfind("else if", 0) == 0 ||
+                  line.rfind("} elif", 0) == 0 || line.rfind("elif", 0) == 0) && line.back() == '{') {
             if (!blocks.empty() && blocks.back().type == "if") {
                 if (blocks.back().condition_met) {
                     ip = blocks.back().end_ip;

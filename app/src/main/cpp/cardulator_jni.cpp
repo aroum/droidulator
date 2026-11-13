@@ -135,6 +135,13 @@ static bool g_last_has_num = false;
 static double g_last_num_val = 0.0;
 static std::string g_last_prefix;
 static std::string g_last_suffix;
+static void prependScriptOutput(std::string& result) {
+    if (script_console_output.empty()) return;
+    std::string output;
+    for (const auto& line : script_console_output) output += line + "\n";
+    result = output + result;
+    if (g_last_has_num) g_last_prefix = output + g_last_prefix;
+}
 
 // Preview evaluation — evaluates formula without adding to history (used for live formula dialog preview)
 JNIEXPORT jstring JNICALL
@@ -159,6 +166,7 @@ JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobject thiz, jstring input_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_last_eval_error = false;
+    script_console_output.clear();
     g_last_has_num = false;
     g_last_num_val = 0.0;
     g_last_prefix.clear();
@@ -402,6 +410,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 }
                 resultStr = g_last_prefix + fmtNum(last_res) + g_last_suffix;
             }
+            prependScriptOutput(resultStr);
             return toJavaString(env, resultStr);
         }
     }
@@ -490,6 +499,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         }
     }
 
+    prependScriptOutput(resultStr);
     return toJavaString(env, resultStr);
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
