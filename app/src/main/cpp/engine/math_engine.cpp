@@ -48,7 +48,10 @@ inline std::vector<UserFunc> getParsedUserFuncs() {
     return res;
 }
 
-double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err) {
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues) {
+    static thread_local unsigned depth = 0;
+    if (depth >= 64) { err = "Function recursion limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
+    struct DepthGuard { unsigned& value; explicit DepthGuard(unsigned& d) : value(d) { ++value; } ~DepthGuard() { --value; } } guard(depth);
     auto it = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) {
         return f.name == name;
     });
@@ -57,7 +60,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    const auto& func = *it;
+    const auto func = *it;
     if (arg_vals.size() != func.params.size()) {
         err = "Arg Count Mismatch";
         return std::numeric_limits<double>::quiet_NaN();
@@ -102,9 +105,31 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
             ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
             if (ret_expr.empty()) ret_expr = "0";
-            ret_val = evaluate(ret_expr, err);
+            const auto parts = splitPlotArgs(ret_expr);
+            std::vector<double> values;
+            if (parts.size() == 1) {
+                bool array = false;
+                values = parseArrayExpr(parts[0], array, err);
+                if (!err.empty()) break;
+                if (!array) values = {evaluate(parts[0], err)};
+            } else {
+                for (const auto& part : parts) {
+                    values.push_back(evaluate(part, err));
+                    if (!err.empty()) break;
+                }
+            }
+            if (!err.empty()) break;
+            ret_val = values.empty() ? 0.0 : values.front();
+            if (returnValues) *returnValues = std::move(values);
             has_returned = true;
             break;
+        }
+
+        if (line.rfind("print(", 0) == 0 && line.back() == ')') {
+            const auto text = formatPrintString(line.substr(6, line.size() - 7), err);
+            if (!err.empty()) break;
+            script_console_output.push_back(text);
+            ++ip; continue;
         }
 
         if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
@@ -165,11 +190,12 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
 
 inline std::string substituteUserFuncs(std::string expr, std::string& err) {
     if (!user_script_funcs.empty()) {
-        for (const auto& sf : user_script_funcs) {
+        const auto scriptFunctions = user_script_funcs;
+        for (const auto& sf : scriptFunctions) {
             std::string search = sf.name + "(";
             size_t pos = 0;
             while ((pos = expr.find(search, pos)) != std::string::npos) {
-                bool prev_ok = (pos == 0 || (!std::isalnum(expr[pos - 1]) && expr[pos - 1] != '_'));
+                bool prev_ok = (pos == 0 || (!std::isalnum(static_cast<unsigned char>(expr[pos - 1])) && expr[pos - 1] != '_'));
                 if (!prev_ok) { pos += search.size(); continue; }
                 
                 size_t start = pos + search.size();
@@ -216,7 +242,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 if (!err.empty()) return expr;
                 
                 std::ostringstream oss;
-                oss << std::setprecision(15) << func_res;
+                oss << std::setprecision(std::numeric_limits<double>::max_digits10) << func_res;
                 std::string res_str = (func_res < 0.0) ? ("(" + oss.str() + ")") : oss.str();
                 expr.replace(pos, (end + 1) - pos, res_str);
                 pos += res_str.size();
@@ -314,9 +340,9 @@ inline std::string preprocessExpression(const std::string& s) {
     res.reserve(s_clean.size());
     int n = s_clean.size();
     for (int i = 0; i < n; ) {
-        if (std::isdigit(s_clean[i]) || s_clean[i] == '.') {
+        if (std::isdigit(static_cast<unsigned char>(s_clean[i])) || s_clean[i] == '.') {
             std::string num = "";
-            while (i < n && (std::isdigit(s_clean[i]) || s_clean[i] == '.')) {
+            while (i < n && (std::isdigit(static_cast<unsigned char>(s_clean[i])) || s_clean[i] == '.')) {
                 num += s_clean[i++];
             }
             res += num;
@@ -333,7 +359,7 @@ inline std::string preprocessExpression(const std::string& s) {
                     int j = i + 1;
                     bool is_exp = false;
                     if (j < n && (s_clean[j] == '+' || s_clean[j] == '-')) j++;
-                    if (j < n && std::isdigit(s_clean[j])) {
+                    if (j < n && std::isdigit(static_cast<unsigned char>(s_clean[j]))) {
                         // Ensure it's not e1, e2 history variable (e.g. 5*e1 or 2+e1 is handled separately, but 5e1 vs e1 after num)
                         // If it's e followed by digits with no +/- sign and no more digits after, check if e is part of history variable
                         is_exp = true;
@@ -347,7 +373,7 @@ inline std::string preprocessExpression(const std::string& s) {
                         } else {
                             i++;
                         }
-                        while (i < n && std::isdigit(s_clean[i])) {
+                        while (i < n && std::isdigit(static_cast<unsigned char>(s_clean[i]))) {
                             res += s_clean[i++];
                         }
                         res += "))";
@@ -455,7 +481,7 @@ inline std::string preprocessPercentage(const std::string& s) {
                 bool is_postfix = true;
                 if (j < res.size()) {
                     char next_c = res[j];
-                    if (std::isalnum(next_c) || next_c == '(' || next_c == '[' || next_c == '_' || next_c == '.') {
+                    if (std::isalnum(static_cast<unsigned char>(next_c)) || next_c == '(' || next_c == '[' || next_c == '_' || next_c == '.') {
                         is_postfix = false;
                     }
                 }
@@ -584,7 +610,7 @@ inline std::string replaceLogicalWords(const std::string& s) {
         }
         
         auto is_word_char = [](char c) {
-            return std::isalnum(c) || c == '_';
+            return std::isalnum(static_cast<unsigned char>(c)) || c == '_';
         };
         
         bool boundary_left = (i == 0 || !is_word_char(s[i - 1]));
@@ -769,7 +795,7 @@ inline double evaluateRelational(const std::string& expr, std::string& err) {
 
 static std::string fmtInternal(double val) {
     std::ostringstream oss;
-    oss << std::setprecision(15) << val;
+    oss << std::setprecision(std::numeric_limits<double>::max_digits10) << val;
     std::string s = oss.str();
     return (val < 0.0) ? ("(" + s + ")") : s;
 }
@@ -1213,132 +1239,137 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    static te_parser s_tep;
-    static bool s_tep_initialized = false;
-    if (!s_tep_initialized) {
-        s_tep.add_variable_or_function(te_variable{"sin", custom_sin});
-        s_tep.add_variable_or_function(te_variable{"cos", custom_cos});
-        s_tep.add_variable_or_function(te_variable{"tan", custom_tan});
-        s_tep.add_variable_or_function(te_variable{"tg", custom_tan});
-        s_tep.add_variable_or_function(te_variable{"cot", custom_cot});
-        s_tep.add_variable_or_function(te_variable{"ctg", custom_cot});
-        s_tep.add_variable_or_function(te_variable{"ctan", custom_ctan});
-        s_tep.add_variable_or_function(te_variable{"sec", custom_sec});
-        s_tep.add_variable_or_function(te_variable{"csc", custom_csc});
-        s_tep.add_variable_or_function(te_variable{"cosec", custom_csc});
+    static te_parser parserTemplate;
+    static bool parserTemplateInitialized = false;
+    if (!parserTemplateInitialized) {
+        parserTemplate.add_variable_or_function(te_variable{"sin", custom_sin});
+        parserTemplate.add_variable_or_function(te_variable{"cos", custom_cos});
+        parserTemplate.add_variable_or_function(te_variable{"tan", custom_tan});
+        parserTemplate.add_variable_or_function(te_variable{"tg", custom_tan});
+        parserTemplate.add_variable_or_function(te_variable{"cot", custom_cot});
+        parserTemplate.add_variable_or_function(te_variable{"ctg", custom_cot});
+        parserTemplate.add_variable_or_function(te_variable{"ctan", custom_ctan});
+        parserTemplate.add_variable_or_function(te_variable{"sec", custom_sec});
+        parserTemplate.add_variable_or_function(te_variable{"csc", custom_csc});
+        parserTemplate.add_variable_or_function(te_variable{"cosec", custom_csc});
 
-        s_tep.add_variable_or_function(te_variable{"asin", custom_asin});
-        s_tep.add_variable_or_function(te_variable{"arcsin", custom_asin});
-        s_tep.add_variable_or_function(te_variable{"acos", custom_acos});
-        s_tep.add_variable_or_function(te_variable{"arccos", custom_acos});
-        s_tep.add_variable_or_function(te_variable{"atan", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"arctan", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"atg", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"arctg", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"atan2", custom_atan2});
-        s_tep.add_variable_or_function(te_variable{"acot", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arccot", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"actg", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arcctg", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"actan", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arcctan", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"asec", custom_asec});
-        s_tep.add_variable_or_function(te_variable{"arcsec", custom_asec});
-        s_tep.add_variable_or_function(te_variable{"acsc", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"arccsc", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"acosec", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"arccosec", custom_acsc});
+        parserTemplate.add_variable_or_function(te_variable{"asin", custom_asin});
+        parserTemplate.add_variable_or_function(te_variable{"arcsin", custom_asin});
+        parserTemplate.add_variable_or_function(te_variable{"acos", custom_acos});
+        parserTemplate.add_variable_or_function(te_variable{"arccos", custom_acos});
+        parserTemplate.add_variable_or_function(te_variable{"atan", custom_atan});
+        parserTemplate.add_variable_or_function(te_variable{"arctan", custom_atan});
+        parserTemplate.add_variable_or_function(te_variable{"atg", custom_atan});
+        parserTemplate.add_variable_or_function(te_variable{"arctg", custom_atan});
+        parserTemplate.add_variable_or_function(te_variable{"atan2", custom_atan2});
+        parserTemplate.add_variable_or_function(te_variable{"acot", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"arccot", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"actg", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"arcctg", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"actan", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"arcctan", custom_acot});
+        parserTemplate.add_variable_or_function(te_variable{"asec", custom_asec});
+        parserTemplate.add_variable_or_function(te_variable{"arcsec", custom_asec});
+        parserTemplate.add_variable_or_function(te_variable{"acsc", custom_acsc});
+        parserTemplate.add_variable_or_function(te_variable{"arccsc", custom_acsc});
+        parserTemplate.add_variable_or_function(te_variable{"acosec", custom_acsc});
+        parserTemplate.add_variable_or_function(te_variable{"arccosec", custom_acsc});
 
-        s_tep.add_variable_or_function(te_variable{"sinh", custom_sinh});
-        s_tep.add_variable_or_function(te_variable{"sh", custom_sinh});
-        s_tep.add_variable_or_function(te_variable{"cosh", custom_cosh});
-        s_tep.add_variable_or_function(te_variable{"ch", custom_cosh});
-        s_tep.add_variable_or_function(te_variable{"tanh", custom_tanh});
-        s_tep.add_variable_or_function(te_variable{"th", custom_tanh});
-        s_tep.add_variable_or_function(te_variable{"coth", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"cth", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"ctgh", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"ctanh", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"sech", custom_sech});
-        s_tep.add_variable_or_function(te_variable{"sch", custom_sech});
-        s_tep.add_variable_or_function(te_variable{"csch", custom_csch});
-        s_tep.add_variable_or_function(te_variable{"cosech", custom_csch});
+        parserTemplate.add_variable_or_function(te_variable{"sinh", custom_sinh});
+        parserTemplate.add_variable_or_function(te_variable{"sh", custom_sinh});
+        parserTemplate.add_variable_or_function(te_variable{"cosh", custom_cosh});
+        parserTemplate.add_variable_or_function(te_variable{"ch", custom_cosh});
+        parserTemplate.add_variable_or_function(te_variable{"tanh", custom_tanh});
+        parserTemplate.add_variable_or_function(te_variable{"th", custom_tanh});
+        parserTemplate.add_variable_or_function(te_variable{"coth", custom_coth});
+        parserTemplate.add_variable_or_function(te_variable{"cth", custom_coth});
+        parserTemplate.add_variable_or_function(te_variable{"ctgh", custom_coth});
+        parserTemplate.add_variable_or_function(te_variable{"ctanh", custom_coth});
+        parserTemplate.add_variable_or_function(te_variable{"sech", custom_sech});
+        parserTemplate.add_variable_or_function(te_variable{"sch", custom_sech});
+        parserTemplate.add_variable_or_function(te_variable{"csch", custom_csch});
+        parserTemplate.add_variable_or_function(te_variable{"cosech", custom_csch});
 
-        s_tep.add_variable_or_function(te_variable{"asinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"ahsin", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arcsinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arsinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arsh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"acosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"ahcos", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arccosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arcosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arch", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"atanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"ahtan", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arctanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"artanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arth", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"artg", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arctgh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"acoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"ahcot", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arccoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arcoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arcth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"ahcoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"asech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"ahsec", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"arcsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"arsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"ahsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"acsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"ahcsc", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arccsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arcsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"acosech", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arccosech", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"ahcsch", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"asinh", custom_asinh});
+        parserTemplate.add_variable_or_function(te_variable{"ahsin", custom_asinh});
+        parserTemplate.add_variable_or_function(te_variable{"arcsinh", custom_asinh});
+        parserTemplate.add_variable_or_function(te_variable{"arsinh", custom_asinh});
+        parserTemplate.add_variable_or_function(te_variable{"arsh", custom_asinh});
+        parserTemplate.add_variable_or_function(te_variable{"acosh", custom_acosh});
+        parserTemplate.add_variable_or_function(te_variable{"ahcos", custom_acosh});
+        parserTemplate.add_variable_or_function(te_variable{"arccosh", custom_acosh});
+        parserTemplate.add_variable_or_function(te_variable{"arcosh", custom_acosh});
+        parserTemplate.add_variable_or_function(te_variable{"arch", custom_acosh});
+        parserTemplate.add_variable_or_function(te_variable{"atanh", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"ahtan", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"arctanh", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"artanh", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"arth", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"artg", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"arctgh", custom_atanh});
+        parserTemplate.add_variable_or_function(te_variable{"acoth", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"ahcot", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"arccoth", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"arcoth", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"arcth", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"ahcoth", custom_acoth});
+        parserTemplate.add_variable_or_function(te_variable{"asech", custom_asech});
+        parserTemplate.add_variable_or_function(te_variable{"ahsec", custom_asech});
+        parserTemplate.add_variable_or_function(te_variable{"arcsech", custom_asech});
+        parserTemplate.add_variable_or_function(te_variable{"arsech", custom_asech});
+        parserTemplate.add_variable_or_function(te_variable{"ahsech", custom_asech});
+        parserTemplate.add_variable_or_function(te_variable{"acsch", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"ahcsc", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"arccsch", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"arcsch", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"acosech", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"arccosech", custom_acsch});
+        parserTemplate.add_variable_or_function(te_variable{"ahcsch", custom_acsch});
         
-        s_tep.add_variable_or_function(te_variable{"deg2rad", custom_deg2rad});
-        s_tep.add_variable_or_function(te_variable{"d2r", custom_deg2rad});
-        s_tep.add_variable_or_function(te_variable{"rad2deg", custom_rad2deg});
-        s_tep.add_variable_or_function(te_variable{"r2d", custom_rad2deg});
+        parserTemplate.add_variable_or_function(te_variable{"deg2rad", custom_deg2rad});
+        parserTemplate.add_variable_or_function(te_variable{"d2r", custom_deg2rad});
+        parserTemplate.add_variable_or_function(te_variable{"rad2deg", custom_rad2deg});
+        parserTemplate.add_variable_or_function(te_variable{"r2d", custom_rad2deg});
         
-        s_tep.add_variable_or_function(te_variable{"sqrt", custom_sqrt});
-        s_tep.add_variable_or_function(te_variable{"ln", custom_ln});
-        s_tep.add_variable_or_function(te_variable{"log", custom_log10});
-        s_tep.add_variable_or_function(te_variable{"log10", custom_log10});
-        s_tep.add_variable_or_function(te_variable{"log2", custom_log2});
-        s_tep.add_variable_or_function(te_variable{"logb", custom_logb});
-        s_tep.add_variable_or_function(te_variable{"mod", custom_mod});
-        s_tep.add_variable_or_function(te_variable{"sgn", custom_sgn});
-        s_tep.add_variable_or_function(te_variable{"trunc", custom_trunc});
-        s_tep.add_variable_or_function(te_variable{"fact", custom_fact});
-        s_tep.add_variable_or_function(te_variable{"C", custom_C});
-        s_tep.add_variable_or_function(te_variable{"Cnk", custom_C});
-        s_tep.add_variable_or_function(te_variable{"P", custom_P});
-        s_tep.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"fib", custom_fib});
-        s_tep.add_variable_or_function(te_variable{"rUni", custom_rUni});
-        s_tep.add_variable_or_function(te_variable{"rNor", custom_rNor});
-        s_tep.add_variable_or_function(te_variable{"abs", custom_abs});
-        s_tep.add_variable_or_function(te_variable{"dot", custom_dot});
-        s_tep.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
+        parserTemplate.add_variable_or_function(te_variable{"sqrt", custom_sqrt});
+        parserTemplate.add_variable_or_function(te_variable{"ln", custom_ln});
+        parserTemplate.add_variable_or_function(te_variable{"log", custom_log10});
+        parserTemplate.add_variable_or_function(te_variable{"log10", custom_log10});
+        parserTemplate.add_variable_or_function(te_variable{"log2", custom_log2});
+        parserTemplate.add_variable_or_function(te_variable{"logb", custom_logb});
+        parserTemplate.add_variable_or_function(te_variable{"mod", custom_mod});
+        parserTemplate.add_variable_or_function(te_variable{"sgn", custom_sgn});
+        parserTemplate.add_variable_or_function(te_variable{"trunc", custom_trunc});
+        parserTemplate.add_variable_or_function(te_variable{"fact", custom_fact});
+        parserTemplate.add_variable_or_function(te_variable{"C", custom_C});
+        parserTemplate.add_variable_or_function(te_variable{"Cnk", custom_C});
+        parserTemplate.add_variable_or_function(te_variable{"P", custom_P});
+        parserTemplate.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"fib", custom_fib});
+        parserTemplate.add_variable_or_function(te_variable{"rUni", custom_rUni});
+        parserTemplate.add_variable_or_function(te_variable{"rNor", custom_rNor});
+        parserTemplate.add_variable_or_function(te_variable{"abs", custom_abs});
+        parserTemplate.add_variable_or_function(te_variable{"dot", custom_dot});
+        parserTemplate.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
         
-        s_tep.add_variable_or_function(te_variable{"mean", variadic_mean, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"median", variadic_median, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"mode", variadic_mode, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"var", variadic_var, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"std", variadic_std, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"sum", variadic_sum, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"prod", variadic_prod, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"min", variadic_min, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"max", variadic_max, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep_initialized = true;
+        parserTemplate.add_variable_or_function(te_variable{"mean", variadic_mean, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"median", variadic_median, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"mode", variadic_mode, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"var", variadic_var, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"std", variadic_std, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"sum", variadic_sum, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"prod", variadic_prod, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"min", variadic_min, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplate.add_variable_or_function(te_variable{"max", variadic_max, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        parserTemplateInitialized = true;
     }
 
+    te_parser s_tep(parserTemplate);
+    const auto argsSnapshot = user_args;
+    const auto constsSnapshot = user_consts;
+    const auto historySnapshot = history;
+    const auto firstHistoryNumber = history_first_number;
     auto& var_set = s_tep.get_variables_and_functions();
     std::vector<te_variable> shadowed_builtins;
     std::vector<te_variable> added_vars;
@@ -1355,21 +1386,21 @@ double evaluate(const std::string& expr_str, std::string& err) {
     };
 
     // 1. Register user defined variables
-    for (size_t i = 0; i < user_args.size(); ++i) {
-        add_dyn_var(user_args[i].name, &user_args[i].val);
+    for (size_t i = 0; i < argsSnapshot.size(); ++i) {
+        add_dyn_var(argsSnapshot[i].name, &argsSnapshot[i].val);
     }
     
     // 2. Register user defined constants
-    for (size_t i = 0; i < user_consts.size(); ++i) {
-        add_dyn_var(user_consts[i].name, &user_consts[i].val);
+    for (size_t i = 0; i < constsSnapshot.size(); ++i) {
+        add_dyn_var(constsSnapshot[i].name, &constsSnapshot[i].val);
     }
     
     // 3. Register history variables (e1, e2, e3...)
-    if (!history.empty() && preprocessed.find('e') != std::string::npos) {
+    if (!historySnapshot.empty() && preprocessed.find('e') != std::string::npos) {
         constexpr size_t max_history_variables = 128;
-        size_t start_h = (history.size() > max_history_variables) ? (history.size() - max_history_variables) : 0;
-        for (size_t i = start_h; i < history.size(); ++i) {
-            add_dyn_var("e" + std::to_string(history_first_number + i), &history[i]);
+        size_t start_h = (historySnapshot.size() > max_history_variables) ? (historySnapshot.size() - max_history_variables) : 0;
+        for (size_t i = start_h; i < historySnapshot.size(); ++i) {
+            add_dyn_var("e" + std::to_string(firstHistoryNumber + i), &historySnapshot[i]);
         }
     }
     
@@ -1454,17 +1485,26 @@ double evaluateWithoutHistory(const std::string& expr_str, std::string& err) {
     return evaluate(expr_str, err);
 }
 
+size_t findAssignmentOperator(const std::string& text) {
+    int depth = 0; char quote = 0;
+    for (size_t i = 0; i < text.size(); ++i) {
+        const char c = text[i];
+        if (quote) { if (c == '\\' && i + 1 < text.size()) ++i; else if (c == quote) quote = 0; continue; }
+        if (c == '\'' || c == '"') { quote = c; continue; }
+        if (c == '(' || c == '[' || c == '{') ++depth;
+        else if (c == ')' || c == ']' || c == '}') --depth;
+        else if (c == '=' && depth == 0 && (i == 0 || (text[i-1] != '=' && text[i-1] != '!' && text[i-1] != '<' && text[i-1] != '>')) && (i + 1 == text.size() || text[i+1] != '=')) return i;
+    }
+    return std::string::npos;
+}
+
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
     err = "";
     isDefinition = false;
     g_last_result_angle = AngleUnit::NONE;
     
-    size_t eq_pos = expr_str.find('=');
-    if (eq_pos != std::string::npos && 
-        expr_str.find("==") == std::string::npos && 
-        expr_str.find(">=") == std::string::npos && 
-        expr_str.find("<=") == std::string::npos && 
-        expr_str.find("!=") == std::string::npos) {
+    size_t eq_pos = findAssignmentOperator(expr_str);
+    if (eq_pos != std::string::npos) {
         
         std::string lhs = expr_str.substr(0, eq_pos);
         std::string rhs = expr_str.substr(eq_pos + 1);
@@ -1496,12 +1536,12 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 err = "History variables are read-only";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            if (!std::isalpha(lhs[0]) && lhs[0] != '_') {
+            if (!std::isalpha(static_cast<unsigned char>(lhs[0])) && lhs[0] != '_') {
                 err = "Invalid Name";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             for (char c : lhs) {
-                if (!std::isalnum(c) && c != '_') {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
                     err = "Invalid Name";
                     return std::numeric_limits<double>::quiet_NaN();
                 }
@@ -1511,12 +1551,12 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             std::string func_name = lhs.substr(0, paren);
             func_name.erase(0, func_name.find_first_not_of(" \t"));
             func_name.erase(func_name.find_last_not_of(" \t") + 1);
-            if (func_name.empty() || (!std::isalpha(func_name[0]) && func_name[0] != '_')) {
+            if (func_name.empty() || (!std::isalpha(static_cast<unsigned char>(func_name[0])) && func_name[0] != '_')) {
                 err = "Invalid Name";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             for (char c : func_name) {
-                if (!std::isalnum(c) && c != '_') {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
                     err = "Invalid Name";
                     return std::numeric_limits<double>::quiet_NaN();
                 }
@@ -1535,6 +1575,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
         isDefinition = true;
         
         if (lhs.find('(') != std::string::npos && lhs.find(')') != std::string::npos) {
+            if (rhs.empty()) { err = "Func Def Error: empty body"; return std::numeric_limits<double>::quiet_NaN(); }
             size_t open_p = lhs.find('(');
             std::string target_fname = lhs.substr(0, open_p);
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
@@ -2165,12 +2206,12 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
             if (!err.empty()) {
                 return expr;
             }
-            int idx = (int)std::round(idx_val);
             const auto& arr = *arr_ptr;
-            if (idx < 1 || idx > (int)arr.size()) {
-                err = "Index " + std::to_string(idx) + " out of bounds for array " + disp_name + " (size " + std::to_string(arr.size()) + ")";
+            if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
+                err = "Invalid or out of bounds index for array " + disp_name + " (size " + std::to_string(arr.size()) + ")";
                 return expr;
             }
+            const size_t idx = static_cast<size_t>(idx_val);
             double element_val = arr[idx - 1];
             res.replace(id_start, (close_bracket - id_start + 1), fmtInternal(element_val));
             replaced_any = true;
@@ -2403,6 +2444,8 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
     if ((trimmed.front() == '[' && trimmed.back() == ']') || (trimmed.front() == '(' && trimmed.back() == ')' && trimmed.find(',') != std::string::npos)) {
         is_array = true;
         std::string inner = trimmed.substr(1, trimmed.size() - 2);
+        if (trimmed.front() == '[' && inner.find(':') != std::string::npos && inner.find(',') == std::string::npos)
+            return parseArrayExpr(inner, is_array, err);
         std::vector<double> res;
         bool in_inner_quotes = false;
         std::string current_val_str = "";
@@ -2592,6 +2635,9 @@ static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_st
         for (size_t i = 0; i < op2_arr.size(); ++i) {
             if (op_str == "*" || op_str == ".*") {
                 res[i] = op1_scalar * op2_arr[i];
+            } else if (op_str == "/" || op_str == "./") {
+                if (op2_arr[i] == 0.0) { err = "Division by zero"; return {}; }
+                res[i] = op1_scalar / op2_arr[i];
             } else if (op_str == "+") {
                 res[i] = op1_scalar + op2_arr[i];
             } else if (op_str == "-") {
@@ -2631,6 +2677,8 @@ std::string formatPrintString(const std::string& str, std::string& err) {
         std::string res = "";
         size_t i = 0;
         while (i < inner.size()) {
+            if (inner[i] == '\\' && i + 1 < inner.size()) { res += inner[i + 1]; i += 2; continue; }
+            if (inner[i] == '"') { err = "Invalid string expression"; return {}; }
             if (inner[i] == '{') {
                 size_t close = inner.find('}', i);
                 if (close == std::string::npos) {
@@ -2663,10 +2711,10 @@ std::string formatPrintString(const std::string& str, std::string& err) {
                     } else {
                         std::string eval_err;
                         std::string prep_expr = preprocessLen(preprocessArrayLookups(expr, eval_err));
-                        if (!eval_err.empty()) return str;
+                        if (!eval_err.empty()) { err = eval_err; return {}; }
                         
                         double val = evaluate(prep_expr, eval_err);
-                        if (!eval_err.empty()) return str;
+                        if (!eval_err.empty()) { err = eval_err; return {}; }
                         
                         res += fmtNum(val);
                     }
@@ -2711,7 +2759,7 @@ bool parseArrayElementAssignment(const std::string& line, std::string& name, std
     if (open == std::string::npos || open == 0) return false;
     
     for (size_t i = 0; i < open; ++i) {
-        if (!std::isalnum(line[i]) && line[i] != '_') return false;
+        if (!std::isalnum(static_cast<unsigned char>(line[i])) && line[i] != '_') return false;
     }
     
     size_t close = line.find(']', open);
@@ -2765,6 +2813,11 @@ bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, st
         else if (bracket_nesting == 0 && paren_nesting == 0) {
             if (c == '+' || c == '-') {
                 if (i > 0 && clean_rhs[i-1] == '.') continue;
+                int previous = i - 1;
+                while (previous >= 0 && std::isspace(static_cast<unsigned char>(clean_rhs[previous]))) --previous;
+                if (previous < 0 || std::string("+-*/^,(<>=!").find(clean_rhs[previous]) != std::string::npos) continue;
+                if ((clean_rhs[previous] == 'e' || clean_rhs[previous] == 'E') && previous > 0 &&
+                    (std::isdigit(static_cast<unsigned char>(clean_rhs[previous - 1])) || clean_rhs[previous - 1] == '.')) continue;
                 std::string left = clean_rhs.substr(0, i);
                 left.erase(0, left.find_first_not_of(" \t"));
                 if (left.empty()) continue; // Unary

@@ -214,7 +214,9 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                 }
 
                 for (double xv : x_vec) {
-                    user_args[x_idx].val = xv;
+                    auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == x_var_name; });
+                    if (current == user_args.end()) { user_args.push_back({x_var_name, xv}); }
+                    else current->val = xv;
                     std::string eval_err;
                     double yv = evaluate(preprocessLen(prep_y), eval_err);
                     if (eval_err.empty() && !std::isnan(yv)) {
@@ -224,11 +226,10 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                     }
                 }
 
-                if (created_x) {
-                    user_args.pop_back();
-                } else {
-                    user_args[x_idx].val = old_x;
-                }
+                auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == x_var_name; });
+                if (created_x) { if (current != user_args.end()) user_args.erase(current); }
+                else if (current != user_args.end()) current->val = old_x;
+                else user_args.push_back({x_var_name, old_x});
             }
         }
         

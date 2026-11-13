@@ -237,7 +237,11 @@ inline double custom_logb(double x, double b) {
     return std::log(x) / std::log(b);
 }
 
-inline double custom_mod(double x, double y) { g_last_result_angle = AngleUnit::NONE; return std::fmod(x, y); }
+inline double custom_mod(double x, double y) {
+    g_last_result_angle = AngleUnit::NONE;
+    if (y == 0.0) { g_math_domain_err = "Division by Zero"; return std::numeric_limits<double>::quiet_NaN(); }
+    return std::fmod(x, y);
+}
 inline double custom_sgn(double x) { g_last_result_angle = AngleUnit::NONE; return (x > 0.0) - (x < 0.0); }
 inline double custom_trunc(double x) { g_last_result_angle = AngleUnit::NONE; return std::trunc(x); }
 inline double custom_abs(double x) { g_last_result_angle = AngleUnit::NONE; return std::abs(x); }
@@ -380,6 +384,7 @@ inline double custom_rUni(double min_v, double max_v) {
 }
 inline double custom_rNor(double mean, double stddev) {
     g_last_result_angle = AngleUnit::NONE;
+    if (!std::isfinite(stddev) || stddev <= 0.0) { g_math_domain_err = "Domain Error: rNor requires a positive standard deviation"; return std::numeric_limits<double>::quiet_NaN(); }
     static std::random_device rd;
     static std::mt19937 gen(rd());
     std::normal_distribution<> dis(mean, stddev);

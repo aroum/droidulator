@@ -191,12 +191,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
     std::string assign_var1 = "", assign_var2 = "";
     bool is_assign = false;
 
-    size_t eq_pos = trimmed_expr.find('=');
-    if (eq_pos != std::string::npos && 
-        trimmed_expr.find("==") == std::string::npos &&
-        trimmed_expr.find(">=") == std::string::npos &&
-        trimmed_expr.find("<=") == std::string::npos &&
-        trimmed_expr.find("!=") == std::string::npos) {
+    size_t eq_pos = findAssignmentOperator(trimmed_expr);
+    if (eq_pos != std::string::npos) {
         
         std::string lhs = trimmed_expr.substr(0, eq_pos);
         std::string rhs = trimmed_expr.substr(eq_pos + 1);
@@ -372,11 +368,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                     if (std::any_of(params.begin(), params.end(), isReservedName)) return toJavaError(env, "ERROR: Reserved parameter");
 
                     std::vector<std::string> body_stmts;
-                    size_t j = i + 1;
-                    while (j < stmts.size() && stmts[j] != "}") {
-                        body_stmts.push_back(stmts[j]);
-                        j++;
-                    }
+                    const size_t j = findMatchingBlockEnd(stmts, i);
+                    if (j == std::string::npos) return toJavaError(env, "ERROR: Mismatched function braces");
+                    for (size_t k = i + 1; k < j; ++k) body_stmts.push_back(stmts[k]);
                     i = j;
 
                     user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f){

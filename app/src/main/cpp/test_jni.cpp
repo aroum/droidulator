@@ -50,6 +50,50 @@ int main() {
     };
     expectNumber("1 / 1e5", 1e-5);
     expectNumber("1 / 10k", 1e-4);
+    {
+        std::string error; bool isDefinition = false;
+        user_script_funcs.push_back({"recursive_test", {"x"}, {"return recursive_test(x)"}});
+        evaluate("recursive_test(1)", error);
+        assert(error.find("recursion limit") != std::string::npos);
+        user_script_funcs.clear();
+        evaluateInput("x=3", error, isDefinition); assert(error.empty());
+        evaluateInput("flag=(x==3)", error, isDefinition); assert(error.empty());
+        expectNumber("flag", 1);
+        evaluateInput("ok=x>=2", error, isDefinition); assert(error.empty());
+        expectNumber("ok", 1);
+        evaluateInput("q(x)=x>=0", error, isDefinition); assert(error.empty());
+        evaluateInput("a=[1,2,4]", error, isDefinition); assert(error.empty());
+        bool isArray = false;
+        auto range = parseArrayExpr("[0:0.1:1]", isArray, error); assert(error.empty() && isArray && range.size() == 11);
+        auto inverse = parseArrayExpr("1 ./ a", isArray, error); assert(error.empty() && isArray && inverse.size() == 3 && inverse[2] == .25);
+        auto scaled = parseArrayExpr("a * -2", isArray, error); assert(error.empty() && isArray && scaled[1] == -4);
+        scaled = parseArrayExpr("1e-3 * a", isArray, error); assert(error.empty() && isArray && std::abs(scaled[1] - .002) < 1e-12);
+        scaled = parseArrayExpr("a * 1e-3", isArray, error); assert(error.empty() && isArray && std::abs(scaled[1] - .002) < 1e-12);
+        evaluate("a[1.4]", error); assert(!error.empty());
+        formatPrintString("\"x = {zzz} ok\"", error); assert(!error.empty());
+        error.clear(); formatPrintString("\"a\" + \"b\"", error); assert(!error.empty());
+        evaluateInput("empty(x)=", error, isDefinition); assert(!error.empty());
+        evaluate("rNor(0,-1)", error); assert(!error.empty());
+        user_args.clear(); user_arrays.clear(); user_funcs.clear();
+    }
+    {
+        runScript("print(\"a+=b\")");
+        assert(script_console_output.size() == 1 && script_console_output[0] == "a+=b");
+        runScript("if(1){ print(1) }else{ print(2) }");
+        assert(script_console_output.size() == 1 && script_console_output[0] == "1");
+        runScript("if(0){ print(1) }else{ print(2) }");
+        assert(script_console_output.size() == 1 && script_console_output[0] == "2");
+        runScript("fn script_once(x) { return x*2 }; print(7)");
+        assert(script_console_output.size() == 1 && script_console_output[0] == "7");
+        runScript("fn sign_test(x) { if(x < 0) { return -1 } else { return 1 } }; a, b = sign_test(-5)");
+        auto a = std::find_if(user_args.begin(), user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(a != user_args.end() && a->val == -1);
+        user_consts.push_back({"constant_test", 8});
+        runScript("constant_test, b = [1,2]");
+        assert(user_consts.back().val == 8 && !script_console_output.empty());
+        user_consts.clear();
+        user_script_funcs.clear();
+    }
     fmt_mode = 4; fmt_precision = 2;
     assert(fmtNum(999.999) == "1.00e+03");
     fmt_mode = 0; fmt_precision = 6;

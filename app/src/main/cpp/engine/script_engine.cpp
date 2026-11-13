@@ -1,5 +1,6 @@
 #include "script_engine.h"
 #include "math_funcs.h"
+#include "math_engine.h"
 #include "plot_engine.h"
 #include <iostream>
 
@@ -275,7 +276,7 @@ void runScript(const std::string& code) {
             ip++;
         }
         // if (cond) {
-        else if (line.rfind("if (", 0) == 0 && line.back() == '{') {
+        else if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
             size_t open_paren = line.find('(');
             size_t close_paren = line.rfind(')');
             if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
@@ -685,12 +686,11 @@ void runScript(const std::string& code) {
                     if (!err.empty()) {
                         script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
                     } else {
-                        int idx = (int)std::round(idx_val);
                         auto& arr = user_arrays[name];
-                        if (idx < 1 || idx > (int)arr.size()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Index " + std::to_string(idx) + " out of bounds");
+                        if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
+                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Invalid or out of bounds index");
                         } else {
-                            arr[idx - 1] = val_val;
+                            arr[static_cast<size_t>(idx_val) - 1] = val_val;
                         }
                     }
                 }
@@ -725,83 +725,44 @@ void runScript(const std::string& code) {
                     v_pos = comma + 1;
                 }
                 bool reserved = false;
-                for (const auto& name : lhs_vars) if (isReservedName(name)) { reserved = true; break; }
-                if (reserved) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name"); ip++; continue; }
+                for (const auto& name : lhs_vars) {
+                    if (isReservedName(name) || std::any_of(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }
+                }
+                if (reserved) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Const or reserved name"); ip++; continue; }
                 
                 // Evaluate RHS expression
                 bool is_arr = false;
                 std::string parse_err;
                 std::vector<double> vals;
                 
-                // Check if RHS is a custom script function call
+                // Use the same function executor as expression calls.
                 size_t open_p = rhs.find('(');
                 bool executed_fn = false;
                 if (open_p != std::string::npos && rhs.back() == ')') {
                     std::string fn_name = rhs.substr(0, open_p);
                     fn_name.erase(0, fn_name.find_first_not_of(" \t"));
                     fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    for (const auto& sf : user_script_funcs) {
-                        if (sf.name == fn_name) {
-                            std::string args_str = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
-                            std::vector<std::string> arg_exprs;
-                            size_t a_pos = 0;
-                            while (a_pos < args_str.size()) {
-                                size_t comma = args_str.find(',', a_pos);
-                                std::string a_e = (comma == std::string::npos) ? args_str.substr(a_pos) : args_str.substr(a_pos, comma - a_pos);
-                                a_e.erase(0, a_e.find_first_not_of(" \t"));
-                                a_e.erase(a_e.find_last_not_of(" \t") + 1);
-                                if (!a_e.empty()) arg_exprs.push_back(a_e);
-                                if (comma == std::string::npos) break;
-                                a_pos = comma + 1;
-                            }
-                            
-                            std::vector<double> eval_arg_vals;
-                            for (size_t p_i = 0; p_i < sf.params.size() && p_i < arg_exprs.size(); ++p_i) {
-                                std::string eval_err;
-                                double val = evaluate(preprocessArrayLookups(arg_exprs[p_i], eval_err), eval_err);
-                                eval_arg_vals.push_back(val);
-                            }
-                            auto old_args = user_args;
-                            for (size_t p_i = 0; p_i < eval_arg_vals.size(); ++p_i) {
-                                bool found = false;
-                                for (auto& ua : user_args) {
-                                    if (ua.name == sf.params[p_i]) { ua.val = eval_arg_vals[p_i]; found = true; break; }
-                                }
-                                if (!found) user_args.push_back({sf.params[p_i], eval_arg_vals[p_i]});
-                            }
-                            
-                            for (const auto& stmt : sf.statements) {
-                                if (stmt.rfind("return", 0) == 0) {
-                                    std::string ret_expr = (stmt.size() > 6) ? stmt.substr(6) : "0";
-                                    ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-                                    ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-                                    
-                                    std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
-                                    
-                                    for (const auto& part : ret_parts) {
-                                        std::string eval_err;
-                                        double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                                        vals.push_back(v);
-                                    }
-                                    break;
-                                } else {
-                                    bool isDef = false;
-                                    std::string eval_err;
-                                    evaluateInput(preprocessArrayLookups(stmt, eval_err), eval_err, isDef);
-                                }
-                            }
-                            user_args = old_args;
-                            executed_fn = true;
-                            break;
+                    const auto found = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) { return f.name == fn_name; });
+                    if (found != user_script_funcs.end()) {
+                        executed_fn = true;
+                        const auto argText = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
+                        auto argExprs = argText.find_first_not_of(" \t") == std::string::npos ? std::vector<std::string>{} : splitPlotArgs(argText);
+                        std::vector<double> evaluated;
+                        for (const auto& arg : argExprs) {
+                            evaluated.push_back(evaluate(arg, parse_err));
+                            if (!parse_err.empty()) break;
                         }
+                        if (parse_err.empty()) executeScriptFunc(fn_name, evaluated, parse_err, &vals);
                     }
                 }
-                
+                if (!parse_err.empty()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + parse_err); ip++; continue; }
+
                 if (!executed_fn) {
                     vals = parseArrayExpr(rhs, is_arr, parse_err);
                     if (!is_arr || !parse_err.empty()) {
                         std::string eval_err;
                         double single_v = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
+                        if (!eval_err.empty()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err); ip++; continue; }
                         vals = {single_v};
                     }
                 }
@@ -1044,102 +1005,10 @@ void runScript(const std::string& code) {
                     }
                 }
             } else {
-                // Check if line is a custom script function call: e.g., func(arg1, arg2)
-                size_t open_p = line.find('(');
-                bool executed_custom = false;
-                if (open_p != std::string::npos && line.back() == ')') {
-                    std::string fn_name = line.substr(0, open_p);
-                    fn_name.erase(0, fn_name.find_first_not_of(" \t"));
-                    fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    
-                    for (const auto& sf : user_script_funcs) {
-                        if (sf.name == fn_name) {
-                            std::string args_str = line.substr(open_p + 1, line.size() - open_p - 2);
-                            std::vector<std::string> arg_exprs;
-                            size_t a_pos = 0;
-                            while (a_pos < args_str.size()) {
-                                size_t comma = args_str.find(',', a_pos);
-                                std::string a_e = (comma == std::string::npos) ? args_str.substr(a_pos) : args_str.substr(a_pos, comma - a_pos);
-                                a_e.erase(0, a_e.find_first_not_of(" \t"));
-                                a_e.erase(a_e.find_last_not_of(" \t") + 1);
-                                if (!a_e.empty()) arg_exprs.push_back(a_e);
-                                if (comma == std::string::npos) break;
-                                a_pos = comma + 1;
-                            }
-                            
-                            std::vector<double> eval_arg_vals;
-                            for (size_t p_i = 0; p_i < sf.params.size() && p_i < arg_exprs.size(); ++p_i) {
-                                std::string eval_err;
-                                double val = evaluate(preprocessArrayLookups(arg_exprs[p_i], eval_err), eval_err);
-                                eval_arg_vals.push_back(val);
-                            }
-                            auto old_args = user_args;
-                            for (size_t p_i = 0; p_i < eval_arg_vals.size(); ++p_i) {
-                                bool found = false;
-                                for (auto& ua : user_args) {
-                                    if (ua.name == sf.params[p_i]) { ua.val = eval_arg_vals[p_i]; found = true; break; }
-                                }
-                                if (!found) user_args.push_back({sf.params[p_i], eval_arg_vals[p_i]});
-                            }
-                            
-                            for (const auto& stmt : sf.statements) {
-                                if (stmt.rfind("return", 0) == 0) {
-                                    std::string ret_expr = (stmt.size() > 6) ? stmt.substr(6) : "0";
-                                    ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-                                    ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-                                    
-                                    std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
-                                    
-                                    if (ret_parts.size() > 1) {
-                                        script_return_is_vec = true;
-                                        script_return_vec.clear();
-                                        for (size_t r_i = 0; r_i < ret_parts.size(); ++r_i) {
-                                            std::string part = ret_parts[r_i];
-                                            part.erase(0, part.find_first_not_of(" \t"));
-                                            part.erase(part.find_last_not_of(" \t") + 1);
-                                            std::string eval_err;
-                                            double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                                            script_return_vec.push_back(v);
-                                        }
-                                        script_return_val = script_return_vec[0];
-                                    } else {
-                                        bool is_arr = false;
-                                        std::string parse_err;
-                                        std::vector<double> arr = parseArrayExpr(ret_expr, is_arr, parse_err);
-                                        if (is_arr && parse_err.empty()) {
-                                            script_return_is_vec = true;
-                                            script_return_vec = arr;
-                                            script_return_val = arr.empty() ? 0.0 : arr[0];
-                                        } else {
-                                            std::string eval_err;
-                                            script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
-                                            script_return_is_vec = false;
-                                            script_return_vec = {script_return_val};
-                                        }
-                                    }
-                                    break;
-                                } else {
-                                    bool isDef = false;
-                                    std::string eval_err;
-                                    evaluateInput(preprocessArrayLookups(stmt, eval_err), eval_err, isDef);
-                                }
-                            }
-                            user_args = old_args;
-                            executed_custom = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!executed_custom) {
-                    bool isDef = false;
-                    std::string eval_err;
-                    evaluateInput(preprocessArrayLookups(line, eval_err), eval_err, isDef);
-                    if (script_has_returned) break;
-                    if (!eval_err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
-                    }
-                }
+                bool isDef = false;
+                std::string eval_err;
+                evaluateInput(line, eval_err, isDef);
+                if (!eval_err.empty()) script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
             }
             ip++;
         }
@@ -1151,6 +1020,12 @@ void runScript(const std::string& code) {
     
     user_funcs = original_funcs;
     autocomplete_words = original_autocomplete;
+    for (const auto& arg : user_args) {
+        if (std::find(autocomplete_words.begin(), autocomplete_words.end(), arg.name) == autocomplete_words.end()) autocomplete_words.push_back(arg.name);
+    }
+    for (const auto& array : user_arrays) {
+        if (std::find(autocomplete_words.begin(), autocomplete_words.end(), array.first) == autocomplete_words.end()) autocomplete_words.push_back(array.first);
+    }
     // Note: user_arrays intentionally not restored — scripts may define arrays
     // that affect subsequent plot rendering (e.g., x, y1) or global state.
 }
