@@ -42,6 +42,11 @@ public class CardulatorEngine {
     if (zero.startsWith("ERROR") || !zero.contains("0")) throw new AssertionError(zero);
     String bad=e.nativeEvaluate("conv(unknown_variable, \"m\", \"cm\")");
     if (!bad.startsWith("ERROR")) throw new AssertionError(bad);
+    String nestedDefinition = e.nativeEvaluate("fn nested_test(x) { if(x>0) { return x } else { return -1 } }; 7");
+    if (nestedDefinition.startsWith("ERROR") || e.nativeGetLastNumericVal() != 7) throw new AssertionError(nestedDefinition);
+    if (e.nativeEvaluate("nested_test(2)").startsWith("ERROR") || e.nativeGetLastNumericVal() != 2) throw new AssertionError("nested function");
+    e.nativeEvaluate("fn recursion_test(x) { return recursion_test(x) }");
+    if (!e.nativeEvaluate("recursion_test(1)").contains("recursion limit")) throw new AssertionError("recursion limit");
     String numeric=e.nativeEvaluate("conv(104, \"pf\")");
     double numericValue=e.nativeGetLastNumericVal();
     String marking=e.nativeEvaluate("conv(\"104\", \"pf\")");

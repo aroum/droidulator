@@ -85,17 +85,17 @@ void runScript(const std::string& code) {
     plot_lines.clear();
     plot_hold = false;
     
-    auto original_args = user_args;
     auto original_funcs = user_funcs;
     auto original_autocomplete = autocomplete_words;
-    auto original_arrays = user_arrays;
     user_args.reserve(256);
     
     std::vector<std::string> lines = splitIntoStatements(code);
     
     size_t ip = 0;
-    int max_steps = 10000;
+    int max_steps = 1000000;
     int step_count = 0;
+    int loop_iterations = 0;
+    constexpr int max_loop_iterations = 10000;
     script_return_val = 0.0;
     script_has_returned = false;
     
@@ -124,6 +124,16 @@ void runScript(const std::string& code) {
         line.erase(line.find_last_not_of(" \t\r") + 1);
         if (line.empty() || line[0] == '#' || line.rfind("//", 0) == 0) {
             ip++;
+            continue;
+        }
+        if (line == "break" || line == "continue") {
+            auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const BlockState& block) { return block.type == "for" || block.type == "while"; });
+            if (loop == blocks.rend()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + line + " outside loop"); ++ip; continue; }
+            const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
+            const size_t end = blocks[index].end_ip;
+            blocks.erase(blocks.begin() + index + 1, blocks.end());
+            if (line == "break") { blocks.erase(blocks.begin() + index); ip = end + 1; }
+            else ip = end;
             continue;
         }
         
@@ -413,6 +423,7 @@ void runScript(const std::string& code) {
                         if (found_block) blocks.erase(blocks.begin() + block_idx);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
+                        if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("Error: Loop iteration limit reached"); break; }
                         if (!found_block) {
                             blocks.push_back({ "while", true, ip, end_ip, "", 0.0, 0.0, cond_str, "" });
                         }
@@ -542,6 +553,7 @@ void runScript(const std::string& code) {
                                 if (found_block) blocks.erase(blocks.begin() + block_idx);
                                 ip = end_ip + 1;
                             } else if (cond_bool) {
+                                if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("Error: Loop iteration limit reached"); break; }
                                 if (!found_block) {
                                     blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
                                 }
@@ -899,6 +911,7 @@ void runScript(const std::string& code) {
                     }
 
                     if (source_arr && !source_arr->empty()) {
+                        const auto sourceValues = *source_arr;
                         bool name_is_id = (!source_arr_name.empty() && (std::isalpha((unsigned char)source_arr_name[0]) || source_arr_name[0] == '_'));
                         if (name_is_id) {
                             for (char c : source_arr_name) {
@@ -922,18 +935,22 @@ void runScript(const std::string& code) {
                             std::string prep_err;
                             std::string prep_rhs = rhs_prepped;
                             std::vector<double> elem_res;
-                            elem_res.reserve(source_arr->size());
+                            elem_res.reserve(sourceValues.size());
                             bool all_ok = true;
                             std::string eval_err;
-                            for (double val : *source_arr) {
-                                user_args[x_idx].val = val;
+                            for (double val : sourceValues) {
+                                auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
+                                if (current == user_args.end()) user_args.push_back({source_arr_name, val});
+                                else current->val = val;
                                 eval_err.clear();
                                 double y = evaluate(prep_rhs, eval_err);
                                 if (!eval_err.empty()) { all_ok = false; break; }
                                 elem_res.push_back(y);
                             }
-                            if (created_var) user_args.pop_back();
-                            else user_args[x_idx].val = old_val;
+                            auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
+                            if (created_var) { if (current != user_args.end()) user_args.erase(current); }
+                            else if (current != user_args.end()) current->val = old_val;
+                            else user_args.push_back({source_arr_name, old_val});
 
                             if (!all_ok) {
                                 script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
@@ -1015,7 +1032,7 @@ void runScript(const std::string& code) {
     }
     
     if (step_count >= max_steps) {
-        script_console_output.push_back("Error: Loop limit reached");
+        script_console_output.push_back("Error: Script statement limit reached");
     }
     
     user_funcs = original_funcs;

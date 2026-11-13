@@ -46,7 +46,7 @@ inline ConvResult handleConv(double value,
     }
 
     auto toLower = [](std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return s;
     };
 
@@ -57,7 +57,7 @@ inline ConvResult handleConv(double value,
     auto parseSMD3 = [](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s;
@@ -70,7 +70,7 @@ inline ConvResult handleConv(double value,
             }
             try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             ohms = base * std::pow(10.0, exp);
@@ -82,7 +82,7 @@ inline ConvResult handleConv(double value,
     auto parseSMD4 = [](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s;
@@ -93,7 +93,7 @@ inline ConvResult handleConv(double value,
             }
             try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 4 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2]) && std::isdigit(s[3])) {
+        if (s.size() == 4 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2])) && std::isdigit(static_cast<unsigned char>(s[3]))) {
             int base = (s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0');
             int exp = s[3] - '0';
             ohms = base * std::pow(10.0, exp);
@@ -119,8 +119,8 @@ inline ConvResult handleConv(double value,
     auto parseEIA96 = [&](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.size() != 3) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
-        if (!std::isdigit(s[0]) || !std::isdigit(s[1])) return false;
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (!std::isdigit(static_cast<unsigned char>(s[0])) || !std::isdigit(static_cast<unsigned char>(s[1]))) return false;
         int codeNum = (s[0] - '0') * 10 + (s[1] - '0');
         if (codeNum < 1 || codeNum > 96) return false;
         int base = EIA96_TABLE[codeNum];
@@ -238,7 +238,7 @@ inline ConvResult handleConv(double value,
     auto parseCapCode = [](const std::string& code, double& farads) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         
         // Check for p, n, u RKM notation (e.g., 4p7, 10n, 1u5)
         for (char unitChar : {'P', 'N', 'U'}) {
@@ -255,7 +255,7 @@ inline ConvResult handleConv(double value,
                 } catch(...) { return false; }
             }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             double pF = base * std::pow(10.0, exp);
@@ -268,7 +268,7 @@ inline ConvResult handleConv(double value,
     auto parseIndCode = [](const std::string& code, double& henries) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         
         // RKM notation for inductors in uH or nH (e.g. 4R7 = 4.7 uH, 10n = 10 nH)
         size_t rPos = s.find('R');
@@ -281,7 +281,7 @@ inline ConvResult handleConv(double value,
             std::string temp = s; temp[nPos] = '.';
             try { size_t used = 0; henries = std::stod(temp, &used) * 1e-9; return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             double uH = base * std::pow(10.0, exp);

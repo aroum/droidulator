@@ -79,7 +79,8 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     double ret_val = 0.0;
     bool has_returned = false;
     int step_count = 0;
-    int max_steps = 1000;
+    int max_steps = 1000000;
+    int loopIterations = 0;
     
     auto lines = func.statements;
     size_t ip = 0;
@@ -89,6 +90,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         size_t start_ip;
         size_t end_ip;
         std::string cond_str;
+        std::string step_str;
     };
     std::vector<FnBlock> blocks;
 
@@ -99,6 +101,17 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         line.erase(0, line.find_first_not_of(" \t\r"));
         line.erase(line.find_last_not_of(" \t\r") + 1);
         if (line.empty() || line[0] == '#' || line.rfind("//", 0) == 0) { ip++; continue; }
+
+        if (line == "break" || line == "continue") {
+            auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const FnBlock& b) { return b.type == "for" || b.type == "while"; });
+            if (loop == blocks.rend()) { err = line + " outside loop"; break; }
+            const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
+            const size_t end = blocks[index].end_ip;
+            blocks.erase(blocks.begin() + index + 1, blocks.end());
+            if (line == "break") { blocks.erase(blocks.begin() + index); ip = end + 1; }
+            else ip = end;
+            continue;
+        }
 
         if (line.rfind("return ", 0) == 0 || line == "return") {
             std::string ret_expr = (line.size() > 7) ? line.substr(7) : "0";
@@ -132,6 +145,35 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             ++ip; continue;
         }
 
+        if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 || line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
+            const bool isFor = line.rfind("for", 0) == 0;
+            const size_t open = line.find('('), close = line.rfind(')');
+            const size_t end = findMatchingBlockEnd(lines, ip);
+            if (open == std::string::npos || close == std::string::npos || end == std::string::npos) { err = "Mismatched loop"; break; }
+            auto existing = std::find_if(blocks.begin(), blocks.end(), [&](const FnBlock& b) { return b.start_ip == ip && (b.type == "for" || b.type == "while"); });
+            const bool active = existing != blocks.end();
+            std::string condition = line.substr(open + 1, close - open - 1), step;
+            if (isFor) {
+                const size_t first = condition.find(';'), second = first == std::string::npos ? first : condition.find(';', first + 1);
+                if (first == std::string::npos || second == std::string::npos) { err = "Invalid for loop"; break; }
+                const std::string init = condition.substr(0, first);
+                step = condition.substr(second + 1);
+                condition = condition.substr(first + 1, second - first - 1);
+                if (!active && init.find_first_not_of(" \t") != std::string::npos) { bool definition = false; evaluateInput(init, err, definition); if (!err.empty()) break; }
+            }
+            const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluate(condition, err);
+            if (!err.empty()) break;
+            if (value != 0.0) {
+                if (++loopIterations > 10000) { err = "Function loop iteration limit reached"; break; }
+                if (!active) blocks.push_back({isFor ? "for" : "while", true, ip, end, condition, step});
+                ++ip;
+            } else {
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+            }
+            continue;
+        }
+
         if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
             size_t open_p = line.find('(');
             size_t close_p = line.rfind(')');
@@ -151,6 +193,16 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
                 }
                 continue;
             }
+        } else if ((line.rfind("} else if", 0) == 0 || line.rfind("else if", 0) == 0 || line.rfind("} elif", 0) == 0 || line.rfind("elif", 0) == 0) && line.back() == '{') {
+            if (blocks.empty() || blocks.back().type != "if") { err = "Unmatched else if"; break; }
+            if (blocks.back().condition_met) { ip = blocks.back().end_ip; continue; }
+            const size_t open = line.find('('), close = line.rfind(')');
+            if (open == std::string::npos || close == std::string::npos || close <= open) { err = "Invalid else if"; break; }
+            const double value = evaluate(line.substr(open + 1, close - open - 1), err);
+            if (!err.empty()) break;
+            if (value != 0.0) { blocks.back().condition_met = true; ++ip; }
+            else { const size_t next = findMatchingBlockEnd(lines, ip, true); ip = next == std::string::npos ? blocks.back().end_ip : next; }
+            continue;
         } else if (line == "} else {" || line == "else {") {
             if (!blocks.empty() && blocks.back().type == "if") {
                 if (blocks.back().condition_met) {
@@ -163,6 +215,15 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             }
         } else if (isBlockEnd(line)) {
             if (!blocks.empty()) {
+                auto& block = blocks.back();
+                if (block.type == "for" || block.type == "while") {
+                    if (block.type == "for" && block.step_str.find_first_not_of(" \t") != std::string::npos) {
+                        for (const auto& step : splitIntoStatements(block.step_str)) { bool definition = false; evaluateInput(step, err, definition); if (!err.empty()) break; }
+                        if (!err.empty()) break;
+                    }
+                    ip = block.start_ip;
+                    continue;
+                }
                 blocks.pop_back();
             }
             ip++;
@@ -181,6 +242,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         ip++;
     }
 
+    if (step_count >= max_steps && !has_returned && err.empty()) err = "Function statement limit reached";
     user_args = orig_args;
     user_arrays = orig_arrays;
 
@@ -1193,6 +1255,106 @@ std::string preprocessVectorStats(const std::string& s) {
     return res;
 }
 
+using UnaryFunction = double (*)(double);
+static const std::map<std::string, UnaryFunction>& unaryFunctions() {
+    static const std::map<std::string, UnaryFunction> functions = {
+        {"sin", custom_sin},
+        {"cos", custom_cos},
+        {"tan", custom_tan},
+        {"tg", custom_tan},
+        {"cot", custom_cot},
+        {"ctg", custom_cot},
+        {"ctan", custom_ctan},
+        {"sec", custom_sec},
+        {"csc", custom_csc},
+        {"cosec", custom_csc},
+        {"asin", custom_asin},
+        {"arcsin", custom_asin},
+        {"acos", custom_acos},
+        {"arccos", custom_acos},
+        {"atan", custom_atan},
+        {"arctan", custom_atan},
+        {"atg", custom_atan},
+        {"arctg", custom_atan},
+        {"acot", custom_acot},
+        {"arccot", custom_acot},
+        {"actg", custom_acot},
+        {"arcctg", custom_acot},
+        {"actan", custom_acot},
+        {"arcctan", custom_acot},
+        {"asec", custom_asec},
+        {"arcsec", custom_asec},
+        {"acsc", custom_acsc},
+        {"arccsc", custom_acsc},
+        {"acosec", custom_acsc},
+        {"arccosec", custom_acsc},
+        {"sinh", custom_sinh},
+        {"sh", custom_sinh},
+        {"cosh", custom_cosh},
+        {"ch", custom_cosh},
+        {"tanh", custom_tanh},
+        {"th", custom_tanh},
+        {"coth", custom_coth},
+        {"cth", custom_coth},
+        {"ctgh", custom_coth},
+        {"ctanh", custom_coth},
+        {"sech", custom_sech},
+        {"sch", custom_sech},
+        {"csch", custom_csch},
+        {"cosech", custom_csch},
+        {"asinh", custom_asinh},
+        {"ahsin", custom_asinh},
+        {"arcsinh", custom_asinh},
+        {"arsinh", custom_asinh},
+        {"arsh", custom_asinh},
+        {"acosh", custom_acosh},
+        {"ahcos", custom_acosh},
+        {"arccosh", custom_acosh},
+        {"arcosh", custom_acosh},
+        {"arch", custom_acosh},
+        {"atanh", custom_atanh},
+        {"ahtan", custom_atanh},
+        {"arctanh", custom_atanh},
+        {"artanh", custom_atanh},
+        {"arth", custom_atanh},
+        {"artg", custom_atanh},
+        {"arctgh", custom_atanh},
+        {"acoth", custom_acoth},
+        {"ahcot", custom_acoth},
+        {"arccoth", custom_acoth},
+        {"arcoth", custom_acoth},
+        {"arcth", custom_acoth},
+        {"ahcoth", custom_acoth},
+        {"asech", custom_asech},
+        {"ahsec", custom_asech},
+        {"arcsech", custom_asech},
+        {"arsech", custom_asech},
+        {"ahsech", custom_asech},
+        {"acsch", custom_acsch},
+        {"ahcsc", custom_acsch},
+        {"arccsch", custom_acsch},
+        {"arcsch", custom_acsch},
+        {"acosech", custom_acsch},
+        {"arccosech", custom_acsch},
+        {"ahcsch", custom_acsch},
+        {"deg2rad", custom_deg2rad},
+        {"d2r", custom_deg2rad},
+        {"rad2deg", custom_rad2deg},
+        {"r2d", custom_rad2deg},
+        {"sqrt", custom_sqrt},
+        {"ln", custom_ln},
+        {"log", custom_log10},
+        {"log10", custom_log10},
+        {"log2", custom_log2},
+        {"sgn", custom_sgn},
+        {"trunc", custom_trunc},
+        {"fact", custom_fact},
+        {"fib", custom_fib},
+        {"abs", custom_abs},
+    };
+    return functions;
+}
+
 static bool s_in_array_fallback = false;
 
 double evaluate(const std::string& expr_str, std::string& err) {
@@ -1242,114 +1404,22 @@ double evaluate(const std::string& expr_str, std::string& err) {
     static te_parser parserTemplate;
     static bool parserTemplateInitialized = false;
     if (!parserTemplateInitialized) {
-        parserTemplate.add_variable_or_function(te_variable{"sin", custom_sin});
-        parserTemplate.add_variable_or_function(te_variable{"cos", custom_cos});
-        parserTemplate.add_variable_or_function(te_variable{"tan", custom_tan});
-        parserTemplate.add_variable_or_function(te_variable{"tg", custom_tan});
-        parserTemplate.add_variable_or_function(te_variable{"cot", custom_cot});
-        parserTemplate.add_variable_or_function(te_variable{"ctg", custom_cot});
-        parserTemplate.add_variable_or_function(te_variable{"ctan", custom_ctan});
-        parserTemplate.add_variable_or_function(te_variable{"sec", custom_sec});
-        parserTemplate.add_variable_or_function(te_variable{"csc", custom_csc});
-        parserTemplate.add_variable_or_function(te_variable{"cosec", custom_csc});
+        for (const auto& [name, function] : unaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
 
-        parserTemplate.add_variable_or_function(te_variable{"asin", custom_asin});
-        parserTemplate.add_variable_or_function(te_variable{"arcsin", custom_asin});
-        parserTemplate.add_variable_or_function(te_variable{"acos", custom_acos});
-        parserTemplate.add_variable_or_function(te_variable{"arccos", custom_acos});
-        parserTemplate.add_variable_or_function(te_variable{"atan", custom_atan});
-        parserTemplate.add_variable_or_function(te_variable{"arctan", custom_atan});
-        parserTemplate.add_variable_or_function(te_variable{"atg", custom_atan});
-        parserTemplate.add_variable_or_function(te_variable{"arctg", custom_atan});
         parserTemplate.add_variable_or_function(te_variable{"atan2", custom_atan2});
-        parserTemplate.add_variable_or_function(te_variable{"acot", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"arccot", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"actg", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"arcctg", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"actan", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"arcctan", custom_acot});
-        parserTemplate.add_variable_or_function(te_variable{"asec", custom_asec});
-        parserTemplate.add_variable_or_function(te_variable{"arcsec", custom_asec});
-        parserTemplate.add_variable_or_function(te_variable{"acsc", custom_acsc});
-        parserTemplate.add_variable_or_function(te_variable{"arccsc", custom_acsc});
-        parserTemplate.add_variable_or_function(te_variable{"acosec", custom_acsc});
-        parserTemplate.add_variable_or_function(te_variable{"arccosec", custom_acsc});
 
-        parserTemplate.add_variable_or_function(te_variable{"sinh", custom_sinh});
-        parserTemplate.add_variable_or_function(te_variable{"sh", custom_sinh});
-        parserTemplate.add_variable_or_function(te_variable{"cosh", custom_cosh});
-        parserTemplate.add_variable_or_function(te_variable{"ch", custom_cosh});
-        parserTemplate.add_variable_or_function(te_variable{"tanh", custom_tanh});
-        parserTemplate.add_variable_or_function(te_variable{"th", custom_tanh});
-        parserTemplate.add_variable_or_function(te_variable{"coth", custom_coth});
-        parserTemplate.add_variable_or_function(te_variable{"cth", custom_coth});
-        parserTemplate.add_variable_or_function(te_variable{"ctgh", custom_coth});
-        parserTemplate.add_variable_or_function(te_variable{"ctanh", custom_coth});
-        parserTemplate.add_variable_or_function(te_variable{"sech", custom_sech});
-        parserTemplate.add_variable_or_function(te_variable{"sch", custom_sech});
-        parserTemplate.add_variable_or_function(te_variable{"csch", custom_csch});
-        parserTemplate.add_variable_or_function(te_variable{"cosech", custom_csch});
 
-        parserTemplate.add_variable_or_function(te_variable{"asinh", custom_asinh});
-        parserTemplate.add_variable_or_function(te_variable{"ahsin", custom_asinh});
-        parserTemplate.add_variable_or_function(te_variable{"arcsinh", custom_asinh});
-        parserTemplate.add_variable_or_function(te_variable{"arsinh", custom_asinh});
-        parserTemplate.add_variable_or_function(te_variable{"arsh", custom_asinh});
-        parserTemplate.add_variable_or_function(te_variable{"acosh", custom_acosh});
-        parserTemplate.add_variable_or_function(te_variable{"ahcos", custom_acosh});
-        parserTemplate.add_variable_or_function(te_variable{"arccosh", custom_acosh});
-        parserTemplate.add_variable_or_function(te_variable{"arcosh", custom_acosh});
-        parserTemplate.add_variable_or_function(te_variable{"arch", custom_acosh});
-        parserTemplate.add_variable_or_function(te_variable{"atanh", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"ahtan", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"arctanh", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"artanh", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"arth", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"artg", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"arctgh", custom_atanh});
-        parserTemplate.add_variable_or_function(te_variable{"acoth", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"ahcot", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"arccoth", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"arcoth", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"arcth", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"ahcoth", custom_acoth});
-        parserTemplate.add_variable_or_function(te_variable{"asech", custom_asech});
-        parserTemplate.add_variable_or_function(te_variable{"ahsec", custom_asech});
-        parserTemplate.add_variable_or_function(te_variable{"arcsech", custom_asech});
-        parserTemplate.add_variable_or_function(te_variable{"arsech", custom_asech});
-        parserTemplate.add_variable_or_function(te_variable{"ahsech", custom_asech});
-        parserTemplate.add_variable_or_function(te_variable{"acsch", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"ahcsc", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"arccsch", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"arcsch", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"acosech", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"arccosech", custom_acsch});
-        parserTemplate.add_variable_or_function(te_variable{"ahcsch", custom_acsch});
         
-        parserTemplate.add_variable_or_function(te_variable{"deg2rad", custom_deg2rad});
-        parserTemplate.add_variable_or_function(te_variable{"d2r", custom_deg2rad});
-        parserTemplate.add_variable_or_function(te_variable{"rad2deg", custom_rad2deg});
-        parserTemplate.add_variable_or_function(te_variable{"r2d", custom_rad2deg});
         
-        parserTemplate.add_variable_or_function(te_variable{"sqrt", custom_sqrt});
-        parserTemplate.add_variable_or_function(te_variable{"ln", custom_ln});
-        parserTemplate.add_variable_or_function(te_variable{"log", custom_log10});
-        parserTemplate.add_variable_or_function(te_variable{"log10", custom_log10});
-        parserTemplate.add_variable_or_function(te_variable{"log2", custom_log2});
         parserTemplate.add_variable_or_function(te_variable{"logb", custom_logb});
         parserTemplate.add_variable_or_function(te_variable{"mod", custom_mod});
-        parserTemplate.add_variable_or_function(te_variable{"sgn", custom_sgn});
-        parserTemplate.add_variable_or_function(te_variable{"trunc", custom_trunc});
-        parserTemplate.add_variable_or_function(te_variable{"fact", custom_fact});
         parserTemplate.add_variable_or_function(te_variable{"C", custom_C});
         parserTemplate.add_variable_or_function(te_variable{"Cnk", custom_C});
         parserTemplate.add_variable_or_function(te_variable{"P", custom_P});
         parserTemplate.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         parserTemplate.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"fib", custom_fib});
         parserTemplate.add_variable_or_function(te_variable{"rUni", custom_rUni});
         parserTemplate.add_variable_or_function(te_variable{"rNor", custom_rNor});
-        parserTemplate.add_variable_or_function(te_variable{"abs", custom_abs});
         parserTemplate.add_variable_or_function(te_variable{"dot", custom_dot});
         parserTemplate.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
         
@@ -2386,46 +2456,13 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                 std::vector<double> res(arg_vec.size());
                 for (size_t i = 0; i < arg_vec.size(); ++i) {
                     double val = arg_vec[i];
-                    if (func_name == "cos") res[i] = custom_cos(val);
-                    else if (func_name == "sin") res[i] = custom_sin(val);
-                    else if (func_name == "tan" || func_name == "tg") res[i] = custom_tan(val);
-                    else if (func_name == "ctan" || func_name == "cot" || func_name == "ctg") res[i] = custom_cot(val);
-                    else if (func_name == "sec") res[i] = custom_sec(val);
-                    else if (func_name == "csc" || func_name == "cosec") res[i] = custom_csc(val);
-                    else if (func_name == "asin" || func_name == "arcsin") res[i] = custom_asin(val);
-                    else if (func_name == "acos" || func_name == "arccos") res[i] = custom_acos(val);
-                    else if (func_name == "atan" || func_name == "arctan" || func_name == "atg" || func_name == "arctg") res[i] = custom_atan(val);
-                    else if (func_name == "acot" || func_name == "arccot" || func_name == "actg" || func_name == "arcctg" || func_name == "actan" || func_name == "arcctan") res[i] = custom_acot(val);
-                    else if (func_name == "asec" || func_name == "arcsec") res[i] = custom_asec(val);
-                    else if (func_name == "acsc" || func_name == "arccsc" || func_name == "acosec" || func_name == "arccosec") res[i] = custom_acsc(val);
-                    else if (func_name == "sinh" || func_name == "sh") res[i] = custom_sinh(val);
-                    else if (func_name == "cosh" || func_name == "ch") res[i] = custom_cosh(val);
-                    else if (func_name == "tanh" || func_name == "th") res[i] = custom_tanh(val);
-                    else if (func_name == "coth" || func_name == "cth" || func_name == "ctgh" || func_name == "ctanh") res[i] = custom_coth(val);
-                    else if (func_name == "sech" || func_name == "sch") res[i] = custom_sech(val);
-                    else if (func_name == "csch" || func_name == "cosech") res[i] = custom_csch(val);
-                    else if (func_name == "asinh" || func_name == "ahsin" || func_name == "arcsinh" || func_name == "arsinh" || func_name == "arsh") res[i] = custom_asinh(val);
-                    else if (func_name == "acosh" || func_name == "ahcos" || func_name == "arccosh" || func_name == "arcosh" || func_name == "arch") res[i] = custom_acosh(val);
-                    else if (func_name == "atanh" || func_name == "ahtan" || func_name == "arctanh" || func_name == "artanh" || func_name == "arth" || func_name == "artg" || func_name == "arctgh") res[i] = custom_atanh(val);
-                    else if (func_name == "acoth" || func_name == "ahcot" || func_name == "arccoth" || func_name == "arcoth" || func_name == "arcth" || func_name == "ahcoth") res[i] = custom_acoth(val);
-                    else if (func_name == "asech" || func_name == "ahsec" || func_name == "arcsech" || func_name == "arsech" || func_name == "ahsech") res[i] = custom_asech(val);
-                    else if (func_name == "acsch" || func_name == "ahcsc" || func_name == "arccsch" || func_name == "arcsch" || func_name == "acosech" || func_name == "arccosech" || func_name == "ahcsch") res[i] = custom_acsch(val);
-                    else if (func_name == "sqrt") res[i] = custom_sqrt(val);
-                    else if (func_name == "cbrt") res[i] = cbrt(val);
-                    else if (func_name == "abs") res[i] = fabs(val);
-                    else if (func_name == "exp") res[i] = exp(val);
-                    else if (func_name == "ln") res[i] = custom_ln(val);
-                    else if (func_name == "log" || func_name == "log10") res[i] = custom_log10(val);
-                    else if (func_name == "log2") res[i] = custom_log2(val);
-                    else if (func_name == "deg2rad" || func_name == "d2r") res[i] = custom_deg2rad(val);
-                    else if (func_name == "rad2deg" || func_name == "r2d") res[i] = custom_rad2deg(val);
-                    else if (func_name == "floor") res[i] = floor(val);
-                    else if (func_name == "ceil") res[i] = ceil(val);
-                    else if (func_name == "round") res[i] = round(val);
-                    else if (func_name == "trunc") res[i] = trunc(val);
-                    else if (func_name == "sgn") res[i] = (val > 0.0 ? 1.0 : (val < 0.0 ? -1.0 : 0.0));
-                    else if (func_name == "fact") res[i] = custom_fact(val);
-                    else if (func_name == "fib") res[i] = custom_fib(val);
+                    const auto function = unaryFunctions().find(func_name);
+                    if (function != unaryFunctions().end()) res[i] = function->second(val);
+                    else if (func_name == "cbrt") res[i] = std::cbrt(val);
+                    else if (func_name == "exp") res[i] = std::exp(val);
+                    else if (func_name == "floor") res[i] = std::floor(val);
+                    else if (func_name == "ceil") res[i] = std::ceil(val);
+                    else if (func_name == "round") res[i] = std::round(val);
                     else {
                         std::string elementError;
                         res[i] = evaluate(func_name + "(" + fmtInternal(val) + ")", elementError);

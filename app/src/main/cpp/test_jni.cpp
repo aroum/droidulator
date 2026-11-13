@@ -62,6 +62,7 @@ int main() {
         evaluateInput("ok=x>=2", error, isDefinition); assert(error.empty());
         expectNumber("ok", 1);
         evaluateInput("q(x)=x>=0", error, isDefinition); assert(error.empty());
+        expectNumber("q(2)", 1); expectNumber("q(-2)", 0);
         evaluateInput("a=[1,2,4]", error, isDefinition); assert(error.empty());
         bool isArray = false;
         auto range = parseArrayExpr("[0:0.1:1]", isArray, error); assert(error.empty() && isArray && range.size() == 11);
@@ -74,11 +75,16 @@ int main() {
         error.clear(); formatPrintString("\"a\" + \"b\"", error); assert(!error.empty());
         evaluateInput("empty(x)=", error, isDefinition); assert(!error.empty());
         evaluate("rNor(0,-1)", error); assert(!error.empty());
+        std::string modError, percentError;
+        evaluate("mod(1,0)", modError); evaluate("1%0", percentError);
+        assert(modError == "Division by Zero" && percentError == modError);
         user_args.clear(); user_arrays.clear(); user_funcs.clear();
     }
     {
         runScript("print(\"a+=b\")");
         assert(script_console_output.size() == 1 && script_console_output[0] == "a+=b");
+        runScript("print(\"a\\\"+=b\")");
+        assert(script_console_output.size() == 1 && script_console_output[0] == "a\"+=b");
         runScript("if(1){ print(1) }else{ print(2) }");
         assert(script_console_output.size() == 1 && script_console_output[0] == "1");
         runScript("if(0){ print(1) }else{ print(2) }");
@@ -88,11 +94,27 @@ int main() {
         runScript("fn sign_test(x) { if(x < 0) { return -1 } else { return 1 } }; a, b = sign_test(-5)");
         auto a = std::find_if(user_args.begin(), user_args.end(), [](const UserArg& x) { return x.name == "a"; });
         assert(a != user_args.end() && a->val == -1);
+        runScript("fn loop_test(x) { y=0; for(i=0; i<x; i+=1) { y=y+i }; print(y); return y }; loop_test(4)");
+        assert(!script_console_output.empty() && script_console_output.front() == "6");
+        runScript("fn branch_test(x) { if(x<0) { return -1 } else if(x==0) { return 0 } else { return 1 } }; a,b=branch_test(0)");
+        auto branch = std::find_if(user_args.begin(), user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(branch != user_args.end() && branch->val == 0);
+        runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1)");
+        assert(!script_console_output.empty() && script_console_output.back().find("Arg Count Mismatch") != std::string::npos);
+        runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1,unknown_value)");
+        assert(!script_console_output.empty() && script_console_output.back().find("Err:") != std::string::npos);
+        runScript("fn recursive_script(x) { return recursive_script(x) }; recursive_script(1)");
+        assert(!script_console_output.empty() && script_console_output.back().find("recursion limit") != std::string::npos);
+        runScript("for (i=0; i<5; i+=1) { if(i==1) { continue }; if(i==3) { break }; print(i) }");
+        assert(script_console_output.size() == 2 && script_console_output[0] == "0" && script_console_output[1] == "2");
+        runScript("counter=0; for (i=0; i<4000; i+=1) { counter=counter+1; counter=counter+1; counter=counter+1 }; print(counter)");
+        assert(!script_console_output.empty() && script_console_output.back() == "12000");
         user_consts.push_back({"constant_test", 8});
         runScript("constant_test, b = [1,2]");
         assert(user_consts.back().val == 8 && !script_console_output.empty());
         user_consts.clear();
         user_script_funcs.clear();
+        user_args.clear(); user_arrays.clear();
     }
     fmt_mode = 4; fmt_precision = 2;
     assert(fmtNum(999.999) == "1.00e+03");
