@@ -22,4 +22,93 @@
     <string name="access_btn_nav_up">Previous command</string>
     <string name="access_btn_nav_down">Next command</string>
     <string name="access_btn_clear">Clear input; long press to clear session</string>
+    <string name="ui_text_001" formatted="false">Unable to install units data</string>
+    <string name="ui_text_002" formatted="false">Clear calculation history, variables and arrays?</string>
+    <string name="ui_text_003" formatted="false">Reset to built-in Gruvbox theme</string>
+    <string name="ui_text_004" formatted="false">History and variables cleared</string>
+    <string name="ui_text_005" formatted="false">No user variables defined.\nClick \'+ Add\' above to create one.</string>
+    <string name="ui_text_006" formatted="false">No custom formulas defined.\nClick \'+ Add\' above to create a formula e.g. f(x) = x^2</string>
+    <string name="ui_text_007" formatted="false">No custom scripts available.\nClick \'+ Add\' above to create a new script.</string>
+    <string name="ui_text_008" formatted="false">A script with this name already exists</string>
+    <string name="ui_text_009" formatted="false">✎ Edit</string>
+    <string name="ui_text_010" formatted="false">✕ Delete</string>
+    <string name="ui_text_011" formatted="false">Cancel</string>
+    <string name="ui_text_012" formatted="false">Result:</string>
+    <string name="ui_text_013" formatted="false">=</string>
+    <string name="ui_text_014" formatted="false">EXPORT</string>
+    <string name="ui_text_015" formatted="false">CLOSE</string>
+    <string name="ui_text_016" formatted="false">Exported to REPL</string>
+    <string name="ui_text_017" formatted="false">Enter an expression</string>
+    <string name="ui_text_018" formatted="false">Name and code cannot be empty</string>
+    <string name="ui_text_019" formatted="false">Saved data could not be loaded; automatic saving is disabled</string>
+    <string name="ui_text_020" formatted="false">Custom JSON theme loaded successfully!</string>
+    <string name="ui_text_021" formatted="false">Invalid theme JSON format</string>
+    <string name="ui_text_022" formatted="false">+</string>
+    <string name="ui_text_023" formatted="false">✕</string>
+    <string name="ui_text_024" formatted="false">#</string>
+    <string name="ui_text_025" formatted="false">DEG</string>
+    <string name="ui_text_026" formatted="false">Welcome to Droidulator Math REPL\nType expressions like \'2+3*4\' or \'sin(90)\'\n</string>
+    <string name="ui_text_027" formatted="false">Theme Mode:</string>
+    <string name="ui_text_028" formatted="false">Auto</string>
+    <string name="ui_text_029" formatted="false">Dark</string>
+    <string name="ui_text_030" formatted="false">Light</string>
+    <string name="ui_text_031" formatted="false">Custom Theme Source:</string>
+    <string name="ui_text_032" formatted="false">Load JSON Theme</string>
+    <string name="ui_text_033" formatted="false">Reset to Built-in</string>
+    <string name="ui_text_034" formatted="false">Display &amp; Input Preferences:</string>
+    <string name="ui_text_035" formatted="false">Hide Welcome Message on Start</string>
+    <string name="ui_text_036" formatted="false">Auto-Pair Brackets &amp; Quotes (( ), [ ], { }, \" \")</string>
+    <string name="ui_text_037" formatted="false">Digit Grouping (Spaces for 1 234 and 0.000 001)</string>
+    <string name="ui_text_038" formatted="false">Enter Key Action in REPL:</string>
+    <string name="ui_text_039" formatted="false">Enter Key: Send Command</string>
+    <string name="ui_text_040" formatted="false">Clear History &amp; Reset Engine Session</string>
+    <string name="ui_text_041" formatted="false">◀</string>
+    <string name="ui_text_042" formatted="false">▶</string>
+    <string name="ui_text_043" formatted="false">▲</string>
+    <string name="ui_text_044" formatted="false">▼</string>
+    <string name="ui_text_045" formatted="false">TAB</string>
+    <string name="ui_text_046" formatted="false">▶ RUN</string>
+    <string name="ui_text_047" formatted="false">SAVE</string>
+    <string name="ui_text_048" formatted="false">Script Name (e.g. my_script)</string>
+    <string name="ui_text_049" formatted="false">// Enter your script code here...</string>
+    <string name="engine_load_error">Unable to load the calculator engine. Please reinstall the app.</string>
+    <string name="clear_session_title">Clear session</string>
+    <string name="action_clear">CLEAR</string>
+    <string name="action_delete">DELETE</string>
+    <string name="action_delete_all">DELETE ALL</string>
+    <string name="action_save">SAVE</string>
+    <string name="script_output_entry">&gt; SCRIPT OUTPUT (%1$s):\n%2$s\n</string>
+    <string name="delete_all_variables">Delete all user variables? Calculation history will be kept.</string>
+    <string name="delete_all_confirm">Are you sure you want to delete all %1$s?</string>
+    <string name="delete_all_title">Delete All %1$s</string>
+    <string name="deleted_all">All %1$s deleted</string>
+    <string name="delete_confirm">Are you sure you want to delete \'%1$s\'?</string>
+    <string name="delete_confirm_title">Confirm Deletion</string>
+    <string name="deleted_item">Deleted \'%1$s\'</string>
+    <string name="edit_variable">Edit Variable \'%1$s\'</string>
+    <string name="edit_constant">Edit Constant \'%1$s\'</string>
+    <string name="edit_formula">Edit Formula \'%1$s\'</string>
+    <string name="builtin_constant">(Built-in Constant)</string>
+    <string name="action_run">▶ Run</string>
+    <string name="action_eval">▶ Eval</string>
+    <string name="script_output_title">Script Output: %1$s</string>
+    <string name="script_output_empty">(No output printed)</string>
+    <string name="value_for_param">Value for %1$s</string>
+    <string name="enter_arguments">Enter arguments above</string>
+    <string name="add_item_title">Add %1$s Item</string>
+    <string name="theme_load_failed">Failed to load file: %1$s</string>
+    <string name="enter_send">Enter Key: Send Command</string>
+    <string name="enter_newline">Enter Key: New Line</string>
+    <string name="history_cleared">History &amp; Session Cleared.\n</string>
+    <string name="error_overlay">ERROR: %1$s\n(Tap to dismiss)</string>
+    <string name="plot_empty">No plot data</string>
+    <string name="plot_accessibility">Interactive function plot</string>
+    <string name="angle_mode_accessibility">Angle mode %1$s; double tap to change</string>
+    <string name="tab_repl_display">REPL ▼</string>
+    <string name="tab_scripts_display">Scripts ▼</string>
+    <string name="tab_formulas_display">Formulas ▼</string>
+    <string name="tab_constants_display">Constants ▼</string>
+    <string name="tab_variables_display">Variables ▼</string>
+    <string name="tab_plot_display">Plot ▼</string>
+    <string name="tab_settings_display">Settings ▼</string>
 </resources>

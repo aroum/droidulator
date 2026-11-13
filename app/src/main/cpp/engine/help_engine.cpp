@@ -5,7 +5,7 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
     trimmed.erase(0, trimmed.find_first_not_of(" \t"));
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
     if (trimmed == "help()" || trimmed == "help" || trimmed == "help( )") {
-        help_out = "=== Cardulator Help ===\n"
+        help_out = "=== Droidulator Help ===\n"
                    "Trig: sin, cos, tan, cot, sec, csc, tg, ctg\n"
                    "Arc-Trig: asin, acos, atan, acot, asec, acsc\n"
                    "Hyperbolic: sinh, cosh, tanh, coth, sech, csch\n"

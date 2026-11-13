@@ -121,7 +121,17 @@ class MainActivity : AppCompatActivity() {
 
     private var currentTabPosition = 0
     private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings")
-    private val tabsDisplay = arrayOf("REPL ▼", "Scripts ▼", "Formulas ▼", "Constants ▼", "Variables ▼", "Plot ▼", "Settings ▼")
+    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display).map(::getString).toTypedArray()
+    private fun tabTitle(tab: String): String = when (tab) {
+        "REPL" -> getString(R.string.tab_repl)
+        "Scripts" -> getString(R.string.tab_scripts)
+        "Formulas" -> getString(R.string.tab_formulas)
+        "Constants" -> getString(R.string.tab_constants)
+        "Variables" -> getString(R.string.tab_variables)
+        "Plot" -> getString(R.string.tab_plot_display).removeSuffix(" ▼")
+        "Settings" -> getString(R.string.tab_settings)
+        else -> tab
+    }
 
     private val session by lazy { ViewModelProvider(this)[CalculatorSession::class.java] }
     private val userScripts get() = session.userScripts
@@ -168,7 +178,6 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private val unitsInstallLock = Any()
-        private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
 
         // Pre-compiled regex patterns for zero-allocation syntax highlighting
         private val NUMBER_REGEX = Regex("(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[a-zA-Z]*(?![A-Za-z0-9_])")
@@ -178,6 +187,8 @@ class MainActivity : AppCompatActivity() {
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
         private val SYNTAX_REGEX = Regex("(?:${NUMBER_REGEX.pattern})|(?:${KEYWORD_REGEX.pattern})|(?:${FUNC_REGEX.pattern})|(?:${CONST_REGEX.pattern})|(?:${OP_REGEX.pattern})")
     }
+
+    private val welcomeMessage get() = getString(R.string.ui_text_026)
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
 
@@ -250,7 +261,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
                         android.util.Log.e("Droidulator", "Unable to load calculator engine", error)
-                        AlertDialog.Builder(this).setMessage("Unable to load the calculator engine. Please reinstall the app.")
+                        AlertDialog.Builder(this).setMessage(R.string.engine_load_error)
                             .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
                             .setOnCancelListener { finish() }.show()
                     }
@@ -259,7 +270,7 @@ class MainActivity : AppCompatActivity() {
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) {
                         android.util.Log.e("Droidulator", "Unable to install units data", error)
-                        Toast.makeText(this, "Unable to install units data", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_001), Toast.LENGTH_LONG).show()
                         finish()
                     }
                 }
@@ -365,11 +376,12 @@ class MainActivity : AppCompatActivity() {
         cbAutoPair.isChecked = isAutoPairEnabled
         CardulatorEngine.nativeSetDegRad(savedDegMode)
         tvMode.text = if (savedDegMode) "DEG" else "RAD"
+        tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         updateEnterActionButtonText()
         if (hideWelcomeMessage) {
             tvOutput.text = ""
         } else {
-            tvOutput.text = WELCOME_MSG
+            tvOutput.text = welcomeMessage
         }
 
         listOf(rbThemeAuto, rbThemeDark, rbThemeLight).getOrNull(themeMode)?.isChecked = true
@@ -706,10 +718,10 @@ class MainActivity : AppCompatActivity() {
         }
         btnClear.setOnLongClickListener {
             val message = TextView(this).apply {
-                text = "Clear calculation history, variables and arrays?"
+                text = this@MainActivity.getString(R.string.ui_text_002)
                 setTextColor(ThemePalette.fgText)
             }
-            showGruvboxCustomDialog("Clear session", message, positiveText = "CLEAR") {
+            showGruvboxCustomDialog(getString(R.string.clear_session_title), message, positiveText = getString(R.string.action_clear)) {
                 clearSessionAndHistory()
             }
             true
@@ -730,13 +742,13 @@ class MainActivity : AppCompatActivity() {
             val activeTab = tabs[currentTabPosition]
             val fgColor = ThemePalette.fgText
             val tvMsg = TextView(this).apply {
-                text = if (activeTab == "Variables") "Delete all user variables? Calculation history will be kept."
-                    else "Are you sure you want to delete all $activeTab?"
+                text = if (activeTab == "Variables") getString(R.string.delete_all_variables)
+                    else getString(R.string.delete_all_confirm, tabTitle(activeTab))
                 setTextColor(fgColor)
                 textSize = 14f
                 typeface = android.graphics.Typeface.MONOSPACE
             }
-            showGruvboxCustomDialog("Delete All $activeTab", tvMsg, positiveText = "DELETE ALL") {
+            showGruvboxCustomDialog(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
                 when (activeTab) {
                     "Variables" -> {
                         val varsRaw = CardulatorEngine.nativeGetVariables()
@@ -771,7 +783,7 @@ class MainActivity : AppCompatActivity() {
                 }
                 saveUserDataToStorage()
                 refreshTabContent(activeTab)
-                Toast.makeText(this, "All $activeTab deleted", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.deleted_all, tabTitle(activeTab)), Toast.LENGTH_SHORT).show()
             }
         }
 
@@ -911,7 +923,7 @@ class MainActivity : AppCompatActivity() {
             val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
             prefs.edit().remove("custom_theme_json").apply()
             applyTheme()
-            Toast.makeText(this, "Reset to built-in Gruvbox theme", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_003), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -979,7 +991,7 @@ class MainActivity : AppCompatActivity() {
         val ssb = android.text.SpannableStringBuilder()
         if (!hideWelcomeMessage) {
             val welcomeStart = ssb.length
-            ssb.append(WELCOME_MSG)
+            ssb.append(welcomeMessage)
             ssb.setSpan(
                 ForegroundColorSpan(ThemePalette.fgDim),
                 welcomeStart,
@@ -1056,9 +1068,9 @@ class MainActivity : AppCompatActivity() {
 
     private fun updateEnterActionButtonText() {
         btnSettingsEnterAction.text = if (isEnterSendMode) {
-            "Enter Key: Send Command"
+            getString(R.string.enter_send)
         } else {
-            "Enter Key: New Line"
+            getString(R.string.enter_newline)
         }
     }
 
@@ -1067,6 +1079,7 @@ class MainActivity : AppCompatActivity() {
         val nextDeg = !isDeg
         CardulatorEngine.nativeSetDegRad(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
+        tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
             .edit()
             .putBoolean("degrees_mode", nextDeg)
@@ -1080,11 +1093,11 @@ class MainActivity : AppCompatActivity() {
         replHistoryIndex = -1
         tempReplInput = ""
         convTabCachedMatches = null
-        tvOutput.text = if (hideWelcomeMessage) "History & Session Cleared.\n" else "History & Session Cleared.\n$WELCOME_MSG"
+        tvOutput.text = if (hideWelcomeMessage) getString(R.string.history_cleared) else getString(R.string.history_cleared) + welcomeMessage
         etInput.setText("")
         dismissErrorOverlay()
         saveUserDataToStorage()
-        Toast.makeText(this, "History and variables cleared", Toast.LENGTH_SHORT).show()
+        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_004), Toast.LENGTH_SHORT).show()
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Variables" || activeTab == "Formulas" || activeTab == "Constants") {
             refreshTabContent(activeTab)
@@ -1092,7 +1105,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showErrorOverlay(errorMessage: String) {
-        tvErrorOverlay.text = "ERROR: $errorMessage\n(Tap to dismiss)"
+        tvErrorOverlay.text = getString(R.string.error_overlay, errorMessage)
         tvErrorOverlay.visibility = View.VISIBLE
     }
 
@@ -1212,15 +1225,15 @@ class MainActivity : AppCompatActivity() {
     private fun showConfirmDeleteDialog(itemName: String, onConfirmDelete: () -> Unit) {
         val fgColor = ThemePalette.fgText
         val tvMsg = TextView(this).apply {
-            text = "Are you sure you want to delete '$itemName'?"
+            text = getString(R.string.delete_confirm, itemName)
             setTextColor(fgColor)
             textSize = 14f
             typeface = android.graphics.Typeface.MONOSPACE
         }
 
-        showGruvboxCustomDialog("Confirm Deletion", tvMsg, positiveText = "DELETE") {
+        showGruvboxCustomDialog(getString(R.string.delete_confirm_title), tvMsg, positiveText = getString(R.string.action_delete)) {
             onConfirmDelete()
-            Toast.makeText(this, "Deleted '$itemName'", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, getString(R.string.deleted_item, itemName), Toast.LENGTH_SHORT).show()
         }
     }
 
@@ -1244,7 +1257,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (lines.isEmpty()) {
                     val emptyTv = TextView(this).apply {
-                        text = "No user variables defined.\nClick '+ Add' above to create one."
+                        text = this@MainActivity.getString(R.string.ui_text_005)
                         setTextColor(dimColor)
                         textSize = 14f
                         setPadding(dp(16), dp(32), dp(16), dp(32))
@@ -1264,7 +1277,7 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onEdit = if (isHistory) null else fun() {
-                                showDefinitionEditorDialog("Edit Variable '$name'", "$name = $value", "$name = $value") { newExpr ->
+                                showDefinitionEditorDialog(getString(R.string.edit_variable, name), "$name = $value", "$name = $value") { newExpr ->
                                     saveDefinition(newExpr, tabName)
                                 }
                             },
@@ -1292,13 +1305,13 @@ class MainActivity : AppCompatActivity() {
 
                     val cardView = createMenuItemCard(
                         title = name,
-                        subtitle = "= $value ${if (isBuiltIn) "(Built-in Constant)" else ""}",
+                        subtitle = "= $value ${if (isBuiltIn) getString(R.string.builtin_constant) else ""}",
                         cardBgColor = cardBgColor,
                         textColor = textColor,
                         dimColor = dimColor,
                         onEdit = if (!isBuiltIn) {
                             {
-                                showDefinitionEditorDialog("Edit Constant '$name'", "$name = $value", "$name = $value") { newExpr ->
+                                showDefinitionEditorDialog(getString(R.string.edit_constant, name), "$name = $value", "$name = $value") { newExpr ->
                                     val fullExpr = if (newExpr.startsWith("const ")) newExpr else "const $newExpr"
                                     saveDefinition(fullExpr, tabName)
                                 }
@@ -1323,7 +1336,7 @@ class MainActivity : AppCompatActivity() {
 
                 if (lines.isEmpty()) {
                     val emptyTv = TextView(this).apply {
-                        text = "No custom formulas defined.\nClick '+ Add' above to create a formula e.g. f(x) = x^2"
+                        text = this@MainActivity.getString(R.string.ui_text_006)
                         setTextColor(dimColor)
                         textSize = 14f
                         setPadding(dp(16), dp(32), dp(16), dp(32))
@@ -1345,7 +1358,7 @@ class MainActivity : AppCompatActivity() {
                                 showRunFormulaDialog(line)
                             },
                             onEdit = {
-                                showDefinitionEditorDialog("Edit Formula '$name'", line, line) { newFormula ->
+                                showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line) { newFormula ->
                                     saveDefinition(newFormula, tabName)
                                 }
                             },
@@ -1365,7 +1378,7 @@ class MainActivity : AppCompatActivity() {
             "Scripts" -> {
                 if (userScripts.isEmpty()) {
                     val emptyTv = TextView(this).apply {
-                        text = "No custom scripts available.\nClick '+ Add' above to create a new script."
+                        text = this@MainActivity.getString(R.string.ui_text_007)
                         setTextColor(dimColor)
                         textSize = 14f
                         setPadding(dp(16), dp(32), dp(16), dp(32))
@@ -1377,9 +1390,10 @@ class MainActivity : AppCompatActivity() {
                         val scriptName = script.first
                         val scriptCode = script.second
 
-                        val cardView = createScriptMenuItemCard(
-                            scriptName = scriptName,
-                            scriptCode = scriptCode,
+                        val cardView = createMenuItemCard(
+                            title = scriptName,
+                            subtitle = scriptCode.lines().firstOrNull()?.take(60) ?: "",
+                            runLabel = getString(R.string.action_run),
                             cardBgColor = cardBgColor,
                             textColor = textColor,
                             dimColor = dimColor,
@@ -1387,13 +1401,13 @@ class MainActivity : AppCompatActivity() {
                                 val log = CardulatorEngine.nativeRunScript(scriptCode)
                                 savePlotState()
                                 saveUserDataToStorage()
-                                appendRawOutput("> SCRIPT OUTPUT ($scriptName):\n$log\n")
-                                showScriptOutputDialog("Script Output: $scriptName", log)
+                                appendRawOutput(getString(R.string.script_output_entry, scriptName, log))
+                                showScriptOutputDialog(getString(R.string.script_output_title, scriptName), log)
                             },
                             onEdit = {
                                 showFullScriptEditorDialog(scriptName, scriptCode) { newName, newCode ->
                                     if (userScripts.withIndex().any { it.index != i && it.value.first == newName }) {
-                                        Toast.makeText(this, "A script with this name already exists", Toast.LENGTH_LONG).show()
+                                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_008), Toast.LENGTH_LONG).show()
                                         return@showFullScriptEditorDialog false
                                     }
                                     if (newName != scriptName) CardulatorEngine.nativeUnregisterScript(scriptName)
@@ -1420,104 +1434,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun createScriptMenuItemCard(
-        scriptName: String,
-        scriptCode: String,
-        cardBgColor: Int,
-        textColor: Int,
-        dimColor: Int,
-        onRun: () -> Unit,
-        onEdit: () -> Unit,
-        onDelete: () -> Unit
-    ): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cardBgColor)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 0, 0, dp(12))
-            layoutParams = lp
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = scriptName
-            setTextColor(textColor)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-
-        val tvSubtitle = TextView(this).apply {
-            val preview = scriptCode.lines().firstOrNull()?.take(60) ?: ""
-            text = preview
-            setTextColor(dimColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        val btnBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, dp(8), 0, 0)
-            layoutParams = lp
-        }
-
-        val btnRun = Button(this).apply {
-            text = "▶ Run"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            setOnClickListener { onRun() }
-        }
-
-        val btnEdit = Button(this).apply {
-            text = "✎ Edit"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.green)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(dp(16), 0, 0, 0)
-            layoutParams = lp
-            setOnClickListener { onEdit() }
-        }
-
-        val btnDelete = Button(this).apply {
-            text = "✕ Delete"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(dp(16), 0, 0, 0)
-            layoutParams = lp
-            setOnClickListener { onDelete() }
-        }
-
-        btnBar.addView(btnRun)
-        btnBar.addView(btnEdit)
-        btnBar.addView(btnDelete)
-
-        container.addView(tvTitle)
-        container.addView(tvSubtitle)
-        container.addView(btnBar)
-
-        return container
-    }
-
     private fun createMenuItemCard(
         title: String,
         subtitle: String,
@@ -1525,6 +1441,7 @@ class MainActivity : AppCompatActivity() {
         textColor: Int,
         dimColor: Int,
         onRun: (() -> Unit)? = null,
+        runLabel: String = getString(R.string.action_eval),
         onEdit: (() -> Unit)?,
         onDelete: (() -> Unit)?
     ): View {
@@ -1571,7 +1488,7 @@ class MainActivity : AppCompatActivity() {
 
             if (onRun != null) {
                 val btnRun = Button(this).apply {
-                    text = "▶ Eval"
+                    text = runLabel
                     setTextColor(ThemePalette.bgDarkText)
                     backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
                     typeface = android.graphics.Typeface.MONOSPACE
@@ -1583,7 +1500,7 @@ class MainActivity : AppCompatActivity() {
 
             if (onEdit != null) {
                 val btnEdit = Button(this).apply {
-                    text = "✎ Edit"
+                    text = this@MainActivity.getString(R.string.ui_text_009)
                     setTextColor(ThemePalette.bgDarkText)
                     backgroundTintList = ColorStateList.valueOf(ThemePalette.green)
                     typeface = android.graphics.Typeface.MONOSPACE
@@ -1601,7 +1518,7 @@ class MainActivity : AppCompatActivity() {
 
             if (onDelete != null) {
                 val btnDelete = Button(this).apply {
-                    text = "✕ Delete"
+                    text = this@MainActivity.getString(R.string.ui_text_010)
                     setTextColor(ThemePalette.bgDarkText)
                     backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
                     typeface = android.graphics.Typeface.MONOSPACE
@@ -1626,7 +1543,7 @@ class MainActivity : AppCompatActivity() {
     private fun showGruvboxCustomDialog(
         title: String,
         contentView: View,
-        positiveText: String? = "SAVE",
+        positiveText: String? = getString(R.string.action_save),
         showCancel: Boolean = true,
         customButtons: List<View>? = null,
         positiveValidator: (() -> Boolean)? = null,
@@ -1690,7 +1607,7 @@ class MainActivity : AppCompatActivity() {
         } else {
             if (showCancel) {
                 val btnCancel = Button(this).apply {
-                    text = "Cancel"
+                    text = this@MainActivity.getString(R.string.ui_text_011)
                     setTextColor(fgColor)
                     setBackgroundColor(Color.TRANSPARENT)
                     typeface = android.graphics.Typeface.MONOSPACE
@@ -1734,7 +1651,7 @@ class MainActivity : AppCompatActivity() {
         val borderColor = ThemePalette.borderColor
 
         val tvOut = TextView(this).apply {
-            text = if (logText.isBlank()) "(No output printed)" else logText
+            text = if (logText.isBlank()) getString(R.string.script_output_empty) else logText
             setTextColor(fgColor)
             textSize = 13f
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1755,7 +1672,7 @@ class MainActivity : AppCompatActivity() {
             addView(tvOut)
         }
 
-        showGruvboxCustomDialog(title, scrollContainer, positiveText = "CLOSE", showCancel = false) {}
+        showGruvboxCustomDialog(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
     }
 
     private fun showRunFormulaDialog(formulaLine: String) {
@@ -1784,7 +1701,7 @@ class MainActivity : AppCompatActivity() {
         for (param in params) {
             val et = EditText(this).apply {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                hint = "Value for $param"
+                hint = getString(R.string.value_for_param, param)
                 typeface = android.graphics.Typeface.MONOSPACE
                 setBackgroundColor(bgSoft)
                 setTextColor(fgColor)
@@ -1799,7 +1716,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val tvResultLabel = TextView(this).apply {
-            text = "Result:"
+            text = this@MainActivity.getString(R.string.ui_text_012)
             setTextColor(fgDim)
             textSize = 12f
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1807,7 +1724,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         val tvResultValue = TextView(this).apply {
-            text = "="
+            text = this@MainActivity.getString(R.string.ui_text_013)
             setTextColor(fgColor)
             textSize = 15f
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1829,7 +1746,7 @@ class MainActivity : AppCompatActivity() {
             val hasEmptyInput = argValues.any { it.isEmpty() }
             if (hasEmptyInput && params.isNotEmpty()) {
                 currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
-                currentRes = "Enter arguments above"
+                currentRes = getString(R.string.enter_arguments)
                 tvResultValue.text = currentRes
                 return
             }
@@ -1858,7 +1775,7 @@ class MainActivity : AppCompatActivity() {
         updateLiveResult()
 
         val btnExport = Button(this).apply {
-            text = "EXPORT"
+            text = this@MainActivity.getString(R.string.ui_text_014)
             setTextColor(ThemePalette.fgInverted)
             backgroundTintList = ColorStateList.valueOf(ThemePalette.aqua)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1872,7 +1789,7 @@ class MainActivity : AppCompatActivity() {
         var formulaDialog: Dialog? = null
 
         val btnClose = Button(this).apply {
-            text = "CLOSE"
+            text = this@MainActivity.getString(R.string.ui_text_015)
             setTextColor(fgColor)
             setBackgroundColor(Color.TRANSPARENT)
             typeface = android.graphics.Typeface.MONOSPACE
@@ -1881,7 +1798,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnExport.setOnClickListener {
-            if (currentEvalExpr.isNotEmpty() && !currentRes.startsWith("Enter")) {
+            if (currentEvalExpr.isNotEmpty() && currentRes != getString(R.string.enter_arguments)) {
                 val evaluation = CardulatorEngine.nativeEvaluateDetailed(currentEvalExpr)
                 val res = evaluation[1]
                 val isErr = evaluation[0] == "error"
@@ -1891,7 +1808,7 @@ class MainActivity : AppCompatActivity() {
                     if (replHistory.size > 500) replHistory.removeAt(0)
                 }
                 saveUserDataToStorage()
-                Toast.makeText(this@MainActivity, "Exported to REPL", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this@MainActivity, this@MainActivity.getString(R.string.ui_text_016), Toast.LENGTH_SHORT).show()
                 refreshTabContent(tabs[currentTabPosition])
             }
         }
@@ -1945,9 +1862,9 @@ class MainActivity : AppCompatActivity() {
             et.post { applySyntaxHighlighting(et.editableText) }
         }
 
-        showGruvboxCustomDialog(title, et, positiveText = "SAVE", positiveValidator = {
+        showGruvboxCustomDialog(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
             val valStr = et.text.toString().trim()
-            if (valStr.isEmpty()) { et.error = "Enter an expression"; false }
+            if (valStr.isEmpty()) { et.error = this@MainActivity.getString(R.string.ui_text_017); false }
             else onSave(valStr)
         })
     }
@@ -2052,10 +1969,10 @@ class MainActivity : AppCompatActivity() {
                     val log = CardulatorEngine.nativeRunScript(newCode)
                     savePlotState()
                     saveUserDataToStorage()
-                    appendRawOutput("> SCRIPT OUTPUT ($newName):\n$log\n")
-                    showScriptOutputDialog("Script Output: $newName", log)
+                    appendRawOutput(getString(R.string.script_output_entry, newName, log))
+                    showScriptOutputDialog(getString(R.string.script_output_title, newName), log)
                 } else {
-                    Toast.makeText(this@MainActivity, "Name and code cannot be empty", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, this@MainActivity.getString(R.string.ui_text_018), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -2069,7 +1986,7 @@ class MainActivity : AppCompatActivity() {
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
                     if (onSave(newName, newCode)) dialog.dismiss()
                 } else {
-                    Toast.makeText(this@MainActivity, "Name and code cannot be empty", Toast.LENGTH_SHORT).show()
+                    Toast.makeText(this@MainActivity, this@MainActivity.getString(R.string.ui_text_018), Toast.LENGTH_SHORT).show()
                 }
             }
         }
@@ -2091,7 +2008,7 @@ class MainActivity : AppCompatActivity() {
         if (activeTab == "Scripts") {
             showFullScriptEditorDialog("", "") { name, code ->
                 if (userScripts.any { it.first == name }) {
-                    Toast.makeText(this, "A script with this name already exists", Toast.LENGTH_LONG).show()
+                    Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_008), Toast.LENGTH_LONG).show()
                     return@showFullScriptEditorDialog false
                 }
                 userScripts.add(Pair(name, code))
@@ -2103,7 +2020,7 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
-        val title = "Add $activeTab Item"
+        val title = getString(R.string.add_item_title, tabTitle(activeTab))
         val hintText = when (activeTab) {
             "Formulas" -> "f(x) = x^2 + 2*x"
             "Constants" -> "MY_CONST = 3.14159"
@@ -2266,7 +2183,7 @@ class MainActivity : AppCompatActivity() {
         } catch (e: Exception) {
             session.storageLoadFailed = true
             android.util.Log.e("Droidulator", "Unable to load saved data", e)
-            Toast.makeText(this, "Saved data could not be loaded; automatic saving is disabled", Toast.LENGTH_LONG).show()
+            Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_019), Toast.LENGTH_LONG).show()
         }
     }
 
@@ -2289,13 +2206,13 @@ class MainActivity : AppCompatActivity() {
                         val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
                         prefs.edit().putString("custom_theme_json", jsonStr).apply()
                         applyTheme()
-                        Toast.makeText(this, "Custom JSON theme loaded successfully!", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_020), Toast.LENGTH_SHORT).show()
                     } else {
-                        Toast.makeText(this, "Invalid theme JSON format", Toast.LENGTH_LONG).show()
+                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_021), Toast.LENGTH_LONG).show()
                     }
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, "Failed to load file: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.theme_load_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
             }
         }
     }

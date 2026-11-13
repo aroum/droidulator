@@ -110,6 +110,8 @@ class PlotView @JvmOverloads constructor(
     private var probeGeneration = 0
 
     init {
+        contentDescription = context.getString(R.string.plot_accessibility)
+        isFocusable = true
         updateBounds()
         updateThemeColors()
     }
@@ -340,7 +342,8 @@ class PlotView @JvmOverloads constructor(
         canvas.drawText(boundsLabelY, dp(8f), dp(36f), textPaint)
 
         if (plotLines.isEmpty()) {
-            canvas.drawText("No plot data", (w - textPaint.measureText("No plot data")) / 2f, h / 2f, textPaint)
+            val emptyMessage = context.getString(R.string.plot_empty)
+            canvas.drawText(emptyMessage, (w - textPaint.measureText(emptyMessage)) / 2f, h / 2f, textPaint)
             return
         }
 

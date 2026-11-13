@@ -9,7 +9,7 @@
 #include <mutex>
 #include <android/log.h>
 
-#define LOG_TAG "CardulatorJNI"
+#define LOG_TAG "DroidulatorJNI"
 #define LOGI(...) __android_log_print(ANDROID_LOG_INFO, LOG_TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, LOG_TAG, __VA_ARGS__)
 
@@ -42,7 +42,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject t
     resetAutocompleteWords();
     resetTabState();
     degreesMode = true;
-    LOGI("Cardulator Native Engine Initialized.");
+    LOGI("Droidulator Native Engine Initialized.");
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
 } catch (const std::exception&) {
@@ -674,7 +674,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetHelp(JNIEnv *env, jobjec
     std::string helpText;
     preprocessHelp(topic, helpText);
     if (helpText.empty()) {
-        helpText = "Cardulator Math REPL\n"
+        helpText = "Droidulator Math REPL\n"
                    "Supported: sin, cos, tan, log, ln, sqrt, abs, sum, prod, if, rUni, rNor\n"
                    "SI Prefixes: 1k (1000), 2.5M, 10u, 5p\n"
                    "History: e1, e2, e3...\n"
