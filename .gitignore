@@ -7,6 +7,7 @@
 /build
 /app/build
 /build-test/
+/build_native/
 /captures
 .externalNativeBuild
 .cxx

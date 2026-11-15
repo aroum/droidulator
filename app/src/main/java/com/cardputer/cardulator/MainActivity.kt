@@ -1998,9 +1998,11 @@ class MainActivity : AppCompatActivity() {
             etCode.post { applySyntaxHighlighting(etCode.editableText) }
         }
 
+        val btnFg = ThemePalette.btnText
+
         btnNavLeft.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener {
                 val sel = etCode.selectionStart
                 if (sel > 0) etCode.setSelection(sel - 1)
@@ -2010,7 +2012,7 @@ class MainActivity : AppCompatActivity() {
 
         btnNavRight.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener {
                 val sel = etCode.selectionStart
                 if (sel < etCode.text.length) etCode.setSelection(sel + 1)
@@ -2020,7 +2022,7 @@ class MainActivity : AppCompatActivity() {
 
         btnNavUp.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.purple) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener {
                 val layout = etCode.layout
                 if (layout != null) {
@@ -2040,7 +2042,7 @@ class MainActivity : AppCompatActivity() {
 
         btnNavDown.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.purple) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener {
                 val layout = etCode.layout
                 if (layout != null) {
@@ -2060,15 +2062,14 @@ class MainActivity : AppCompatActivity() {
 
         btnCancel.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.red) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener { dialog.dismiss() }
         }
 
         btnTab.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            val tabFg = if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE
-            setTextColor(tabFg)
-            iconTint = ColorStateList.valueOf(tabFg)
+            setTextColor(btnFg)
+            iconTint = ColorStateList.valueOf(btnFg)
             setOnClickListener {
                 selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
@@ -2112,7 +2113,7 @@ class MainActivity : AppCompatActivity() {
 
         btnRun.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE)
+            setTextColor(btnFg)
             setOnClickListener {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
@@ -2130,8 +2131,7 @@ class MainActivity : AppCompatActivity() {
 
         btnSave.apply {
             backgroundTintList = ColorStateList.valueOf(btnAqua)
-            val iconColor = if (androidx.core.graphics.ColorUtils.calculateLuminance(btnAqua) > 0.4) Color.BLACK else Color.WHITE
-            iconTint = ColorStateList.valueOf(iconColor)
+            iconTint = ColorStateList.valueOf(btnFg)
             setOnClickListener {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
@@ -2415,11 +2415,11 @@ class MainActivity : AppCompatActivity() {
             btnLoadCustomTheme to ThemePalette.aqua, btnSettingsEnterAction to ThemePalette.blue,
             btnSettingsClearHistory to ThemePalette.red
         )
+        val btnFg = ThemePalette.btnText
         for ((button, color) in themedButtons) {
             button.backgroundTintList = ColorStateList.valueOf(color)
-            val fg = if (androidx.core.graphics.ColorUtils.calculateLuminance(color) > 0.4) Color.BLACK else Color.WHITE
-            button.setTextColor(fg)
-            (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(fg)
+            button.setTextColor(btnFg)
+            (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(btnFg)
         }
         spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
