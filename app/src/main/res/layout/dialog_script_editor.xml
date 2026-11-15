@@ -72,16 +72,22 @@
             android:layout_weight="1" />
 
         <!-- Tab Indent / Autocomplete Button -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_script_tab"
-            android:layout_width="wrap_content"
+            android:contentDescription="@string/btn_tab"
+            android:layout_width="38dp"
             android:layout_height="match_parent"
-            android:text="@string/btn_tab"
-            android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
-            android:fontFamily="monospace"
-            android:textSize="13sp"
-            android:textStyle="bold"
+            app:icon="@drawable/ic_tab"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="20dp"
+            app:iconTint="@color/gruvbox_bg"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
             android:layout_marginStart="2dp"
             android:layout_marginEnd="4dp" />
 

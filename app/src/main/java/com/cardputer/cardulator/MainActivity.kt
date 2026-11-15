@@ -1953,7 +1953,7 @@ class MainActivity : AppCompatActivity() {
         val btnNavRight = dialog.findViewById<Button>(R.id.btn_script_nav_right)
         val btnNavUp = dialog.findViewById<Button>(R.id.btn_script_nav_up)
         val btnNavDown = dialog.findViewById<Button>(R.id.btn_script_nav_down)
-        val btnTab = dialog.findViewById<Button>(R.id.btn_script_tab)
+        val btnTab = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_script_tab)
         val btnCancel = dialog.findViewById<Button>(R.id.btn_script_cancel)
         val btnRun = dialog.findViewById<Button>(R.id.btn_script_run)
         val btnSave = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_script_save)
@@ -2066,7 +2066,9 @@ class MainActivity : AppCompatActivity() {
 
         btnTab.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE)
+            val tabFg = if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE
+            setTextColor(tabFg)
+            iconTint = ColorStateList.valueOf(tabFg)
             setOnClickListener {
                 selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
@@ -2414,7 +2416,9 @@ class MainActivity : AppCompatActivity() {
         )
         for ((button, color) in themedButtons) {
             button.backgroundTintList = ColorStateList.valueOf(color)
-            button.setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(color) > 0.4) Color.BLACK else Color.WHITE)
+            val fg = if (androidx.core.graphics.ColorUtils.calculateLuminance(color) > 0.4) Color.BLACK else Color.WHITE
+            button.setTextColor(fg)
+            (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(fg)
         }
         spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
