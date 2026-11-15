@@ -200,7 +200,9 @@ class MainActivity : AppCompatActivity() {
         val bottom = view.paddingBottom
         androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(view) { target, insets ->
             val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
-            target.setPadding(left + bars.left, top + bars.top, right + bars.right, bottom + bars.bottom)
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+            val bottomInset = maxOf(bars.bottom, ime.bottom)
+            target.setPadding(left + bars.left, top + bars.top, right + bars.right, bottom + bottomInset)
             insets
         }
         androidx.core.view.ViewCompat.requestApplyInsets(view)
