@@ -40,16 +40,16 @@ Built with Kotlin for the Android UI and a high-performance C++ NDK core (`TinyE
 
 Droidulator features a mode selection dropdown at the top navigation header bar to switch between views:
 
-| Mode | Functionality |
-| :--- | :--- |
-| **Calculator (REPL)** | Primary REPL terminal for live calculation, history review, script running `run()`, and navigation toolbar. |
-| **Scripts** | Manage saved user scripts. Create new scripts, edit existing ones, run scripts with popup output logs, or delete scripts. |
-| **Variables** | Unified variable manager (`x = 42`, `e#` history variables). Single-field definition editor for inline modification and removal. |
-| **Formulas** | Interactive formula library (`f(x) = x^2 + 2*x`). Tap a formula to open the live parameter preview wizard and export results to REPL. |
-| **Constants** | Custom & built-in constant definitions (`const MY_PI = 3.14159`). |
-| **Plot** | 2D graph viewer for interactive function visualization and plotting. |
-| **Settings** | Configure number formatting modes, decimal precision (DP), digit grouping, `e#` history variable visibility, and light/dark theme modes. |
-| **Help** | Contextual help reference for available functions, operators, and syntax. |
+| Mode                  | Functionality                                                                                                                            |
+| :-------------------- | :--------------------------------------------------------------------------------------------------------------------------------------- |
+| **Calculator (REPL)** | Primary REPL terminal for live calculation, history review, script running `run()`, and navigation toolbar.                              |
+| **Scripts**           | Manage saved user scripts. Create new scripts, edit existing ones, run scripts with popup output logs, or delete scripts.                |
+| **Variables**         | Unified variable manager (`x = 42`, `e#` history variables). Single-field definition editor for inline modification and removal.         |
+| **Formulas**          | Interactive formula library (`f(x) = x^2 + 2*x`). Tap a formula to open the live parameter preview wizard and export results to REPL.    |
+| **Constants**         | Custom & built-in constant definitions (`const MY_PI = 3.14159`).                                                                        |
+| **Plot**              | 2D graph viewer for interactive function visualization and plotting.                                                                     |
+| **Settings**          | Configure number formatting modes, decimal precision (DP), digit grouping, `e#` history variable visibility, and light/dark theme modes. |
+| **Help**              | Contextual help reference for available functions, operators, and syntax.                                                                |
 
 ---
 
@@ -82,6 +82,7 @@ Droidulator provides fine-grained control over numerical result representation v
 ## Theme Management & Custom JSON Themes
 
 Droidulator supports dynamic theme switching via **Settings**:
+
 - **Auto**: Automatically matches Android system Day/Night mode.
 - **Dark**: Dark palette mode.
 - **Light**: Light palette mode.
@@ -327,6 +328,7 @@ Droidulator provides native support for physical unit conversions, logarithmic r
 The `conv()` function handles conversion between numeric values (in base SI units like $\Omega$, $\text{F}$, $\text{H}$) and component marking codes.
 
 #### Passing Arguments & Syntax
+
 - **Marking Code String to Value**: Strings with marking codes **must be enclosed in quotes**:
   - `conv("01C", "ohm")` $\rightarrow$ `10000 ohm` *(10 kΩ)*
   - `conv("104", "uf")` $\rightarrow$ `0.1 uF` *(100 nF)*
@@ -358,17 +360,17 @@ The `conv()` function handles conversion between numeric values (in base SI unit
 
 All standard and alternative EIA-96 multiplier letters are supported on input:
 
-| Multiplier Letter | Multiplier Factor | Example Code | Equivalent Resistance |
-| :---------------- | :---------------- | :----------- | :-------------------- |
-| **`Z`**           | $0.001$           | `"01Z"`      | `0.1 ohm`             |
-| **`Y`** or **`R`**| $0.01$            | `"01Y"`, `"01R"` | `1 ohm`           |
-| **`X`** or **`S`**| $0.1$             | `"01X"`, `"01S"` | `10 ohm`          |
-| **`A`**           | $1$               | `"01A"`      | `100 ohm` *(E96 index 01 = 100)* |
-| **`B`** or **`H`**| $10$              | `"01B"`, `"01H"` | `1000 ohm` *(1 kΩ)*   |
-| **`C`**           | $100$             | `"01C"`      | `10000 ohm` *(10 kΩ)* |
-| **`D`**           | $1000$            | `"01D"`      | `100000 ohm` *(100 kΩ)* |
-| **`E`**           | $10000$           | `"01E"`      | `1000000 ohm` *(1 MΩ)*|
-| **`F`**           | $100000$          | `"01F"`      | `10000000 ohm` *(10 MΩ)*|
+| Multiplier Letter  | Multiplier Factor | Example Code     | Equivalent Resistance            |
+| :----------------- | :---------------- | :--------------- | :------------------------------- |
+| **`Z`**            | $0.001$           | `"01Z"`          | `0.1 ohm`                        |
+| **`Y`** or **`R`** | $0.01$            | `"01Y"`, `"01R"` | `1 ohm`                          |
+| **`X`** or **`S`** | $0.1$             | `"01X"`, `"01S"` | `10 ohm`                         |
+| **`A`**            | $1$               | `"01A"`          | `100 ohm` *(E96 index 01 = 100)* |
+| **`B`** or **`H`** | $10$              | `"01B"`, `"01H"` | `1000 ohm` *(1 kΩ)*              |
+| **`C`**            | $100$             | `"01C"`          | `10000 ohm` *(10 kΩ)*            |
+| **`D`**            | $1000$            | `"01D"`          | `100000 ohm` *(100 kΩ)*          |
+| **`E`**            | $10000$           | `"01E"`          | `1000000 ohm` *(1 MΩ)*           |
+| **`F`**            | $100000$          | `"01F"`          | `10000000 ohm` *(10 MΩ)*         |
 
 #### Capacitance & Inductance Codes
 
@@ -509,8 +511,10 @@ cd droidulator
 ---
 
 ## License
- 
+
 This project is licensed under the [GNU General Public License v3.0 (GPLv3)](LICENSE).
- 
+
 - **GNU Units**: Licensed under the GNU General Public License v3.0 (GPLv3).
 - **TinyExpr++**: Licensed under the zlib License.
+
+---
