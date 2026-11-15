@@ -380,6 +380,7 @@ class MainActivity : AppCompatActivity() {
         tvMode.text = if (savedDegMode) "DEG" else "RAD"
         tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         updateEnterActionButtonText()
+        updateInputImeOptions()
         if (hideWelcomeMessage) {
             tvOutput.text = ""
         } else {
@@ -545,8 +546,33 @@ class MainActivity : AppCompatActivity() {
 
                 val currentText = s.toString()
                 val composing = android.view.inputmethod.BaseInputConnection.getComposingSpanStart(etInput.editableText) >= 0
+
+                // Intercept single Enter key press from soft keyboard in REPL when enter-to-send is active.
+                // Pasted multiline text has count > 2 (or text without just a newline) and is preserved intact.
+                val isSingleNewline = !composing && (
+                    (count == 1 && start < currentText.length && (currentText[start] == '\n' || currentText[start] == '\r')) ||
+                    (count == 2 && start + 1 < currentText.length && currentText.substring(start, start + 2) == "\r\n")
+                )
+                if (tabs[currentTabPosition] == "REPL" && isEnterSendMode && isSingleNewline) {
+                    etInput.post {
+                        if (isSubmitting) return@post
+                        val text = etInput.editableText
+                        val lenToDelete = if (count == 2) 2 else 1
+                        if (start + lenToDelete <= text.length && text.subSequence(start, start + lenToDelete).any { it == '\n' || it == '\r' }) {
+                            isHighlighting = true
+                            try {
+                                text.delete(start, start + lenToDelete)
+                            } finally {
+                                isHighlighting = false
+                            }
+                        }
+                        submitCurrentInput()
+                    }
+                    return
+                }
+
                 // A pasted multiline expression must remain intact. Enter actions
-                // are handled by the editor/key listeners above.
+                // are handled by the editor/key listeners above or the single newline interceptor.
                 if (isAutoPairEnabled && !composing && count == 1 && before == 0 && start < currentText.length) {
                     val typed = currentText[start]
                     val next = currentText.getOrNull(start + 1)
@@ -1066,6 +1092,7 @@ class MainActivity : AppCompatActivity() {
             .putBoolean("enter_send_mode", isEnterSendMode)
             .apply()
         updateEnterActionButtonText()
+        updateInputImeOptions()
     }
 
     private fun updateEnterActionButtonText() {
@@ -1074,6 +1101,17 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.enter_newline)
         }
+    }
+
+    private fun updateInputImeOptions() {
+        if (!::etInput.isInitialized) return
+        etInput.imeOptions = if (isEnterSendMode) {
+            EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        } else {
+            EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_ENTER_ACTION or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        }
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.restartInput(etInput)
     }
 
     private fun toggleDegRad() {
@@ -1179,7 +1217,7 @@ class MainActivity : AppCompatActivity() {
                 scrollView.visibility = View.VISIBLE
                 etInput.visibility = View.VISIBLE
                 toolbarKeyboard.visibility = View.VISIBLE
-
+                updateInputImeOptions()
             }
             "Plot" -> {
                 scrollView.visibility = View.GONE
