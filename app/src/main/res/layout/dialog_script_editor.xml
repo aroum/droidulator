@@ -21,21 +21,23 @@
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ui_text_011"
-            android:textColor="@color/gruvbox_fg"
-            android:backgroundTint="@android:color/transparent"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_red"
             android:fontFamily="monospace"
-            android:textSize="13sp" />
+            android:textSize="13sp"
+            android:textStyle="bold" />
 
         <Button
             android:id="@+id/btn_script_tab"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
             android:text="@string/ui_text_045"
-            android:textColor="@color/gruvbox_fg"
-            android:backgroundTint="@android:color/transparent"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_blue"
             android:fontFamily="monospace"
             android:textSize="13sp"
-            android:layout_marginStart="4dp" />
+            android:textStyle="bold"
+            android:layout_marginStart="6dp" />
 
         <View
             android:layout_width="0dp"

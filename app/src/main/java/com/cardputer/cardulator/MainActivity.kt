@@ -432,7 +432,11 @@ class MainActivity : AppCompatActivity() {
                 v.setTextColor(ThemePalette.fgText)
                 v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                 v.textSize = 14f
-                v.setPadding(dp(16), dp(16), dp(16), dp(16))
+                v.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
+                val padH = dp(16)
+                val padV = dp(8)
+                v.setPadding(padH, padV, padH, padV)
+                v.minHeight = dp(44)
                 return v
             }
         }
@@ -471,7 +475,11 @@ class MainActivity : AppCompatActivity() {
                     v.setTextColor(ThemePalette.fgText)
                     v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                     v.textSize = 14f
-                    v.setPadding(dp(16), dp(16), dp(16), dp(16))
+                    v.gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
+                    val padH = dp(16)
+                    val padV = dp(8)
+                    v.setPadding(padH, padV, padH, padV)
+                    v.minHeight = dp(44)
                     return v
                 }
             }
@@ -1987,12 +1995,14 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnCancel.apply {
-            setTextColor(fgColor)
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.red) > 0.4) Color.BLACK else Color.WHITE)
             setOnClickListener { dialog.dismiss() }
         }
 
         btnTab.apply {
-            setTextColor(fgColor)
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
             setOnClickListener {
                 selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
@@ -2013,15 +2023,24 @@ class MainActivity : AppCompatActivity() {
                         val match = localVars.first()
                         etCode.text.replace(wordStart, cursor, match)
                         etCode.setSelection((wordStart + match.length).coerceAtMost(etCode.text.length))
+                        return@setOnClickListener
                     } else {
                         val outCursor = intArrayOf(prefix.length)
                         val completed = CardulatorEngine.nativeAutocomplete(prefix, prefix.length, outCursor)
                         if (completed != prefix) {
                             etCode.text.replace(wordStart, cursor, completed)
                             etCode.setSelection((wordStart + completed.length).coerceAtMost(etCode.text.length))
+                            return@setOnClickListener
                         }
                     }
                 }
+                // Default Tab action in code editor: indent with 4 spaces
+                val selStart = etCode.selectionStart.coerceAtLeast(0)
+                val selEnd = etCode.selectionEnd.coerceAtLeast(0)
+                val minSel = minOf(selStart, selEnd)
+                val maxSel = maxOf(selStart, selEnd)
+                etCode.text.replace(minSel, maxSel, "    ")
+                etCode.setSelection(minSel + 4)
             }
         }
 

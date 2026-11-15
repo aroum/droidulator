@@ -482,9 +482,11 @@
             android:text="↵"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_green"
-            android:fontFamily="monospace"
-            android:textSize="18sp"
+            android:fontFamily="sans-serif"
+            android:textSize="26sp"
             android:textStyle="bold"
+            android:includeFontPadding="false"
+            android:gravity="center"
             android:padding="0dp"
             android:layout_marginStart="4dp"
             android:visibility="gone" />
