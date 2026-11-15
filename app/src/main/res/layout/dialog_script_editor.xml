@@ -6,139 +6,7 @@
     android:layout_height="match_parent"
     android:orientation="vertical"
     android:background="@color/gruvbox_bg"
-    android:padding="12dp">
-
-    <!-- Top Toolbar (matching REPL keyboard bar) -->
-    <LinearLayout
-        android:id="@+id/script_editor_topbar"
-        android:layout_width="match_parent"
-        android:layout_height="44dp"
-        android:orientation="horizontal"
-        android:gravity="center_vertical"
-        android:background="@color/gruvbox_bg_soft"
-        android:layout_marginBottom="12dp">
-
-        <!-- Navigation Arrow Buttons for Code Navigation -->
-        <Button
-            android:id="@+id/btn_script_nav_left"
-            android:contentDescription="@string/access_btn_nav_left"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="@string/ui_text_041"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_blue"
-            android:textSize="12sp"
-            android:padding="0dp" />
-
-        <Button
-            android:id="@+id/btn_script_nav_right"
-            android:contentDescription="@string/access_btn_nav_right"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="@string/ui_text_042"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_blue"
-            android:textSize="12sp"
-            android:padding="0dp"
-            android:layout_marginStart="2dp" />
-
-        <Button
-            android:id="@+id/btn_script_nav_up"
-            android:contentDescription="@string/access_btn_nav_up"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="@string/ui_text_043"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_purple"
-            android:textSize="12sp"
-            android:padding="0dp"
-            android:layout_marginStart="2dp" />
-
-        <Button
-            android:id="@+id/btn_script_nav_down"
-            android:contentDescription="@string/access_btn_nav_down"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="@string/ui_text_044"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_purple"
-            android:textSize="12sp"
-            android:padding="0dp"
-            android:layout_marginStart="2dp" />
-
-        <View
-            android:layout_width="0dp"
-            android:layout_height="1dp"
-            android:layout_weight="1" />
-
-        <!-- Tab Indent / Autocomplete Button -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_script_tab"
-            android:contentDescription="@string/btn_tab"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:backgroundTint="@color/gruvbox_yellow"
-            app:icon="@drawable/ic_tab"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp"
-            app:iconSize="20dp"
-            app:iconTint="@color/gruvbox_bg"
-            android:padding="0dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:layout_marginStart="2dp"
-            android:layout_marginEnd="4dp" />
-
-        <!-- Cancel / Close Button (✕) -->
-        <Button
-            android:id="@+id/btn_script_cancel"
-            android:contentDescription="@string/ui_text_011"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="@string/btn_clear"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_red"
-            android:fontFamily="monospace"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:padding="0dp" />
-
-        <!-- Run Script Button (▶ icon only) -->
-        <Button
-            android:id="@+id/btn_script_run"
-            android:contentDescription="@string/ui_text_046"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:text="▶"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_yellow"
-            android:fontFamily="sans-serif"
-            android:textSize="14sp"
-            android:textStyle="bold"
-            android:padding="0dp"
-            android:layout_marginStart="4dp" />
-
-        <!-- Save Script Button (Floppy Disk Icon) -->
-        <com.google.android.material.button.MaterialButton
-            android:id="@+id/btn_script_save"
-            android:contentDescription="@string/ui_text_047"
-            android:layout_width="38dp"
-            android:layout_height="match_parent"
-            android:backgroundTint="@color/gruvbox_aqua"
-            app:icon="@drawable/ic_save"
-            app:iconGravity="textStart"
-            app:iconPadding="0dp"
-            app:iconSize="20dp"
-            app:iconTint="@color/gruvbox_light_bg"
-            android:padding="0dp"
-            android:insetTop="0dp"
-            android:insetBottom="0dp"
-            android:insetLeft="0dp"
-            android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
-    </LinearLayout>
+    android:padding="8dp">
 
     <!-- Script Name Field -->
     <EditText
@@ -154,7 +22,7 @@
         android:textSize="14sp"
         android:padding="12dp"
         android:singleLine="true"
-        android:layout_marginBottom="12dp" />
+        android:layout_marginBottom="8dp" />
 
     <!-- Script Code Multi-Line Editor -->
     <EditText
@@ -172,5 +40,164 @@
         android:gravity="top|start"
         android:inputType="textMultiLine|textNoSuggestions"
         android:scrollbars="vertical" />
+
+    <!-- Sticky Keyboard Toolbar (matching REPL, right above the soft keyboard) -->
+    <LinearLayout
+        android:id="@+id/script_editor_toolbar"
+        android:layout_width="match_parent"
+        android:layout_height="44dp"
+        android:orientation="horizontal"
+        android:gravity="center_vertical"
+        android:background="@color/gruvbox_bg_soft"
+        android:layout_marginTop="4dp"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="4dp"
+        android:paddingBottom="4dp">
+
+        <!-- Navigation Arrow Buttons for Code Navigation -->
+        <Button
+            android:id="@+id/btn_script_nav_left"
+            android:contentDescription="@string/access_btn_nav_left"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="@string/ui_text_041"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_blue"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp" />
+
+        <Button
+            android:id="@+id/btn_script_nav_right"
+            android:contentDescription="@string/access_btn_nav_right"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="@string/ui_text_042"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_blue"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+
+        <Button
+            android:id="@+id/btn_script_nav_up"
+            android:contentDescription="@string/access_btn_nav_up"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="@string/ui_text_043"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_purple"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+
+        <Button
+            android:id="@+id/btn_script_nav_down"
+            android:contentDescription="@string/access_btn_nav_down"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="@string/ui_text_044"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_purple"
+            android:textSize="12sp"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+
+        <!-- Tab Indent / Autocomplete Button (Right next to arrows) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_script_tab"
+            android:contentDescription="@string/btn_tab"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:backgroundTint="@color/gruvbox_yellow"
+            app:icon="@drawable/ic_tab"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="20dp"
+            app:iconTint="@color/gruvbox_bg"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+
+        <View
+            android:layout_width="0dp"
+            android:layout_height="1dp"
+            android:layout_weight="1" />
+
+        <!-- Cancel / Close Button (✕) -->
+        <Button
+            android:id="@+id/btn_script_cancel"
+            android:contentDescription="@string/ui_text_011"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="@string/btn_clear"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_red"
+            android:fontFamily="monospace"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp" />
+
+        <!-- Run Script Button (▶ icon only) -->
+        <Button
+            android:id="@+id/btn_script_run"
+            android:contentDescription="@string/ui_text_046"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:text="▶"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_yellow"
+            android:fontFamily="sans-serif"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+
+        <!-- Save Script Button (Floppy Disk Icon) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_script_save"
+            android:contentDescription="@string/ui_text_047"
+            android:layout_width="36dp"
+            android:layout_height="match_parent"
+            android:backgroundTint="@color/gruvbox_aqua"
+            app:icon="@drawable/ic_save"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="20dp"
+            app:iconTint="@color/gruvbox_light_bg"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="2dp" />
+    </LinearLayout>
 
 </LinearLayout>

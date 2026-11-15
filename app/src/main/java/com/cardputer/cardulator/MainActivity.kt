@@ -2147,6 +2147,7 @@ class MainActivity : AppCompatActivity() {
 
         dialog.window?.apply {
             setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            setSoftInputMode(android.view.WindowManager.LayoutParams.SOFT_INPUT_ADJUST_RESIZE)
             setBackgroundDrawable(ColorDrawable(bgColor))
             if (android.os.Build.VERSION.SDK_INT < 35) statusBarColor = bgColor
             val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
