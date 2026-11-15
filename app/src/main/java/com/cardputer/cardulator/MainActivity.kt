@@ -1949,10 +1949,14 @@ class MainActivity : AppCompatActivity() {
 
         val root = dialog.findViewById<LinearLayout>(R.id.script_editor_root)
         applySystemInsets(root)
-        val btnCancel = dialog.findViewById<Button>(R.id.btn_script_cancel)
+        val btnNavLeft = dialog.findViewById<Button>(R.id.btn_script_nav_left)
+        val btnNavRight = dialog.findViewById<Button>(R.id.btn_script_nav_right)
+        val btnNavUp = dialog.findViewById<Button>(R.id.btn_script_nav_up)
+        val btnNavDown = dialog.findViewById<Button>(R.id.btn_script_nav_down)
         val btnTab = dialog.findViewById<Button>(R.id.btn_script_tab)
+        val btnCancel = dialog.findViewById<Button>(R.id.btn_script_cancel)
         val btnRun = dialog.findViewById<Button>(R.id.btn_script_run)
-        val btnSave = dialog.findViewById<Button>(R.id.btn_script_save)
+        val btnSave = dialog.findViewById<com.google.android.material.button.MaterialButton>(R.id.btn_script_save)
         val etName = dialog.findViewById<EditText>(R.id.et_script_name)
         val etCode = dialog.findViewById<EditText>(R.id.et_script_code)
 
@@ -1994,6 +1998,66 @@ class MainActivity : AppCompatActivity() {
             etCode.post { applySyntaxHighlighting(etCode.editableText) }
         }
 
+        btnNavLeft.apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
+            setOnClickListener {
+                val sel = etCode.selectionStart
+                if (sel > 0) etCode.setSelection(sel - 1)
+                etCode.requestFocus()
+            }
+        }
+
+        btnNavRight.apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
+            setOnClickListener {
+                val sel = etCode.selectionStart
+                if (sel < etCode.text.length) etCode.setSelection(sel + 1)
+                etCode.requestFocus()
+            }
+        }
+
+        btnNavUp.apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.purple) > 0.4) Color.BLACK else Color.WHITE)
+            setOnClickListener {
+                val layout = etCode.layout
+                if (layout != null) {
+                    val pos = etCode.selectionStart
+                    val line = layout.getLineForOffset(pos)
+                    if (line > 0) {
+                        val col = pos - layout.getLineStart(line)
+                        val prevStart = layout.getLineStart(line - 1)
+                        val prevEnd = layout.getLineEnd(line - 1)
+                        val effEnd = if (prevEnd > prevStart && etCode.text[prevEnd - 1] == '\n') prevEnd - 1 else prevEnd
+                        etCode.setSelection((prevStart + col).coerceAtMost(effEnd))
+                    }
+                }
+                etCode.requestFocus()
+            }
+        }
+
+        btnNavDown.apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.purple) > 0.4) Color.BLACK else Color.WHITE)
+            setOnClickListener {
+                val layout = etCode.layout
+                if (layout != null) {
+                    val pos = etCode.selectionStart
+                    val line = layout.getLineForOffset(pos)
+                    if (line < layout.lineCount - 1) {
+                        val col = pos - layout.getLineStart(line)
+                        val nextStart = layout.getLineStart(line + 1)
+                        val nextEnd = layout.getLineEnd(line + 1)
+                        val effEnd = if (nextEnd > nextStart && etCode.text[nextEnd - 1] == '\n') nextEnd - 1 else nextEnd
+                        etCode.setSelection((nextStart + col).coerceAtMost(effEnd))
+                    }
+                }
+                etCode.requestFocus()
+            }
+        }
+
         btnCancel.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
             setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.red) > 0.4) Color.BLACK else Color.WHITE)
@@ -2001,8 +2065,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnTab.apply {
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
-            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.blue) > 0.4) Color.BLACK else Color.WHITE)
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE)
             setOnClickListener {
                 selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
@@ -2045,8 +2109,8 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnRun.apply {
-            setTextColor(ThemePalette.bgDarkText)
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
+            setTextColor(if (androidx.core.graphics.ColorUtils.calculateLuminance(ThemePalette.yellow) > 0.4) Color.BLACK else Color.WHITE)
             setOnClickListener {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
@@ -2063,8 +2127,9 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnSave.apply {
-            setTextColor(ThemePalette.fgInverted)
             backgroundTintList = ColorStateList.valueOf(btnAqua)
+            val iconColor = if (androidx.core.graphics.ColorUtils.calculateLuminance(btnAqua) > 0.4) Color.BLACK else Color.WHITE
+            iconTint = ColorStateList.valueOf(iconColor)
             setOnClickListener {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
