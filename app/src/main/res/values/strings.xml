@@ -22,6 +22,7 @@
     <string name="access_btn_nav_up">Previous command</string>
     <string name="access_btn_nav_down">Next command</string>
     <string name="access_btn_clear">Clear input; long press to clear session</string>
+    <string name="access_btn_enter">Send command</string>
     <string name="ui_text_001" formatted="false">Unable to install units data</string>
     <string name="ui_text_002" formatted="false">Clear calculation history, variables and arrays?</string>
     <string name="ui_text_003" formatted="false">Reset to built-in Gruvbox theme</string>

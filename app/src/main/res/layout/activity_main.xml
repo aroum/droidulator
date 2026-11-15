@@ -457,7 +457,7 @@
             android:textSize="13sp"
             android:textStyle="bold"
             android:layout_marginStart="2dp"
-            android:layout_marginEnd="12dp" />
+            android:layout_marginEnd="4dp" />
 
         <!-- Clear Input / History Button -->
         <Button
@@ -472,6 +472,22 @@
             android:textSize="14sp"
             android:textStyle="bold"
             android:padding="0dp" />
+
+        <!-- Enter / Send Command Button (2u width, visible when Enter-to-send is disabled) -->
+        <Button
+            android:id="@+id/btn_enter"
+            android:contentDescription="@string/access_btn_enter"
+            android:layout_width="80dp"
+            android:layout_height="match_parent"
+            android:text="↵"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_green"
+            android:fontFamily="monospace"
+            android:textSize="18sp"
+            android:textStyle="bold"
+            android:padding="0dp"
+            android:layout_marginStart="4dp"
+            android:visibility="gone" />
     </LinearLayout>
 
 </LinearLayout>

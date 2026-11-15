@@ -84,6 +84,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNavDown: Button
     private lateinit var btnTab: Button
     private lateinit var btnClear: Button
+    private lateinit var btnEnter: Button
 
     // Settings UI elements
     private lateinit var rgThemeMode: RadioGroup
@@ -339,6 +340,7 @@ class MainActivity : AppCompatActivity() {
         btnNavDown = findViewById(R.id.btn_nav_down)
         btnTab = findViewById(R.id.btn_tab)
         btnClear = findViewById(R.id.btn_clear)
+        btnEnter = findViewById(R.id.btn_enter)
 
         // Settings views
         rgThemeMode = findViewById(R.id.rg_theme_mode)
@@ -744,6 +746,11 @@ class MainActivity : AppCompatActivity() {
             etInput.setText("")
             dismissErrorOverlay()
         }
+        btnEnter.setOnClickListener {
+            if (tabs[currentTabPosition] == "REPL") {
+                submitCurrentInput()
+            }
+        }
         btnClear.setOnLongClickListener {
             val message = TextView(this).apply {
                 text = this@MainActivity.getString(R.string.ui_text_002)
@@ -1101,6 +1108,9 @@ class MainActivity : AppCompatActivity() {
         } else {
             getString(R.string.enter_newline)
         }
+        if (::btnEnter.isInitialized) {
+            btnEnter.visibility = if (isEnterSendMode) View.GONE else View.VISIBLE
+        }
     }
 
     private fun updateInputImeOptions() {
@@ -1112,6 +1122,14 @@ class MainActivity : AppCompatActivity() {
         }
         val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
         imm?.restartInput(etInput)
+    }
+
+    private fun hideSoftKeyboard() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        val focusedView = currentFocus ?: etInput
+        focusedView.clearFocus()
+        imm?.hideSoftInputFromWindow(mainRoot.windowToken, 0)
+        mainRoot.requestFocus()
     }
 
     private fun toggleDegRad() {
@@ -1195,11 +1213,15 @@ class MainActivity : AppCompatActivity() {
         } finally {
             isSubmitting = false
         }
-        etInput.requestFocus()
-        etInput.post {
+        if (tabs[currentTabPosition] == "REPL") {
             etInput.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-            imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            etInput.post {
+                etInput.requestFocus()
+                val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+                imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            }
+        } else {
+            hideSoftKeyboard()
         }
     }
 
@@ -1208,6 +1230,9 @@ class MainActivity : AppCompatActivity() {
         btnAddItem.visibility = View.GONE
         btnDeleteAll.visibility = View.GONE
         btnToggleEVars.visibility = View.GONE
+        if (tabName != "REPL") {
+            hideSoftKeyboard()
+        }
 
         when (tabName) {
             "REPL" -> {
@@ -1218,6 +1243,7 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.VISIBLE
                 toolbarKeyboard.visibility = View.VISIBLE
                 updateInputImeOptions()
+                updateEnterActionButtonText()
             }
             "Plot" -> {
                 scrollView.visibility = View.GONE
@@ -2298,6 +2324,7 @@ class MainActivity : AppCompatActivity() {
             btnNavLeft to ThemePalette.blue, btnNavRight to ThemePalette.blue,
             btnNavUp to ThemePalette.purple, btnNavDown to ThemePalette.purple,
             btnTab to ThemePalette.yellow, btnClear to ThemePalette.red,
+            btnEnter to ThemePalette.green,
             btnLoadCustomTheme to ThemePalette.aqua, btnSettingsEnterAction to ThemePalette.blue,
             btnSettingsClearHistory to ThemePalette.red
         )
