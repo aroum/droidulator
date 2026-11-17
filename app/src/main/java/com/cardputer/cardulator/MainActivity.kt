@@ -30,6 +30,7 @@ data class ReplDisplayItem(
         val numVal: Double = 0.0,
         val prefix: String = "",
         val suffix: String = "",
+        val arrayValues: DoubleArray? = null,
         val isRawText: Boolean = false
     )
 
@@ -412,6 +413,11 @@ class MainActivity : AppCompatActivity() {
         rebuildReplOutput()
     }
 
+    private fun rounded(color: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(8).toFloat()
+    }
+
     private fun setupTabSpinner() {
         val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, tabsDisplay) {
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
@@ -428,7 +434,7 @@ class MainActivity : AppCompatActivity() {
             override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
                 val v = super.getDropDownView(position, convertView, parent) as TextView
                 v.text = tabs[position]
-                v.setBackgroundColor(ThemePalette.bgSoft)
+                v.setBackgroundColor(Color.TRANSPARENT)
                 v.setTextColor(ThemePalette.fgText)
                 v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                 v.textSize = 14f
@@ -471,7 +477,7 @@ class MainActivity : AppCompatActivity() {
                 override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
                     val v = super.getDropDownView(position, convertView, parent) as TextView
                     v.text = rawItems[position]
-                    v.setBackgroundColor(ThemePalette.bgSoft)
+                    v.setBackgroundColor(Color.TRANSPARENT)
                     v.setTextColor(ThemePalette.fgText)
                     v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
                     v.textSize = 14f
@@ -1047,7 +1053,11 @@ class MainActivity : AppCompatActivity() {
             if (item.isRawText) {
                 ssb.append(item.rawOutput)
             } else {
-                val res = if (item.hasNum) {
+                val res = if (item.arrayValues != null) {
+                    item.rawOutput.substringBeforeLast("[") + item.arrayValues.joinToString(", ", "[", "]") {
+                        CardulatorEngine.nativeFormatNumber(it)
+                    }
+                } else if (item.hasNum) {
                     item.prefix + CardulatorEngine.nativeFormatNumber(item.numVal) + item.suffix
                 } else {
                     item.rawOutput
@@ -1070,6 +1080,7 @@ class MainActivity : AppCompatActivity() {
                 rawOutput = res,
                 isError = isError,
                 hasNum = hasNum,
+                arrayValues = if (!isError && !hasNum) CardulatorEngine.nativeLastArray() else null,
                 numVal = if (hasNum) CardulatorEngine.nativeGetLastNumericVal() else 0.0,
                 prefix = if (hasNum) CardulatorEngine.nativeGetLastNumericPrefix() else "",
                 suffix = if (hasNum) CardulatorEngine.nativeGetLastNumericSuffix() else ""
@@ -1234,6 +1245,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshTabContent(tabName: String) {
+        val formatVisibility = if (tabName == "REPL" || tabName == "Plot") View.VISIBLE else View.GONE
+        spinnerFmtPrec.visibility = formatVisibility
+        spinnerFmtMode.visibility = formatVisibility
         dismissErrorOverlay()
         btnAddItem.visibility = View.GONE
         btnDeleteAll.visibility = View.GONE
@@ -1520,96 +1534,45 @@ class MainActivity : AppCompatActivity() {
         onDelete: (() -> Unit)?
     ): View {
         val container = LinearLayout(this).apply {
+            orientation = LinearLayout.HORIZONTAL
+            gravity = Gravity.CENTER_VERTICAL
+            background = GradientDrawable().apply { setColor(cardBgColor); cornerRadius = dp(8).toFloat() }
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+        }
+        val labels = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cardBgColor)
-            setPadding(dp(16), dp(12), dp(16), dp(12))
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 0, 0, dp(12))
-            layoutParams = lp
+            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
         }
-
-        val tvTitle = TextView(this).apply {
-            text = title
-            setTextColor(textColor)
-            textSize = 15f
+        fun label(value: String, size: Float, color: Int) = TextView(this).apply {
+            text = value
+            textSize = size
+            setTextColor(color)
             typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
+            maxLines = 1
+            ellipsize = android.text.TextUtils.TruncateAt.END
         }
-
-        val tvSubtitle = TextView(this).apply {
-            text = subtitle
-            setTextColor(dimColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
+        labels.addView(label(title, 15f, textColor))
+        labels.addView(label(subtitle, 13f, dimColor))
+        container.addView(labels)
+        fun action(icon: Int, description: String, color: Int, callback: () -> Unit) {
+            container.addView(com.google.android.material.button.MaterialButton(this).apply {
+                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) }
+                contentDescription = description
+                setIconResource(icon)
+                iconSize = dp(24)
+                iconPadding = 0
+                iconGravity = com.google.android.material.button.MaterialButton.ICON_GRAVITY_TEXT_START
+                iconTint = ColorStateList.valueOf(ThemePalette.bgDarkText)
+                backgroundTintList = ColorStateList.valueOf(color)
+                cornerRadius = dp(8)
+                setPadding(0, 0, 0, 0)
+                setOnClickListener { callback() }
+            })
         }
-
-        container.addView(tvTitle)
-        container.addView(tvSubtitle)
-
-        if (onRun != null || onEdit != null || onDelete != null) {
-            val btnBar = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                val lp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                lp.setMargins(0, dp(8), 0, 0)
-                layoutParams = lp
-            }
-
-            if (onRun != null) {
-                val btnRun = Button(this).apply {
-                    text = runLabel
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    setOnClickListener { onRun() }
-                }
-                btnBar.addView(btnRun)
-            }
-
-            if (onEdit != null) {
-                val btnEdit = Button(this).apply {
-                    text = this@MainActivity.getString(R.string.ui_text_009)
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.green)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    val lp = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    if (onRun != null) lp.setMargins(dp(16), 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener { onEdit() }
-                }
-                btnBar.addView(btnEdit)
-            }
-
-            if (onDelete != null) {
-                val btnDelete = Button(this).apply {
-                    text = this@MainActivity.getString(R.string.ui_text_010)
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    val lp = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    lp.setMargins(dp(16), 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener { onDelete() }
-                }
-                btnBar.addView(btnDelete)
-            }
-
-            container.addView(btnBar)
-        }
+        onRun?.let { action(R.drawable.ic_run, runLabel, ThemePalette.yellow, it) }
+        onEdit?.let { action(R.drawable.ic_edit, getString(R.string.ui_text_009), ThemePalette.green, it) }
+        onDelete?.let { action(R.drawable.ic_close, getString(R.string.ui_text_010), ThemePalette.red, it) }
 
         return container
     }
@@ -1635,7 +1598,7 @@ class MainActivity : AppCompatActivity() {
             val dialogDrawable = GradientDrawable().apply {
                 setColor(bgColor)
                 setStroke(dp(2), borderColor)
-                cornerRadius = dp(16).toFloat()
+                cornerRadius = dp(8).toFloat()
             }
             setBackgroundDrawable(dialogDrawable)
             setDimAmount(0.6f)
@@ -1736,7 +1699,7 @@ class MainActivity : AppCompatActivity() {
             val bgDrawable = GradientDrawable().apply {
                 setColor(bgSoft)
                 setStroke(dp(2), borderColor)
-                cornerRadius = dp(6).toFloat()
+                cornerRadius = dp(8).toFloat()
             }
             background = bgDrawable
             isScrollbarFadingEnabled = false
@@ -1777,7 +1740,7 @@ class MainActivity : AppCompatActivity() {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 hint = getString(R.string.value_for_param, param)
                 typeface = android.graphics.Typeface.MONOSPACE
-                setBackgroundColor(bgSoft)
+                background = rounded(bgSoft)
                 setTextColor(fgColor)
                 setHintTextColor(fgDim)
                 setPadding(dp(16), dp(12), dp(16), dp(12))
@@ -1807,7 +1770,7 @@ class MainActivity : AppCompatActivity() {
             val bgDrawable = GradientDrawable().apply {
                 setColor(bgSoft)
                 setStroke(dp(2), borderColor)
-                cornerRadius = dp(6).toFloat()
+                cornerRadius = dp(8).toFloat()
             }
             background = bgDrawable
         }
@@ -1917,7 +1880,7 @@ class MainActivity : AppCompatActivity() {
             setSelection(initialExpr.length)
             hint = hintText
             typeface = android.graphics.Typeface.MONOSPACE
-            setBackgroundColor(bgSoft)
+            background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
             setPadding(dp(20), dp(16), dp(20), dp(16))
@@ -1966,18 +1929,19 @@ class MainActivity : AppCompatActivity() {
         val fgDim = ThemePalette.fgDim
         val btnAqua = ThemePalette.aqua
 
+        dialog.findViewById<View>(R.id.script_editor_toolbar).background = rounded(bgSoft)
         root.setBackgroundColor(bgColor)
 
         etName.apply {
             setText(initialName)
-            setBackgroundColor(bgSoft)
+            background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
         }
 
         etCode.apply {
             setText(initialCode)
-            setBackgroundColor(bgSoft)
+            background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
             addTextChangedListener(object : TextWatcher {
@@ -2391,11 +2355,11 @@ class MainActivity : AppCompatActivity() {
         val bgSoftColor = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
         val fgDimColor = ThemePalette.fgDim
-        val spinnerTint = ThemePalette.green
+
 
         // Root & Top Bar
         mainRoot.setBackgroundColor(bgColor)
-        topHeaderBar.setBackgroundColor(bgSoftColor)
+        topHeaderBar.background = rounded(bgSoftColor)
         window?.let { activityWindow ->
             if (android.os.Build.VERSION.SDK_INT < 35) {
                 activityWindow.statusBarColor = bgColor
@@ -2421,7 +2385,10 @@ class MainActivity : AppCompatActivity() {
             button.setTextColor(btnFg)
             (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(btnFg)
         }
-        spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
+        for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
+            spinner.background = rounded(bgColor)
+            spinner.setPopupBackgroundDrawable(rounded(bgSoftColor))
+        }
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
         (spinnerFmtMode.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
         (spinnerFmtPrec.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
@@ -2452,10 +2419,10 @@ class MainActivity : AppCompatActivity() {
         btnResetCustomTheme.backgroundTintList = ColorStateList.valueOf(bgSoftColor)
 
         // Input Field & Keyboard Bar
-        etInput.setBackgroundColor(bgSoftColor)
+        etInput.background = rounded(bgSoftColor)
         etInput.setTextColor(fgColor)
         etInput.setHintTextColor(fgDimColor)
-        toolbarKeyboard.setBackgroundColor(bgSoftColor)
+        toolbarKeyboard.background = rounded(bgSoftColor)
 
         // Re-render menu cards under new theme if active tab is a menu list
         val currentTab = tabs[currentTabPosition]

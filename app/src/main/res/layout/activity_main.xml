@@ -15,7 +15,7 @@
         android:orientation="horizontal"
         android:background="@color/gruvbox_bg_soft"
         android:gravity="center_vertical"
-        android:padding="4dp">
+        android:padding="2dp">
 
         <!-- Top Dropdown Spinner Mode Switcher -->
         <Spinner
@@ -23,7 +23,7 @@
             android:contentDescription="@string/access_spinner_tabs"
             android:layout_width="0dp"
             android:layout_weight="1"
-            android:layout_height="48dp"
+            android:layout_height="40dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
@@ -33,8 +33,8 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_add_item"
             android:contentDescription="@string/access_btn_add_item"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
             android:fontFamily="monospace"
@@ -48,8 +48,8 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_delete_all"
             android:contentDescription="@string/access_btn_delete_all"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_red"
             android:fontFamily="monospace"
@@ -63,8 +63,8 @@
         <Button
             android:id="@+id/btn_toggle_evars"
             android:contentDescription="@string/access_btn_toggle_evars"
-            android:layout_width="48dp"
-            android:layout_height="48dp"
+            android:layout_width="40dp"
+            android:layout_height="40dp"
             android:text="@string/ui_text_024"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_aqua"
@@ -76,17 +76,14 @@
             android:layout_marginEnd="2dp" />
 
         <!-- Spacer View to push formatting options to the right -->
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
+
 
         <!-- Format Mode Spinner (NORM, FLT, FIX, SCI, ENG) -->
         <Spinner
             android:id="@+id/spinner_fmt_mode"
             android:contentDescription="@string/access_spinner_fmt_mode"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
@@ -98,7 +95,7 @@
             android:id="@+id/spinner_fmt_prec"
             android:contentDescription="@string/access_spinner_fmt_prec"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="40dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"

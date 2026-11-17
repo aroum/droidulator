@@ -131,6 +131,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeInitUnits(JNIEnv *env, jobj
 static bool g_last_eval_error = false;
 static jstring toJavaError(JNIEnv* env, const std::string& value) { g_last_eval_error = true; return toJavaString(env, value); }
 
+static bool lastOutputWasArray = false;
 static bool g_last_has_num = false;
 static double g_last_num_val = 0.0;
 static std::string g_last_prefix;
@@ -167,6 +168,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_last_eval_error = false;
     script_console_output.clear();
+    lastOutputWasArray = false;
     g_last_has_num = false;
     g_last_num_val = 0.0;
     g_last_prefix.clear();
@@ -448,6 +450,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             resultStr = "Def OK";
         }
     } else if (g_last_eval_is_array) {
+        lastOutputWasArray = true;
         std::string trimmed = expression;
         trimmed.erase(0, trimmed.find_first_not_of(" \t"));
         trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
@@ -1108,6 +1111,16 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreArray(JNIEnv *env, j
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
 } catch (...) {
     throwJavaException(env, "java/lang/RuntimeException", "Invalid saved array");
+}
+
+JNIEXPORT jdoubleArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeLastArray(JNIEnv *env, jobject) {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
+    if (!lastOutputWasArray) return nullptr;
+    auto array = env->NewDoubleArray(g_last_eval_array.size());
+    if (array && !g_last_eval_array.empty())
+        env->SetDoubleArrayRegion(array, 0, g_last_eval_array.size(), g_last_eval_array.data());
+    return array;
 }
 
 } // extern "C"

@@ -114,50 +114,52 @@ jobs:
       - name: Prepare APK artifact names
         run: |
           cd "app/build/outputs/apk/${APK_VARIANT}"
-          if [[ "${{ github.ref }}" == refs/tags/* ]]; then
-            TAG_NAME="${{ github.ref_name }}"
-            UNIVERSAL_APK=$(ls *universal*.apk 2>/dev/null | head -n 1 || true)
-            if [ -n "$UNIVERSAL_APK" ] && [ -f "$UNIVERSAL_APK" ]; then
-              cp -f "$UNIVERSAL_APK" "droidulator-${TAG_NAME}.apk" || true
-            fi
-            for arch in arm64-v8a armeabi-v7a x86_64 x86; do
-              SOURCE_APK=$(ls *${arch}*.apk 2>/dev/null | head -n 1 || true)
-              if [ -n "$SOURCE_APK" ] && [ -f "$SOURCE_APK" ] && [ "$SOURCE_APK" != "droidulator-${TAG_NAME}-${arch}.apk" ]; then
-                mv -f "$SOURCE_APK" "droidulator-${TAG_NAME}-${arch}.apk" || true
-              fi
-            done
-            for apk in *.apk; do
-              if [[ "$apk" != "droidulator-${TAG_NAME}"* ]]; then
-                rm -f "$apk"
-              fi
-            done
-          else
-            BUILD_DATE=$(date -u +'%y.%m.%d')
-            # Create nightly-named split APKs for all architectures
-            for arch in arm64-v8a armeabi-v7a x86_64 x86 universal; do
-              SOURCE_APK=$(ls *${arch}*.apk 2>/dev/null | head -n 1 || true)
-              if [ -n "$SOURCE_APK" ] && [ -f "$SOURCE_APK" ]; then
-                cp -f "$SOURCE_APK" "droidulator-${BUILD_DATE}-nightly-${arch}.apk" || true
-              fi
-            done
-            UNIVERSAL_APK=$(ls *universal*.apk 2>/dev/null | head -n 1 || true)
-            if [ -n "$UNIVERSAL_APK" ] && [ -f "$UNIVERSAL_APK" ]; then
-              cp -f "$UNIVERSAL_APK" "droidulator-${BUILD_DATE}-nightly.apk" || true
-            fi
-            # Remove raw build artifacts without -nightly to keep nightly release clean
-            for apk in *.apk; do
-              if [[ "$apk" != *"-nightly"* ]]; then
-                rm -f "$apk"
-              fi
-            done
-          fi
-          ls -la
+          for abi in arm64-v8a armeabi-v7a x86_64 x86 universal; do
+            files=( *-"${abi}"-*.apk )
+            test "${#files[@]}" -eq 1 && test -f "${files[0]}" || exit 1
+            suffix="-${abi}"
+            if [[ "$abi" == universal ]]; then suffix=""; fi
+            mv "${files[0]}" "${ARTIFACT_NAME}${suffix}.apk"
+          done
 
-      - name: Upload APK Artifacts
+      - name: Upload universal APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}
-          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/*.apk
+          name: ${{ env.ARTIFACT_NAME }}-universal
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload arm64-v8a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-arm64-v8a
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-arm64-v8a.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload armeabi-v7a APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-armeabi-v7a
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-armeabi-v7a.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload x86_64 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-x86_64
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-x86_64.apk
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload x86 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}-x86
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-x86.apk
+          if-no-files-found: error
           retention-days: 3
 
       - name: Create GitHub Release (Tag Release)
