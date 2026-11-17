@@ -1,6 +1,16 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
+    <style name="Widget.Droidulator.Button" parent="Widget.MaterialComponents.Button">
+        <item name="cornerRadius">8dp</item>
+        <item name="android:insetTop">0dp</item>
+        <item name="android:insetBottom">0dp</item>
+        <item name="android:insetLeft">0dp</item>
+        <item name="android:insetRight">0dp</item>
+        <item name="android:minWidth">0dp</item>
+        <item name="android:minHeight">0dp</item>
+    </style>
     <style name="Theme.Droidulator" parent="Theme.MaterialComponents.DayNight.NoActionBar">
+        <item name="materialButtonStyle">@style/Widget.Droidulator.Button</item>
         <item name="colorPrimary">@color/gruvbox_green</item>
         <item name="colorPrimaryVariant">@color/gruvbox_aqua</item>
         <item name="colorOnPrimary">@color/gruvbox_bg</item>

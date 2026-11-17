@@ -21,20 +21,20 @@
         <Spinner
             android:id="@+id/spinner_tabs"
             android:contentDescription="@string/access_spinner_tabs"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_width="0dp"
+            android:layout_weight="1"
+            android:layout_height="48dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
             android:paddingEnd="4dp" />
 
         <!-- Add Item Button (+) -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_add_item"
             android:contentDescription="@string/access_btn_add_item"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:text="@string/ui_text_022"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
             android:fontFamily="monospace"
@@ -42,15 +42,14 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            android:layout_marginEnd="2dp" app:icon="@drawable/ic_add" app:iconSize="24dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Delete All Items Button (Red ✕) -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_delete_all"
             android:contentDescription="@string/access_btn_delete_all"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:text="@string/ui_text_023"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_red"
             android:fontFamily="monospace"
@@ -58,14 +57,14 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            android:layout_marginEnd="2dp" app:icon="@drawable/ic_close" app:iconSize="24dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Toggle e-history variables (#) -->
         <Button
             android:id="@+id/btn_toggle_evars"
             android:contentDescription="@string/access_btn_toggle_evars"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
             android:text="@string/ui_text_024"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_aqua"
