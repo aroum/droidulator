@@ -1535,7 +1535,7 @@ class MainActivity : AppCompatActivity() {
     ): View {
         val container = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
-            gravity = Gravity.CENTER_VERTICAL
+            gravity = android.view.Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply { setColor(cardBgColor); cornerRadius = dp(8).toFloat() }
             setPadding(dp(12), dp(8), dp(12), dp(8))
             layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
