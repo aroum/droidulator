@@ -1970,6 +1970,7 @@ class MainActivity : AppCompatActivity() {
         val fgDim = ThemePalette.fgDim
         val btnAqua = ThemePalette.aqua
 
+        dialog.findViewById<View>(R.id.script_editor_header).background = rounded(bgSoft)
         dialog.findViewById<View>(R.id.script_editor_toolbar).background = rounded(bgSoft)
         root.setBackgroundColor(bgColor)
 
