@@ -1,5 +1,6 @@
 package com.cardputer.cardulator
 
+import androidx.core.widget.doAfterTextChanged
 import android.app.Dialog
 import android.content.res.ColorStateList
 import android.content.res.Configuration
@@ -108,9 +109,9 @@ class MainActivity : AppCompatActivity() {
     private lateinit var spinnerFmtMode: Spinner
     private lateinit var spinnerFmtPrec: Spinner
     private val fmtModeItems = arrayOf("NORM", "FLT", "FIX", "SCI", "ENG")
-    private val fmtModeItemsDisplay = arrayOf("NORM ▼", "FLT ▼", "FIX ▼", "SCI ▼", "ENG ▼")
+    private val fmtModeItemsDisplay = arrayOf("NORM", "FLT", "FIX", "SCI", "ENG")
     private val fmtPrecItems = arrayOf("0dp", "1dp", "2dp", "3dp", "4dp", "5dp", "6dp", "7dp", "8dp", "9dp", "10dp", "11dp", "12dp")
-    private val fmtPrecItemsDisplay = arrayOf("0dp ▼", "1dp ▼", "2dp ▼", "3dp ▼", "4dp ▼", "5dp ▼", "6dp ▼", "7dp ▼", "8dp ▼", "9dp ▼", "10dp ▼", "11dp ▼", "12dp ▼")
+    private val fmtPrecItemsDisplay = arrayOf("0dp", "1dp", "2dp", "3dp", "4dp", "5dp", "6dp", "7dp", "8dp", "9dp", "10dp", "11dp", "12dp")
 
     private var fmtMode = 0
     private var fmtPrecision = 6
@@ -122,15 +123,15 @@ class MainActivity : AppCompatActivity() {
     private var isEnterSendMode = true
 
     private var currentTabPosition = 0
-    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings")
-    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display).map(::getString).toTypedArray()
+    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings", "Help")
+    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display, R.string.help_tab).map(::getString).toTypedArray()
     private fun tabTitle(tab: String): String = when (tab) {
         "REPL" -> getString(R.string.tab_repl)
         "Scripts" -> getString(R.string.tab_scripts)
         "Formulas" -> getString(R.string.tab_formulas)
         "Constants" -> getString(R.string.tab_constants)
         "Variables" -> getString(R.string.tab_variables)
-        "Plot" -> getString(R.string.tab_plot_display).removeSuffix(" ▼")
+        "Plot" -> getString(R.string.tab_plot_display).removeSuffix("")
         "Settings" -> getString(R.string.tab_settings)
         else -> tab
     }
@@ -418,84 +419,69 @@ class MainActivity : AppCompatActivity() {
         cornerRadius = dp(8).toFloat()
     }
 
-    private fun setupTabSpinner() {
-        val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, tabsDisplay) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getView(position, convertView, parent) as TextView
-                v.text = tabsDisplay[position]
-                v.setTextColor(ThemePalette.green)
-                v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                v.textSize = 14f
-                v.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
-                v.setPadding(0, 0, 0, 0)
-                return v
+    private fun spinnerAdapter(items: Array<String>, spinner: Spinner) =
+        object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
+            private fun row(position: Int, popup: Boolean) = TextView(this@MainActivity).apply {
+                text = items[position]
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 13f
+                gravity = android.view.Gravity.CENTER
+                minHeight = dp(36)
+                setSingleLine()
+                setPadding(dp(3), 0, dp(3), 0)
+                val selected = popup && position == spinner.selectedItemPosition
+                setTextColor(if (selected) ThemePalette.btnText else ThemePalette.fgText)
+                if (selected) background = rounded(ThemePalette.aqua)
             }
-
-            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getDropDownView(position, convertView, parent) as TextView
-                v.text = tabs[position]
-                v.setBackgroundColor(Color.TRANSPARENT)
-                v.setTextColor(ThemePalette.fgText)
-                v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                v.textSize = 14f
-                v.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
-                val padH = dp(16)
-                val padV = dp(8)
-                v.setPadding(padH, padV, padH, padV)
-                v.minHeight = dp(44)
-                return v
-            }
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, false)
+            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, true)
         }
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinnerTabs.adapter = adapter
 
+    private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help")
+    private val searchField get() = findViewById<EditText>(R.id.search_query)
+    private fun filterCards() {
+        val words = searchField.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        for (index in 0 until itemsContainer.childCount) {
+            val card = itemsContainer.getChildAt(index)
+            val content = card.tag as? String ?: ""
+            card.visibility = if (words.all { content.contains(it, ignoreCase = true) }) View.VISIBLE else View.GONE
+        }
+    }
+
+    private fun setupTabSpinner() {
+        spinnerTabs.adapter = spinnerAdapter(tabsDisplay, spinnerTabs)
         spinnerTabs.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 currentTabPosition = position
-                val selectedTab = tabs[position]
-                refreshTabContent(selectedTab)
+                refreshTabContent(tabs[position])
             }
-
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        val search = searchField
+        findViewById<View>(R.id.search_toggle).setOnClickListener {
+            val opening = search.visibility != View.VISIBLE
+            spinnerTabs.visibility = if (opening) View.GONE else View.VISIBLE
+            search.visibility = if (opening) View.VISIBLE else View.GONE
+            if (opening) {
+                search.requestFocus()
+                (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            } else {
+                search.text.clear()
+                hideSoftKeyboard()
+            }
+        }
+        search.doAfterTextChanged { filterCards() }
+        search.setOnEditorActionListener { _, action, event ->
+            val done = action == EditorInfo.IME_ACTION_DONE || event?.keyCode == KeyEvent.KEYCODE_ENTER
+            if (done) hideSoftKeyboard()
+            done
         }
     }
 
     private fun setupFormatSpinners() {
-        fun createCustomAdapter(displayItems: Array<String>, rawItems: Array<String>, colorRes: () -> Int): ArrayAdapter<String> {
-            val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, displayItems) {
-                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                    val v = super.getView(position, convertView, parent) as TextView
-                    v.text = displayItems[position]
-                    v.setTextColor(colorRes())
-                    v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                    v.textSize = 14f
-                    v.gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                    v.setPadding(0, 0, 0, 0)
-                    return v
-                }
-
-                override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
-                    val v = super.getDropDownView(position, convertView, parent) as TextView
-                    v.text = rawItems[position]
-                    v.setBackgroundColor(Color.TRANSPARENT)
-                    v.setTextColor(ThemePalette.fgText)
-                    v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                    v.textSize = 14f
-                    v.gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                    val padH = dp(16)
-                    val padV = dp(8)
-                    v.setPadding(padH, padV, padH, padV)
-                    v.minHeight = dp(44)
-                    return v
-                }
-            }
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            return adapter
-        }
-
-        spinnerFmtMode.adapter = createCustomAdapter(fmtModeItemsDisplay, fmtModeItems) { ThemePalette.orange }
-        spinnerFmtPrec.adapter = createCustomAdapter(fmtPrecItemsDisplay, fmtPrecItems) { ThemePalette.yellow }
-
+        spinnerFmtMode.adapter = spinnerAdapter(fmtModeItemsDisplay, spinnerFmtMode)
+        spinnerFmtPrec.adapter = spinnerAdapter(fmtPrecItemsDisplay, spinnerFmtPrec)
         spinnerFmtMode.setSelection(fmtMode.coerceIn(0, fmtModeItems.size - 1))
         spinnerFmtPrec.setSelection(fmtPrecision.coerceIn(0, fmtPrecItems.size - 1))
 
@@ -1245,9 +1231,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshTabContent(tabName: String) {
-        val formatVisibility = if (tabName == "REPL" || tabName == "Plot") View.VISIBLE else View.GONE
-        spinnerFmtPrec.visibility = formatVisibility
-        spinnerFmtMode.visibility = formatVisibility
+        findViewById<View>(R.id.search_toggle).visibility = if (tabName in searchableTabs) View.VISIBLE else View.GONE
         dismissErrorOverlay()
         btnAddItem.visibility = View.GONE
         btnDeleteAll.visibility = View.GONE
@@ -1292,15 +1276,15 @@ class MainActivity : AppCompatActivity() {
                     else -> rbThemeAuto.isChecked = true
                 }
             }
-            "Variables", "Formulas", "Constants", "Scripts" -> {
+            "Variables", "Formulas", "Constants", "Scripts", "Help" -> {
                 scrollView.visibility = View.GONE
                 scrollSettings.visibility = View.GONE
                 plotView.visibility = View.GONE
                 scrollItems.visibility = View.VISIBLE
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
-                btnAddItem.visibility = View.VISIBLE
-                btnDeleteAll.visibility = View.VISIBLE
+                btnAddItem.visibility = if (tabName == "Help") View.GONE else View.VISIBLE
+                btnDeleteAll.visibility = btnAddItem.visibility
                 if (tabName == "Variables") {
                     btnToggleEVars.visibility = View.VISIBLE
                 }
@@ -1333,6 +1317,27 @@ class MainActivity : AppCompatActivity() {
         val dimColor = ThemePalette.fgDim
 
         when (tabName) {
+            "Help" -> {
+                val topics = listOf("plot", "print", "conv", "len", "trig", "arctrig", "hyperbolic", "archyp",
+                    "errors", "deg2rad", "sqrt", "log", "round", "mod", "mean", "dot", "fact", "if", "sum", "rUni")
+                for (topic in topics) {
+                    val detail = CardulatorEngine.nativeGetHelp("help($topic)")
+                    val card = createMenuItemCard(topic, detail.lineSequence().drop(1).firstOrNull().orEmpty(),
+                        cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
+                    card.tag = "$topic $detail"
+                    card.setOnClickListener {
+                        val body = TextView(this).apply {
+                            text = detail
+                            typeface = android.graphics.Typeface.MONOSPACE
+                            setTextColor(textColor)
+                        }
+                        val scroll = ScrollView(this).apply { addView(body) }
+                        AlertDialog.Builder(this).setTitle(topic).setView(scroll)
+                            .setPositiveButton(android.R.string.ok, null).show()
+                    }
+                    itemsContainer.addView(card)
+                }
+            }
             "Variables" -> {
                 val varsRaw = CardulatorEngine.nativeGetVariables()
                 var lines = varsRaw.split("\n").filter { it.contains("=") }
@@ -1515,11 +1520,13 @@ class MainActivity : AppCompatActivity() {
                                 }
                             }
                         )
+                        cardView.tag = "$scriptName $scriptCode"
                         itemsContainer.addView(cardView)
                     }
                 }
             }
         }
+        filterCards()
     }
 
     private fun createMenuItemCard(
@@ -1537,8 +1544,9 @@ class MainActivity : AppCompatActivity() {
             orientation = LinearLayout.HORIZONTAL
             gravity = android.view.Gravity.CENTER_VERTICAL
             background = GradientDrawable().apply { setColor(cardBgColor); cornerRadius = dp(8).toFloat() }
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(8) }
+            tag = "$title $subtitle"
+            setPadding(dp(6), dp(2), dp(6), dp(2))
+            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(3) }
         }
         val labels = LinearLayout(this).apply {
             orientation = LinearLayout.VERTICAL
@@ -1557,10 +1565,10 @@ class MainActivity : AppCompatActivity() {
         container.addView(labels)
         fun action(icon: Int, description: String, color: Int, callback: () -> Unit) {
             container.addView(com.google.android.material.button.MaterialButton(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(48), dp(48)).apply { marginStart = dp(4) }
+                layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(4) }
                 contentDescription = description
                 setIconResource(icon)
-                iconSize = dp(24)
+                iconSize = dp(20)
                 iconPadding = 0
                 iconGravity = com.google.android.material.button.MaterialButton.ICON_GRAVITY_TEXT_START
                 iconTint = ColorStateList.valueOf(ThemePalette.bgDarkText)
@@ -1939,6 +1947,23 @@ class MainActivity : AppCompatActivity() {
             setHintTextColor(fgDim)
         }
 
+        val lineLabel = dialog.findViewById<TextView>(R.id.script_line)
+        lineLabel.setTextColor(fgColor)
+        var lastCursor = -1
+        var lastEdit = -1
+        var revision = 0
+        etCode.doAfterTextChanged { revision++ }
+        etCode.viewTreeObserver.addOnPreDrawListener {
+            val cursor = etCode.selectionStart.coerceIn(0, etCode.length())
+            if (cursor != lastCursor || revision != lastEdit) {
+                var line = 1
+                for (i in 0 until cursor) if (etCode.text[i] == '\n') line++
+                lineLabel.text = getString(R.string.line_number, line)
+                lastCursor = cursor
+                lastEdit = revision
+            }
+            true
+        }
         etCode.apply {
             setText(initialCode)
             background = rounded(bgSoft)
@@ -2386,7 +2411,7 @@ class MainActivity : AppCompatActivity() {
             (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(btnFg)
         }
         for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
-            spinner.background = rounded(bgColor)
+            spinner.background = rounded(ThemePalette.borderColor)
             spinner.setPopupBackgroundDrawable(rounded(bgSoftColor))
         }
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
@@ -2396,7 +2421,14 @@ class MainActivity : AppCompatActivity() {
         // Scroll Views & Plot View
         scrollView.setBackgroundColor(bgColor)
         tvOutput.setTextColor(fgColor)
-        tvMode.setTextColor(if (isLightThemeActive) ThemePalette.fgText else ThemePalette.yellow)
+        tvMode.background = rounded(ThemePalette.borderColor)
+        tvMode.setTextColor(ThemePalette.fgText)
+        tvMode.typeface = android.graphics.Typeface.MONOSPACE
+        tvMode.textSize = 13f
+        findViewById<com.google.android.material.button.MaterialButton>(R.id.search_toggle).apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.aqua)
+            iconTint = ColorStateList.valueOf(ThemePalette.btnText)
+        }
         scrollSettings.setBackgroundColor(bgColor)
         scrollItems.setBackgroundColor(bgColor)
         plotView.setThemeMode(isLightThemeActive)

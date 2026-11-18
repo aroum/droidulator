@@ -105,11 +105,14 @@
     <string name="plot_empty">No plot data</string>
     <string name="plot_accessibility">Interactive function plot</string>
     <string name="angle_mode_accessibility">Angle mode %1$s; double tap to change</string>
-    <string name="tab_repl_display">REPL ▼</string>
-    <string name="tab_scripts_display">Scripts ▼</string>
-    <string name="tab_formulas_display">Formulas ▼</string>
-    <string name="tab_constants_display">Constants ▼</string>
-    <string name="tab_variables_display">Variables ▼</string>
-    <string name="tab_plot_display">Plot ▼</string>
-    <string name="tab_settings_display">Settings ▼</string>
+    <string name="tab_repl_display">REPL</string>
+    <string name="tab_scripts_display">Scripts</string>
+    <string name="tab_formulas_display">Formulas</string>
+    <string name="tab_constants_display">Constants</string>
+    <string name="tab_variables_display">Variables</string>
+    <string name="tab_plot_display">Plot</string>
+    <string name="tab_settings_display">Settings</string>
+    <string name="search">Search</string>
+    <string name="help_tab">Help</string>
+    <string name="line_number">Ln %1$d</string>
 </resources>

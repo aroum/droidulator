@@ -89,7 +89,8 @@ void runScript(const std::string& code) {
     auto original_autocomplete = autocomplete_words;
     user_args.reserve(256);
     
-    std::vector<std::string> lines = splitIntoStatements(code);
+    std::vector<size_t> sourceLines;
+    std::vector<std::string> lines = splitIntoStatements(code, &sourceLines);
     
     size_t ip = 0;
     int max_steps = 1000000;
@@ -128,7 +129,7 @@ void runScript(const std::string& code) {
         }
         if (line == "break" || line == "continue") {
             auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const BlockState& block) { return block.type == "for" || block.type == "while"; });
-            if (loop == blocks.rend()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + line + " outside loop"); ++ip; continue; }
+            if (loop == blocks.rend()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + line + " outside loop"); ++ip; continue; }
             const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
             const size_t end = blocks[index].end_ip;
             blocks.erase(blocks.begin() + index + 1, blocks.end());
@@ -181,7 +182,7 @@ void runScript(const std::string& code) {
                     script_return_is_vec = false;
                     script_return_vec = {script_return_val};
                     if (!eval_err.empty()) {
-                        script_console_output.push_back("Error: " + eval_err);
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                     } else {
                         script_console_output.push_back("Return: " + fmtNum(script_return_val));
                     }
@@ -201,7 +202,7 @@ void runScript(const std::string& code) {
                 fname.erase(0, fname.find_first_not_of(" \t"));
                 fname.erase(fname.find_last_not_of(" \t") + 1);
                 if (isReservedName(fname)) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + fname);
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + fname);
                     const size_t end = findMatchingBlockEnd(lines, ip);
                     ip = end == std::string::npos ? lines.size() : end + 1;
                     continue;
@@ -220,7 +221,7 @@ void runScript(const std::string& code) {
                     p_pos = comma + 1;
                 }
                 if (std::any_of(params.begin(), params.end(), isReservedName)) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved parameter");
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved parameter");
                     const size_t end = findMatchingBlockEnd(lines, ip);
                     ip = end == std::string::npos ? lines.size() : end + 1;
                     continue;
@@ -261,7 +262,7 @@ void runScript(const std::string& code) {
             double result = 0.0;
             if (handlePlotCommands(line, err, result)) {
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 }
                 ip++;
                 continue;
@@ -274,7 +275,7 @@ void runScript(const std::string& code) {
             std::string err;
             std::string output = formatPrintString(expr, err);
             if (!err.empty()) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
             } else {
                 script_console_output.push_back(output);
             }
@@ -306,7 +307,7 @@ void runScript(const std::string& code) {
 
                     
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
                         blocks.push_back({ "if", true, ip, end_ip, "", 0.0, 0.0, "", "" });
@@ -321,11 +322,11 @@ void runScript(const std::string& code) {
                         }
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched if");
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched if");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
                 ip++;
             }
         }
@@ -352,7 +353,7 @@ void runScript(const std::string& code) {
                         bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                         
                         if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             ip = blocks.back().end_ip;
                         } else if (cond_bool) {
                             blocks.back().condition_met = true;
@@ -366,12 +367,12 @@ void runScript(const std::string& code) {
                             }
                         }
                     } else {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched else if");
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
                         ip++;
                     }
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Unmatched else if");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
                 ip++;
             }
         }
@@ -385,7 +386,7 @@ void runScript(const std::string& code) {
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Unmatched else");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
                 ip++;
             }
         }
@@ -419,11 +420,11 @@ void runScript(const std::string& code) {
                     bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                     
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                         if (found_block) blocks.erase(blocks.begin() + block_idx);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
-                        if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("Error: Loop iteration limit reached"); break; }
+                        if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                         if (!found_block) {
                             blocks.push_back({ "while", true, ip, end_ip, "", 0.0, 0.0, cond_str, "" });
                         }
@@ -435,11 +436,11 @@ void runScript(const std::string& code) {
                         ip = end_ip;
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched while");
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched while");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
                 ip++;
             }
         }
@@ -540,7 +541,7 @@ void runScript(const std::string& code) {
                         }
                         
                         if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             if (found_block) blocks.erase(blocks.begin() + block_idx);
                             ip = end_ip + 1;
                         } else {
@@ -549,11 +550,11 @@ void runScript(const std::string& code) {
                             bool cond_bool = (cond_err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                             
                             if (!cond_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + cond_err);
+                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + cond_err);
                                 if (found_block) blocks.erase(blocks.begin() + block_idx);
                                 ip = end_ip + 1;
                             } else if (cond_bool) {
-                                if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("Error: Loop iteration limit reached"); break; }
+                                if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                                 if (!found_block) {
                                     blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
                                 }
@@ -566,15 +567,15 @@ void runScript(const std::string& code) {
                             }
                         }
                     } else {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for");
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
                         ip++;
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for syntax");
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
                 ip++;
             }
         }
@@ -666,7 +667,7 @@ void runScript(const std::string& code) {
             std::string var_name = line.substr(0, line.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
-            if (isReservedName(var_name)) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + var_name); ip++; continue; }
+            if (isReservedName(var_name)) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + var_name); ip++; continue; }
             char op = line[line.size() - 1];
             bool found = false;
             for (auto& arg : user_args) {
@@ -685,22 +686,22 @@ void runScript(const std::string& code) {
         // Array element assignment: A[idx] = expr
         else if (std::string name, idx_expr, val_expr; parseArrayElementAssignment(line, name, idx_expr, val_expr)) {
             if (user_arrays.find(name) == user_arrays.end()) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Array " + name + " not defined");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Array " + name + " not defined");
                 ip++;
             } else {
                 std::string err;
                 double idx_val = evaluate(preprocessArrayLookups(idx_expr, err), err);
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 } else {
                     err.clear();
                     double val_val = evaluate(preprocessArrayLookups(val_expr, err), err);
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                     } else {
                         auto& arr = user_arrays[name];
                         if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Invalid or out of bounds index");
+                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid or out of bounds index");
                         } else {
                             arr[static_cast<size_t>(idx_val) - 1] = val_val;
                         }
@@ -740,7 +741,7 @@ void runScript(const std::string& code) {
                 for (const auto& name : lhs_vars) {
                     if (isReservedName(name) || std::any_of(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }
                 }
-                if (reserved) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Const or reserved name"); ip++; continue; }
+                if (reserved) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const or reserved name"); ip++; continue; }
                 
                 // Evaluate RHS expression
                 bool is_arr = false;
@@ -767,14 +768,14 @@ void runScript(const std::string& code) {
                         if (parse_err.empty()) executeScriptFunc(fn_name, evaluated, parse_err, &vals);
                     }
                 }
-                if (!parse_err.empty()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + parse_err); ip++; continue; }
+                if (!parse_err.empty()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + parse_err); ip++; continue; }
 
                 if (!executed_fn) {
                     vals = parseArrayExpr(rhs, is_arr, parse_err);
                     if (!is_arr || !parse_err.empty()) {
                         std::string eval_err;
                         double single_v = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
-                        if (!eval_err.empty()) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err); ip++; continue; }
+                        if (!eval_err.empty()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err); ip++; continue; }
                         vals = {single_v};
                     }
                 }
@@ -803,7 +804,7 @@ void runScript(const std::string& code) {
                 continue;
             }
             
-            if (isReservedName(lhs)) { script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Reserved name: " + lhs); ip++; continue; }
+            if (isReservedName(lhs)) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + lhs); ip++; continue; }
             bool is_const_assign = false;
             for (const auto& cn : user_consts) {
                 if (cn.name == lhs) {
@@ -812,7 +813,7 @@ void runScript(const std::string& code) {
                 }
             }
             if (is_const_assign) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Const Error");
+                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
                 ip++;
                 continue;
             }
@@ -845,7 +846,7 @@ void runScript(const std::string& code) {
                 double scalar_res = 0;
                 std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 } else if (is_scalar) {
                     user_arrays.erase(lhs);
                     bool found = false;
@@ -953,7 +954,7 @@ void runScript(const std::string& code) {
                             else user_args.push_back({source_arr_name, old_val});
 
                             if (!all_ok) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
+                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                             } else {
                                 user_arrays[lhs] = elem_res;
                                 user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
@@ -964,7 +965,7 @@ void runScript(const std::string& code) {
                             std::string eval_err;
                             double val = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
                             if (!eval_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
+                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                             } else {
                                 user_arrays.erase(lhs);
                                 bool found = false;
@@ -988,7 +989,7 @@ void runScript(const std::string& code) {
                         std::string prep_rhs = preprocessArrayLookups(preprocessLen(rhs), eval_err);
                         double val = evaluate(prep_rhs, eval_err);
                         if (!eval_err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
+                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                         } else {
                             bool found = false;
                             for (auto& a : user_args) {
@@ -1018,21 +1019,21 @@ void runScript(const std::string& code) {
                 double result = 0.0;
                 if (handlePlotCommands(line, err, result)) {
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                     }
                 }
             } else {
                 bool isDef = false;
                 std::string eval_err;
                 evaluateInput(line, eval_err, isDef);
-                if (!eval_err.empty()) script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
+                if (!eval_err.empty()) script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
             }
             ip++;
         }
     }
     
     if (step_count >= max_steps) {
-        script_console_output.push_back("Error: Script statement limit reached");
+        script_console_output.push_back("L:" + std::to_string(sourceLines[std::min(ip, sourceLines.size() - 1)]) + " Err: Script statement limit reached");
     }
     
     user_funcs = original_funcs;

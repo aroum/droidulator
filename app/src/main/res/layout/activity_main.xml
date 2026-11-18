@@ -17,24 +17,54 @@
         android:gravity="center_vertical"
         android:padding="2dp">
 
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none">
+        <LinearLayout android:layout_width="wrap_content" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
         <!-- Top Dropdown Spinner Mode Switcher -->
         <Spinner
             android:id="@+id/spinner_tabs"
             android:contentDescription="@string/access_spinner_tabs"
-            android:layout_width="0dp"
-            android:layout_weight="1"
-            android:layout_height="40dp"
+            android:layout_width="86dp"
+            android:layout_height="36dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
             android:paddingEnd="4dp" />
 
+        <EditText
+            android:id="@+id/search_query"
+            android:layout_width="86dp"
+            android:layout_height="36dp"
+            android:fontFamily="monospace"
+            android:textSize="13sp"
+            android:hint="@string/search"
+            android:singleLine="true"
+            android:inputType="text"
+            android:imeOptions="actionDone"
+            android:paddingHorizontal="4dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/search_toggle"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
+            android:padding="0dp"
+            android:contentDescription="@string/search"
+            android:visibility="gone"
+            app:icon="@drawable/ic_search"
+            app:iconSize="20dp"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
+
         <!-- Add Item Button (+) -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_add_item"
             android:contentDescription="@string/access_btn_add_item"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
             android:fontFamily="monospace"
@@ -42,14 +72,14 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" app:icon="@drawable/ic_add" app:iconSize="24dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
+            android:layout_marginEnd="2dp" app:icon="@drawable/ic_add" app:iconSize="20dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Delete All Items Button (Red ✕) -->
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_delete_all"
             android:contentDescription="@string/access_btn_delete_all"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_red"
             android:fontFamily="monospace"
@@ -57,14 +87,14 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" app:icon="@drawable/ic_close" app:iconSize="24dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
+            android:layout_marginEnd="2dp" app:icon="@drawable/ic_close" app:iconSize="20dp" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Toggle e-history variables (#) -->
         <Button
             android:id="@+id/btn_toggle_evars"
             android:contentDescription="@string/access_btn_toggle_evars"
-            android:layout_width="40dp"
-            android:layout_height="40dp"
+            android:layout_width="36dp"
+            android:layout_height="36dp"
             android:text="@string/ui_text_024"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_aqua"
@@ -83,7 +113,7 @@
             android:id="@+id/spinner_fmt_mode"
             android:contentDescription="@string/access_spinner_fmt_mode"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="36dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
@@ -95,7 +125,7 @@
             android:id="@+id/spinner_fmt_prec"
             android:contentDescription="@string/access_spinner_fmt_prec"
             android:layout_width="wrap_content"
-            android:layout_height="40dp"
+            android:layout_height="36dp"
             android:background="@null"
             android:spinnerMode="dropdown"
             android:paddingStart="4dp"
@@ -104,8 +134,9 @@
 
         <TextView
             android:id="@+id/tv_mode"
+            android:gravity="center"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
+            android:layout_height="36dp"
             android:text="@string/ui_text_025"
             android:textColor="@color/gruvbox_yellow"
             android:fontFamily="monospace"
@@ -113,6 +144,8 @@
             android:textStyle="bold"
             android:paddingStart="6dp"
             android:paddingEnd="6dp" />
+        </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
 
     <!-- Main Output / Terminal Log Area -->
@@ -383,15 +416,15 @@
     <LinearLayout
         android:id="@+id/toolbar_keyboard"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="40dp"
         android:orientation="horizontal"
         android:background="@color/gruvbox_bg_soft"
         android:gravity="center_vertical"
         android:layout_marginTop="4dp"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
-        android:paddingTop="4dp"
-        android:paddingBottom="4dp">
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
 
         <!-- Navigation Arrow Buttons -->
         <Button
@@ -501,12 +534,12 @@
             android:layout_marginStart="2dp" />
 
         <!-- Enter / Send Command Button (2u width, visible when Enter-to-send is disabled) -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_enter"
             android:contentDescription="@string/access_btn_enter"
-            android:layout_width="80dp"
+            android:layout_width="36dp"
             android:layout_height="match_parent"
-            android:text="↵"
+            app:icon="@drawable/ic_enter" app:iconGravity="textStart" app:iconPadding="0dp" app:iconSize="20dp"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_green"
             android:fontFamily="sans-serif"

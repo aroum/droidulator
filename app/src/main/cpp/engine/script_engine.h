@@ -43,8 +43,14 @@ inline size_t findMatchingBlockEnd(const std::vector<std::string>& lines, size_t
     return std::string::npos;
 }
 
-inline std::vector<std::string> splitIntoStatements(const std::string& code) {
+inline std::vector<std::string> splitIntoStatements(const std::string& code, std::vector<size_t>* sourceLines = nullptr) {
     std::vector<std::string> statements;
+    std::vector<size_t> newlines;
+    if (sourceLines) {
+        for (size_t i = 0; i < code.size(); ++i)
+            if (code[i] == '\n') newlines.push_back(i);
+    }
+    size_t startOffset = 0;
     std::string current_stmt = "";
     bool in_quotes = false;
     
@@ -120,12 +126,15 @@ inline std::vector<std::string> splitIntoStatements(const std::string& code) {
         }
         
         statements.push_back(s);
+        if (sourceLines)
+            sourceLines->push_back(1 + (std::lower_bound(newlines.begin(), newlines.end(), startOffset) - newlines.begin()));
     };
     
     char quote_char = 0;
     int paren_depth = 0;
     for (size_t i = 0; i < code.size(); ++i) {
         char c = code[i];
+        if (current_stmt.empty()) startOffset = i;
         if (in_quotes && c == '\\' && i + 1 < code.size()) { current_stmt += c; current_stmt += code[++i]; continue; }
         if (c == '"' || c == '\'') {
             if (!in_quotes) {
@@ -154,6 +163,7 @@ inline std::vector<std::string> splitIntoStatements(const std::string& code) {
             current_stmt += c; push_stmt(current_stmt); current_stmt.clear();
         } else if (!in_quotes && paren_depth == 0 && c == '}') {
             if (!current_stmt.empty()) { push_stmt(current_stmt); current_stmt.clear(); }
+            startOffset = i;
             size_t next = i + 1;
             while (next < code.size() && std::isspace(static_cast<unsigned char>(code[next]))) ++next;
             if (code.compare(next, 4, "else") == 0 || code.compare(next, 4, "elif") == 0) {
