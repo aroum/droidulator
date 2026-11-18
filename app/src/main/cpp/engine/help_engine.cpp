@@ -22,7 +22,10 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
         std::string target = trimmed.substr(5, trimmed.size() - 6);
         target.erase(0, target.find_first_not_of(" \t\"'"));
         target.erase(target.find_last_not_of(" \t\"'") + 1);
-        if (target == "plot") {
+        if (target == "xor") {
+            help_out = "a xor b\nLogical exclusive OR. Zero is false and nonzero is true.\nExamples\n1 xor 0 = 1\n2 xor 3 = 0";
+        }
+        else if (target == "plot") {
             help_out = "=== plot() Help ===\n"
                        "Usage: plot(y) or plot(x, y, [col], [style])\n"
                        "Colors (col):\n"

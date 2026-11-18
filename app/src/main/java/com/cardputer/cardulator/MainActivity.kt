@@ -1,5 +1,6 @@
 package com.cardputer.cardulator
 
+import androidx.activity.OnBackPressedCallback
 import androidx.core.widget.doAfterTextChanged
 import android.app.Dialog
 import android.content.res.ColorStateList
@@ -419,6 +420,19 @@ class MainActivity : AppCompatActivity() {
         cornerRadius = dp(8).toFloat()
     }
 
+    private fun spinnerColor(spinner: Spinner): Int = when (spinner) {
+        spinnerTabs -> ThemePalette.green
+        spinnerFmtMode -> ThemePalette.orange
+        else -> ThemePalette.yellow
+    }
+
+    private fun closeSearch() {
+        searchField.text.clear()
+        searchField.visibility = View.GONE
+        spinnerTabs.visibility = View.VISIBLE
+        hideSoftKeyboard()
+    }
+
     private fun spinnerAdapter(items: Array<String>, spinner: Spinner) =
         object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
             private fun row(position: Int, popup: Boolean) = TextView(this@MainActivity).apply {
@@ -428,10 +442,10 @@ class MainActivity : AppCompatActivity() {
                 gravity = android.view.Gravity.CENTER
                 minHeight = dp(36)
                 setSingleLine()
-                setPadding(dp(3), 0, dp(3), 0)
+                setPadding(dp(4), dp(8), dp(4), dp(8))
                 val selected = popup && position == spinner.selectedItemPosition
-                setTextColor(if (selected) ThemePalette.btnText else ThemePalette.fgText)
-                if (selected) background = rounded(ThemePalette.aqua)
+                setTextColor(if (selected || !popup) ThemePalette.btnText else spinnerColor(spinner))
+                if (selected) background = rounded(spinnerColor(spinner))
             }
             override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, false)
             override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, true)
@@ -462,6 +476,16 @@ class MainActivity : AppCompatActivity() {
             }
             override fun onNothingSelected(parent: AdapterView<*>?) {}
         }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (searchField.visibility == View.VISIBLE) closeSearch()
+                else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
         val search = searchField
         findViewById<View>(R.id.search_toggle).setOnClickListener {
             val opening = search.visibility != View.VISIBLE
@@ -472,8 +496,7 @@ class MainActivity : AppCompatActivity() {
                 (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
                     .showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
             } else {
-                search.text.clear()
-                hideSoftKeyboard()
+                closeSearch()
             }
         }
         search.doAfterTextChanged { filterCards() }
@@ -1324,10 +1347,12 @@ class MainActivity : AppCompatActivity() {
         when (tabName) {
             "Help" -> {
                 val topics = listOf("plot", "print", "conv", "len", "trig", "arctrig", "hyperbolic", "archyp",
-                    "errors", "deg2rad", "sqrt", "log", "round", "mod", "mean", "dot", "fact", "if", "sum", "rUni")
+                    "xor", "errors", "deg2rad", "sqrt", "log", "round", "mod", "mean", "dot", "fact", "if", "sum", "rUni")
                 for (topic in topics) {
-                    val detail = CardulatorEngine.nativeGetHelp("help($topic)")
-                    val card = createMenuItemCard(topic, detail.lineSequence().drop(1).firstOrNull().orEmpty(),
+                    val raw = CardulatorEngine.nativeGetHelp("help($topic)")
+                    val detail = raw.lineSequence().filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
+                    
+                    val card = createMenuItemCard(topic, detail.lineSequence().firstOrNull().orEmpty(),
                         cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
                     card.tag = "$topic $detail"
                     card.setOnClickListener {
@@ -1335,10 +1360,11 @@ class MainActivity : AppCompatActivity() {
                             text = detail
                             typeface = android.graphics.Typeface.MONOSPACE
                             setTextColor(textColor)
+                            textSize = 14f
+                            setPadding(dp(12), dp(8), dp(12), dp(8))
                         }
                         val scroll = ScrollView(this).apply { addView(body) }
-                        AlertDialog.Builder(this).setTitle(topic).setView(scroll)
-                            .setPositiveButton(android.R.string.ok, null).show()
+                        showGruvboxCustomDialog(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
                     }
                     itemsContainer.addView(card)
                 }
@@ -2416,7 +2442,7 @@ class MainActivity : AppCompatActivity() {
             (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(btnFg)
         }
         for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
-            spinner.background = rounded(ThemePalette.borderColor)
+            spinner.background = rounded(spinnerColor(spinner))
             spinner.setPopupBackgroundDrawable(rounded(bgSoftColor))
         }
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
@@ -2426,10 +2452,16 @@ class MainActivity : AppCompatActivity() {
         // Scroll Views & Plot View
         scrollView.setBackgroundColor(bgColor)
         tvOutput.setTextColor(fgColor)
-        tvMode.background = rounded(ThemePalette.borderColor)
-        tvMode.setTextColor(ThemePalette.fgText)
+        tvMode.background = rounded(ThemePalette.yellow)
+        tvMode.setTextColor(ThemePalette.btnText)
         tvMode.typeface = android.graphics.Typeface.MONOSPACE
         tvMode.textSize = 13f
+        searchField.apply {
+            background = rounded(ThemePalette.bgSoft)
+            setTextColor(ThemePalette.fgText)
+            setHintTextColor(ThemePalette.fgDim)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
         findViewById<com.google.android.material.button.MaterialButton>(R.id.search_toggle).apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.aqua)
             iconTint = ColorStateList.valueOf(ThemePalette.btnText)
