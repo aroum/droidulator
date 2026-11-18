@@ -1,6 +1,6 @@
 #include "help_engine.h"
 
-bool preprocessHelp(const std::string& s, std::string& help_out) {
+static bool legacyHelp(const std::string& s, std::string& help_out) {
     std::string trimmed = s;
     trimmed.erase(0, trimmed.find_first_not_of(" \t"));
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
@@ -176,4 +176,46 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
         return true;
     }
     return false;
+}
+
+#include "help_catalog.h"
+#include <algorithm>
+#include <cctype>
+
+bool preprocessHelp(const std::string& input, std::string& output) {
+    std::string request = input;
+    const auto first = request.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    request = request.substr(first, request.find_last_not_of(" \t\r\n") - first + 1);
+    if (request == "help" || request == "help()" || request == "help( )") {
+        output = "Droidulator Help\nUse help(topic) or search the Help section.\nTopics\n";
+        for (const auto& entry : helpEntries) output += std::string(entry.name) + "\n";
+        return true;
+    }
+    if (request.rfind("help(", 0) != 0 || request.back() != ')') return false;
+    std::string topic = request.substr(5, request.size() - 6);
+    const auto start = topic.find_first_not_of(" \t\"'");
+    topic = start == std::string::npos ? "" : topic.substr(start, topic.find_last_not_of(" \t\"'") - start + 1);
+    if (topic == "index") {
+        output.clear();
+        for (const auto& entry : helpEntries) output += std::string(entry.name) + "\n";
+        return true;
+    }
+    auto equalName = [](const std::string& a, const std::string& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+            [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
+    };
+    for (const auto& entry : helpEntries) {
+        if (!equalName(topic, entry.name)) continue;
+        output = std::string(entry.description) + "\n\nSyntax\n" + entry.syntax +
+            "\n\nExamples\n" + entry.example;
+        if (entry.detail[0]) {
+            std::string reference;
+            legacyHelp("help(" + std::string(entry.detail) + ")", reference);
+            if (!reference.empty()) output += "\n\nReference\n" + reference;
+        }
+        return true;
+    }
+    output = "Unknown help topic '" + topic + "'. Use help() to list available topics.";
+    return true;
 }

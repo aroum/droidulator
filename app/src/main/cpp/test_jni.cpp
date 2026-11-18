@@ -26,6 +26,20 @@ extern "C" int bridge_test_fatal();
 #include "engine/app_state.cpp"
 
 int main() {
+    // Exercise the same index and topic renderer used by the Android Help screen.
+    std::string helpIndex;
+    assert(preprocessHelp("help(index)", helpIndex));
+    for (const auto& entry : helpEntries) {
+        std::string rendered;
+        assert(helpIndex.find(std::string(entry.name) + "\n") != std::string::npos);
+        assert(preprocessHelp("help(\"" + std::string(entry.name) + "\")", rendered));
+        assert(rendered.find("\n\nSyntax\n") != std::string::npos);
+        assert(rendered.find("\n\nExamples\n") != std::string::npos);
+        assert(rendered.find("General math function/variable") == std::string::npos);
+    }
+    std::string xorHelp;
+    assert(preprocessHelp("help(XOR)", xorHelp));
+    assert(xorHelp.find("2 xor 3 = 0") != std::string::npos);
     std::cout << "[Droidulator Native Test] Initializing..." << std::endl;
     std::string err;
     bool isDef = false;

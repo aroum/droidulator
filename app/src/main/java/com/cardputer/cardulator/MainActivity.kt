@@ -1346,12 +1346,11 @@ class MainActivity : AppCompatActivity() {
 
         when (tabName) {
             "Help" -> {
-                val topics = listOf("plot", "print", "conv", "len", "trig", "arctrig", "hyperbolic", "archyp",
-                    "xor", "errors", "deg2rad", "sqrt", "log", "round", "mod", "mean", "dot", "fact", "if", "sum", "rUni")
+                val topics = CardulatorEngine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }.toList()
                 for (topic in topics) {
                     val raw = CardulatorEngine.nativeGetHelp("help($topic)")
                     val detail = raw.lineSequence().filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
-                    
+
                     val card = createMenuItemCard(topic, detail.lineSequence().firstOrNull().orEmpty(),
                         cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
                     card.tag = "$topic $detail"

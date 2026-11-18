@@ -19,6 +19,8 @@ target_compile_options(native_tests PRIVATE -UNDEBUG)
 target_compile_definitions(native_tests PRIVATE "UNITS_DAT_PATH=\"${CMAKE_CURRENT_LIST_DIR}/../../app/src/main/assets/units.dat\"")
 target_link_libraries(native_tests PRIVATE units)
 enable_testing()
+find_package(Python3 REQUIRED COMPONENTS Interpreter)
+add_test(NAME help_coverage COMMAND ${Python3_EXECUTABLE} "${CMAKE_CURRENT_LIST_DIR}/check_help_coverage.py")
 add_test(NAME native_tests COMMAND native_tests)
 
 option(BUILD_UNITS_FUZZER "Build the libFuzzer target" OFF)
