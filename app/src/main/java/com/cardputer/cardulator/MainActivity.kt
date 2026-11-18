@@ -96,7 +96,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rbThemeLight: RadioButton
     private lateinit var btnLoadCustomTheme: Button
     private lateinit var btnResetCustomTheme: Button
-    private lateinit var btnSettingsEnterAction: Button
+    private lateinit var btnSettingsEnterAction: CheckBox
     private lateinit var btnSettingsClearHistory: Button
     private lateinit var cbDigitGrouping: CheckBox
     private lateinit var cbHideWelcome: CheckBox
@@ -124,8 +124,8 @@ class MainActivity : AppCompatActivity() {
     private var isEnterSendMode = true
 
     private var currentTabPosition = 0
-    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings", "Help")
-    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display, R.string.help_tab).map(::getString).toTypedArray()
+    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings", "Help", "Units")
+    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display, R.string.help_tab, R.string.units_tab).map(::getString).toTypedArray()
     private fun tabTitle(tab: String): String = when (tab) {
         "REPL" -> getString(R.string.tab_repl)
         "Scripts" -> getString(R.string.tab_scripts)
@@ -182,6 +182,7 @@ class MainActivity : AppCompatActivity() {
 
     companion object {
         private val unitsInstallLock = Any()
+        @Volatile private var unitsReady = false
 
         // Pre-compiled regex patterns for zero-allocation syntax highlighting
         private val NUMBER_REGEX = Regex("(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[a-zA-Z]*(?![A-Za-z0-9_])")
@@ -253,12 +254,21 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
+        // Bind the complete screen before its first visible frame.
+        findViewById<View>(R.id.main_root).visibility = View.INVISIBLE
+        if (unitsReady) {
+            finishStartup()
+            return
+        }
 
         // File extraction and comparison can be slow on cold start.
         Thread {
             try {
                 synchronized(unitsInstallLock) {
-                    installUnitsData().also { CardulatorEngine.nativeInitUnits(it) }
+                    if (!unitsReady) {
+                        installUnitsData().also { CardulatorEngine.nativeInitUnits(it) }
+                        unitsReady = true
+                    }
                 }
                 runOnUiThread {
                     if (!isFinishing && !isDestroyed) finishStartup()
@@ -413,6 +423,7 @@ class MainActivity : AppCompatActivity() {
         // Apply theme upon creation and restore the retained REPL output.
         applyTheme()
         rebuildReplOutput()
+        mainRoot.visibility = View.VISIBLE
     }
 
     private fun rounded(color: Int) = GradientDrawable().apply {
@@ -451,9 +462,48 @@ class MainActivity : AppCompatActivity() {
             override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, true)
         }
 
-    private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help")
+    private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
     private val searchField get() = findViewById<EditText>(R.id.search_query)
+    private val unitsReference by lazy {
+        assets.open("units.dat").bufferedReader().use { UnitsReference(it.lineSequence()) }
+    }
+
+    private fun renderUnits() {
+        itemsContainer.removeAllViews()
+        val notice = TextView(this).apply {
+            text = getString(R.string.units_search_hint)
+            setTextColor(ThemePalette.fgDim)
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(dp(8), dp(8), dp(8), dp(8))
+        }
+        itemsContainer.addView(notice)
+        for (entry in unitsReference.search(searchField.text.toString())) {
+            val detail = getString(R.string.unit_reference_detail, entry.name, entry.aliases, entry.definition, entry.name)
+            val card = createMenuItemCard(entry.name, entry.aliases.ifEmpty { entry.definition },
+                ThemePalette.bgCard, ThemePalette.fgText, ThemePalette.fgDim, onEdit = null, onDelete = null)
+            card.setOnClickListener { showHelpDetail(entry.name, detail) }
+            itemsContainer.addView(card)
+        }
+    }
+
+    private fun showHelpDetail(topic: String, detail: String) {
+        val body = TextView(this).apply {
+            text = detail
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(ThemePalette.fgText)
+            textSize = 14f
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setTextIsSelectable(true)
+        }
+        val scroll = ScrollView(this).apply { addView(body) }
+        showGruvboxCustomDialog(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
+    }
+
     private fun filterCards() {
+        if (tabs[currentTabPosition] == "Units") {
+            renderUnits()
+            return
+        }
         val words = searchField.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
         for (index in 0 until itemsContainer.childCount) {
             val card = itemsContainer.getChildAt(index)
@@ -1139,11 +1189,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateEnterActionButtonText() {
-        btnSettingsEnterAction.text = if (isEnterSendMode) {
-            getString(R.string.enter_send)
-        } else {
-            getString(R.string.enter_newline)
-        }
+        btnSettingsEnterAction.isChecked = isEnterSendMode
         if (::btnEnter.isInitialized) {
             btnEnter.visibility = if (isEnterSendMode) View.GONE else View.VISIBLE
         }
@@ -1307,14 +1353,14 @@ class MainActivity : AppCompatActivity() {
                     else -> rbThemeAuto.isChecked = true
                 }
             }
-            "Variables", "Formulas", "Constants", "Scripts", "Help" -> {
+            "Variables", "Formulas", "Constants", "Scripts", "Help", "Units" -> {
                 scrollView.visibility = View.GONE
                 scrollSettings.visibility = View.GONE
                 plotView.visibility = View.GONE
                 scrollItems.visibility = View.VISIBLE
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
-                btnAddItem.visibility = if (tabName == "Help") View.GONE else View.VISIBLE
+                btnAddItem.visibility = if (tabName == "Help" || tabName == "Units") View.GONE else View.VISIBLE
                 btnDeleteAll.visibility = btnAddItem.visibility
                 if (tabName == "Variables") {
                     btnToggleEVars.visibility = View.VISIBLE
@@ -1341,6 +1387,10 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun renderDedicatedMenuList(tabName: String) {
+        if (tabName == "Units") {
+            renderUnits()
+            return
+        }
         itemsContainer.removeAllViews()
 
         val cardBgColor = ThemePalette.bgCard
@@ -1358,15 +1408,7 @@ class MainActivity : AppCompatActivity() {
                         cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
                     card.tag = "$topic $detail"
                     card.setOnClickListener {
-                        val body = TextView(this).apply {
-                            text = detail
-                            typeface = android.graphics.Typeface.MONOSPACE
-                            setTextColor(textColor)
-                            textSize = 14f
-                            setPadding(dp(12), dp(8), dp(12), dp(8))
-                        }
-                        val scroll = ScrollView(this).apply { addView(body) }
-                        showGruvboxCustomDialog(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
+                        showHelpDetail(topic, detail)
                     }
                     itemsContainer.addView(card)
                 }
@@ -1667,7 +1709,11 @@ class MainActivity : AppCompatActivity() {
         root.addView(tvTitle)
 
         (contentView.parent as? ViewGroup)?.removeView(contentView)
-        root.addView(contentView)
+        if (contentView is ScrollView) {
+            root.addView(contentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+        } else {
+            root.addView(contentView)
+        }
 
         val btnBar = LinearLayout(this).apply {
             orientation = LinearLayout.HORIZONTAL
@@ -1720,6 +1766,11 @@ class MainActivity : AppCompatActivity() {
 
         dialog.setContentView(root)
         dialog.show()
+        if (contentView is ScrollView) {
+            root.layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
+            val screen = resources.displayMetrics
+            dialog.window?.setLayout(screen.widthPixels - dp(32), (screen.heightPixels * 0.8f).toInt())
+        }
         return dialog
     }
 
@@ -2435,7 +2486,7 @@ class MainActivity : AppCompatActivity() {
             btnNavUp to ThemePalette.purple, btnNavDown to ThemePalette.purple,
             btnTab to ThemePalette.yellow, btnClear to ThemePalette.red,
             btnEnter to ThemePalette.green,
-            btnLoadCustomTheme to ThemePalette.aqua, btnSettingsEnterAction to ThemePalette.blue,
+            btnLoadCustomTheme to ThemePalette.aqua,
             btnSettingsClearHistory to ThemePalette.red
         )
         val btnFg = ThemePalette.btnText
@@ -2486,6 +2537,8 @@ class MainActivity : AppCompatActivity() {
         cbHideWelcome.setTextColor(fgColor)
         cbAutoPair.setTextColor(fgColor)
         cbDigitGrouping.setTextColor(fgColor)
+        btnSettingsEnterAction.setTextColor(fgColor)
+        btnSettingsEnterAction.buttonTintList = ColorStateList.valueOf(ThemePalette.aqua)
 
         btnResetCustomTheme.setTextColor(fgColor)
         btnResetCustomTheme.backgroundTintList = ColorStateList.valueOf(bgSoftColor)
@@ -2498,7 +2551,7 @@ class MainActivity : AppCompatActivity() {
 
         // Re-render menu cards under new theme if active tab is a menu list
         val currentTab = tabs[currentTabPosition]
-        if (currentTab in arrayOf("Variables", "Formulas", "Constants", "Scripts")) {
+        if (currentTab in arrayOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")) {
             renderDedicatedMenuList(currentTab)
         }
         rebuildReplOutput()

@@ -115,4 +115,8 @@
     <string name="search">Search</string>
     <string name="help_tab">Help</string>
     <string name="line_number">Ln %1$d</string>
+    <string name="units_tab">Units</string>
+    <string name="enter_send_checkbox">Enter sends command</string>
+    <string name="units_search_hint">Search unit names or symbols, e.g. mm or millimeter. Up to 100 matches. Names and prefixes are case-sensitive when used in conv.</string>
+    <string name="unit_reference_detail">Name\n%1$s\n\nAliases\n%2$s\n\nDefinition\n%3$s\n\nSyntax\nconv(1, &quot;%4$s&quot;, &quot;target_unit&quot;)</string>
 </resources>

@@ -99,9 +99,9 @@ jobs:
       - name: Build APK
         run: |
           if [[ "$APK_VARIANT" == release ]]; then
-            ./gradlew assembleRelease --stacktrace
+            ./gradlew testReleaseUnitTest assembleRelease --stacktrace
           else
-            ./gradlew assembleCi --stacktrace
+            ./gradlew testCiUnitTest assembleCi --stacktrace
           fi
         env:
           VERSION_NAME: ${{ env.VERSION_NAME }}

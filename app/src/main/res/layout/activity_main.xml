@@ -171,7 +171,7 @@
             android:textSize="14sp"
             android:lineSpacingExtra="4dp"
             android:textIsSelectable="true"
-            android:text="@string/ui_text_026" />
+            android:text="" />
     </ScrollView>
 
     <!-- Dedicated Plot View Container -->
@@ -337,15 +337,14 @@
                 android:textSize="14sp"
                 android:layout_marginBottom="4dp" />
 
-            <Button
+            <CheckBox
                 android:id="@+id/btn_settings_enter_action"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="@string/ui_text_039"
-                android:textColor="@color/gruvbox_bg"
-                android:backgroundTint="@color/gruvbox_blue"
+                android:text="@string/enter_send_checkbox"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
-                android:textStyle="bold"
                 android:layout_marginBottom="16dp" />
 
             <Button
