@@ -449,6 +449,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupTabSpinner() {
+        for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
+            spinner.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+                if (right > left) spinner.dropDownWidth = right - left
+            }
+        }
         spinnerTabs.adapter = spinnerAdapter(tabsDisplay, spinnerTabs)
         spinnerTabs.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
