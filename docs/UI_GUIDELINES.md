@@ -2,7 +2,7 @@
 
 Use the shared ThemePalette for dark, light and custom themes. Use monospace for expressions, code, results, control labels and help examples.
 
-Use an 8 dp corner radius for buttons, fields, cards, bars, popups and dialogs. Compact toolbar controls are 36 dp high with 20 dp icons. Keep 4 dp between adjacent controls and between the script header and code field. Keep format, precision and angle controls at the right edge.
+Use an 8 dp corner radius for buttons, fields, cards, bars, popups and dialogs. Compact toolbar controls are 36 dp high with 20 dp icons. Keep 4 dp between adjacent controls and between the script header and code field. Use the shared toolbar dimension resources for these measurements. Spinner anchors have zero horizontal padding so the popup outer edges align with the anchor. Put label padding inside the adapter row. Popup background padding and horizontal offset must be zero. Keep format, precision and angle controls at the right edge.
 
 Use green for section selection, orange for number format and yellow for precision and angle mode. Popup rows use the same typography and accent as their anchor. Highlight the current selection with the anchor color. Give rows at least the anchor height and 8 dp vertical text padding.
 

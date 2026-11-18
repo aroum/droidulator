@@ -15,7 +15,7 @@
         android:inputType="textNoSuggestions"
         android:layout_width="0dp"
         android:layout_weight="1"
-        android:layout_height="wrap_content"
+        android:layout_height="@dimen/toolbar_control_size"
         android:hint="@string/ui_text_048"
         android:textColorHint="@color/gruvbox_fg_dim"
         android:textColor="@color/gruvbox_fg"
@@ -27,9 +27,10 @@
         android:minHeight="36dp" />
         <Button
             android:id="@+id/btn_script_cancel"
+            android:layout_marginStart="@dimen/toolbar_gap"
             android:contentDescription="@string/ui_text_011"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
             android:text="@string/btn_clear"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_red"
@@ -44,8 +45,8 @@
         <Button
             android:id="@+id/btn_script_run"
             android:contentDescription="@string/ui_text_046"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
             android:text="▶"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
@@ -57,30 +58,30 @@
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_script_save"
             android:contentDescription="@string/ui_text_047"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
             android:backgroundTint="@color/gruvbox_aqua"
             app:icon="@drawable/ic_save"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
-            app:iconSize="20dp"
+            app:iconSize="@dimen/toolbar_icon_size"
             app:iconTint="@color/gruvbox_light_bg"
             android:padding="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
     </LinearLayout>
 
     <!-- Script Code Multi-Line Editor -->
     <EditText
         android:id="@+id/et_script_code"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="@dimen/toolbar_gap"
         android:layout_width="match_parent"
         android:layout_height="0dp"
         android:layout_weight="1"
@@ -103,7 +104,7 @@
         android:orientation="horizontal"
         android:gravity="center_vertical"
         android:background="@color/gruvbox_bg_soft"
-        android:layout_marginTop="4dp"
+        android:layout_marginTop="@dimen/toolbar_gap"
         android:paddingStart="4dp"
         android:paddingEnd="4dp"
         android:paddingTop="2dp"
@@ -113,7 +114,7 @@
         <Button
             android:id="@+id/btn_script_nav_left"
             android:contentDescription="@string/access_btn_nav_left"
-            android:layout_width="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
             android:layout_height="match_parent"
             android:text="@string/ui_text_041"
             android:textColor="@color/gruvbox_bg"
@@ -128,7 +129,7 @@
         <Button
             android:id="@+id/btn_script_nav_right"
             android:contentDescription="@string/access_btn_nav_right"
-            android:layout_width="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
             android:layout_height="match_parent"
             android:text="@string/ui_text_042"
             android:textColor="@color/gruvbox_bg"
@@ -139,12 +140,12 @@
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <Button
             android:id="@+id/btn_script_nav_up"
             android:contentDescription="@string/access_btn_nav_up"
-            android:layout_width="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
             android:layout_height="match_parent"
             android:text="@string/ui_text_043"
             android:textColor="@color/gruvbox_bg"
@@ -155,12 +156,12 @@
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <Button
             android:id="@+id/btn_script_nav_down"
             android:contentDescription="@string/access_btn_nav_down"
-            android:layout_width="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
             android:layout_height="match_parent"
             android:text="@string/ui_text_044"
             android:textColor="@color/gruvbox_bg"
@@ -171,7 +172,7 @@
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <!-- Tab Indent / Autocomplete Button (Right next to arrows) -->
 
@@ -187,20 +188,20 @@
         <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_script_tab"
             android:contentDescription="@string/btn_tab"
-            android:layout_width="36dp"
+            android:layout_width="@dimen/toolbar_control_size"
             android:layout_height="match_parent"
             android:backgroundTint="@color/gruvbox_yellow"
             app:icon="@drawable/ic_tab"
             app:iconGravity="textStart"
             app:iconPadding="0dp"
-            app:iconSize="20dp"
+            app:iconSize="@dimen/toolbar_icon_size"
             app:iconTint="@color/gruvbox_bg"
             android:padding="0dp"
             android:insetTop="0dp"
             android:insetBottom="0dp"
             android:insetLeft="0dp"
             android:insetRight="0dp"
-            android:layout_marginStart="4dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <!-- Cancel / Close Button (✕) -->
 
