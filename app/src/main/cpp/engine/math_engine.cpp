@@ -666,14 +666,7 @@ inline std::string preprocessLen(const std::string& s) {
     std::string res = s;
     size_t pos = 0;
     while (pos < res.size()) {
-        size_t call = std::string::npos;
-        for (const auto& token : expression::tokenize(std::string_view(res).substr(pos))) {
-            if (token.kind == expression::Kind::Word && token.text == "len" &&
-                res.compare(pos + token.start + 3, 1, "(") == 0) {
-                call = pos + token.start;
-                break;
-            }
-        }
+        const size_t call = expression::callOffset(res, "len", pos);
         if (call == std::string::npos) break;
         pos = call;
         const size_t close = expression::matchingGroupEnd(res, pos + 3);

@@ -285,6 +285,9 @@ int main() {
         std::string emptyArgumentError;
         evaluate("empty_argument_test(,1)", emptyArgumentError);
         assert(!emptyArgumentError.empty());
+        assert(preprocessLen("\"len(missing_array)\"") == "\"len(missing_array)\"");
+        assert(expression::callOffset("\"f(1)\" + f(2)", "f") == 9);
+        assert(expression::matchingGroupEnd("f(\")\", [1,2])", 1) == 12);
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
