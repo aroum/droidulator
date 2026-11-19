@@ -335,29 +335,8 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 }
                 
                 std::string args_str = expr.substr(start, end - start);
-                std::vector<std::string> args;
-                int arg_depth = 0;
-                std::string current_arg = "";
-                for (char c : args_str) {
-                    if (c == '(') arg_depth++;
-                    else if (c == ')') arg_depth--;
-                    
-                    if (c == ',' && arg_depth == 0) {
-                        args.push_back(current_arg);
-                        current_arg = "";
-                    } else {
-                        current_arg += c;
-                    }
-                }
-                if (!current_arg.empty() || args_str.empty()) {
-                    args.push_back(current_arg);
-                }
-                
-                for (auto& arg : args) {
-                    arg.erase(0, arg.find_first_not_of(" \t"));
-                    arg.erase(arg.find_last_not_of(" \t") + 1);
-                }
-                
+                const auto args = expression::splitArguments(args_str);
+
                 if (args.size() != f.params.size()) {
                     err = "Arg Count Mismatch";
                     return expr;
