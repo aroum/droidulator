@@ -18,6 +18,7 @@ static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
 
 std::vector<UserFunc> getParsedUserFuncs() {
     std::vector<UserFunc> res;
+    res.reserve(engineState().user_funcs.size());
     for (const auto& f_str : engineState().user_funcs) {
         const size_t eq = expression::assignmentOffset(f_str);
         if (eq == std::string::npos) continue;
@@ -38,8 +39,8 @@ std::vector<UserFunc> getParsedUserFuncs() {
         name.erase(name.find_last_not_of(" \t") + 1);
         
         std::string params_str = lhs.substr(paren_open + 1, paren_close - paren_open - 1);
-        const auto params = expression::splitArguments(params_str);
-        res.push_back({name, params, rhs});
+        auto params = expression::splitArguments(params_str);
+        res.push_back({std::move(name), std::move(params), std::move(rhs)});
     }
     return res;
 }
