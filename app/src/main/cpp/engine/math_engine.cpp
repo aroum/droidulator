@@ -448,8 +448,9 @@ inline std::string preprocessPercentage(const std::string& s) {
     std::string res = s;
     while (true) {
         size_t pct_pos = std::string::npos;
-        for (size_t i = 0; i < res.size(); ++i) {
-            if (res[i] == '%') {
+        for (const auto& token : expression::tokenize(res)) {
+            if (token.kind == expression::Kind::Operator && token.text == "%") {
+                const size_t i = token.start;
                 size_t j = i + 1;
                 while (j < res.size() && (res[j] == ' ' || res[j] == '\t')) j++;
                 bool is_postfix = true;
