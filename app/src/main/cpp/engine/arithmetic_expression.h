@@ -13,10 +13,12 @@ class ArithmeticExpression {
 public:
     using UnaryFunction = double (*)(double);
     using UnaryLookup = UnaryFunction (*)(std::string_view);
+    using ArrayLookup = const std::vector<double>* (*)(std::string_view);
     using ScalarLookup = std::optional<double> (*)(std::string_view);
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
-                                          ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr) {
+                                          ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
+                                          ArrayLookup arrays = nullptr) {
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
@@ -24,6 +26,11 @@ public:
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
             if (node.symbol.empty()) continue;
+            if (node.op == '[') {
+                if (!arrays) return std::nullopt;
+                node.array = arrays(node.symbol);
+                continue;
+            }
             if (node.op == 'f') {
                 if (!unary || !(node.function = unary(node.symbol))) return std::nullopt;
                 continue;
@@ -38,6 +45,19 @@ public:
             const double left = parser.nodes[node.left].value;
             const double right = parser.nodes[node.right].value;
             switch (node.op) {
+                case '[':
+                    if (!node.array) {
+                        error = "Array " + std::string(node.symbol) + " not defined";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    if (!std::isfinite(left) || std::trunc(left) != left || left < 1 ||
+                        left > static_cast<double>(node.array->size())) {
+                        error = "Invalid or out of bounds index for array " + std::string(node.symbol) +
+                            " (size " + std::to_string(node.array->size()) + ")";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    node.value = (*node.array)[static_cast<size_t>(left) - 1];
+                    break;
                 case 'f': node.value = node.function(left); break;
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
@@ -66,6 +86,7 @@ private:
         size_t right = 0;
         std::string_view symbol{};
         UnaryFunction function = nullptr;
+        const std::vector<double>* array = nullptr;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -104,11 +125,11 @@ private:
             left = add({value});
         } else {
             if (token.kind == Kind::Word) {
-                if (next < tokens.size() && tokens[next].text == "(") {
-                    ++next;
+                if (next < tokens.size() && (tokens[next].text == "(" || tokens[next].text == "[")) {
+                    const bool index = tokens[next++].text == "[";
                     const auto argument = parse(0, depth + 1);
-                    if (argument == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
-                    left = add({0, 'f', argument, 0, token.text});
+                    if (argument == invalid || next == tokens.size() || tokens[next++].text != (index ? "]" : ")")) return invalid;
+                    left = add({0, index ? '[' : 'f', argument, 0, token.text});
                 } else {
                     left = add({0, 0, 0, 0, token.text});
                 }

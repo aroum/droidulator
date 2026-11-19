@@ -63,6 +63,11 @@ int main() {
         assert(evaluate("isolated_var", err) == 42);
         assert(engineState().history.size() == 1 && engineState().history[0] == 7);
         assert(evaluate("isolated_var * 2 + e1", err) == 91 && err.empty());
+        engineState().user_arrays["ast_samples"] = {2, 4, 8};
+        assert(expression::ArithmeticExpression::evaluate("ast_samples[1+1] * 2", err,
+            lookupScalar, lookupUnary, lookupArray) == 8 && err.empty());
+        assert(std::isnan(evaluate("ast_samples[1.4]", err)) && err.find("out of bounds") != std::string::npos);
+        err.clear();
         assert(evaluate("-(isolated_var + e1)", err) == -49 && err.empty());
     }
     {

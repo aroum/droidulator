@@ -1334,6 +1334,12 @@ static UnaryFunction lookupUnary(std::string_view name) {
     return found == unaryFunctions().end() ? nullptr : found->second;
 }
 
+static const std::vector<double>* lookupArray(std::string_view name) {
+    const auto& arrays = engineState().user_arrays;
+    const auto found = arrays.find(std::string(name));
+    return found == arrays.end() ? nullptr : &found->second;
+}
+
 static std::optional<double> lookupScalar(std::string_view name) {
     const auto& state = engineState();
     if (name.size() > 1 && name.front() == 'e') {
@@ -1376,7 +1382,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary)) {
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray)) {
         if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
     }
