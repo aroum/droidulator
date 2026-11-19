@@ -97,7 +97,8 @@ static bool handleScriptFunctionDeclaration(
         return text;
     };
     const auto name = trim(line.substr(keywordLength, open - keywordLength));
-    const auto params = expression::splitArguments(line.substr(open + 1, close - open - 1));
+    const auto parameterText = line.substr(open + 1, close - open - 1);
+    const auto params = expression::splitArguments(parameterText);
     const auto validName = [](const std::string& identifier) {
         const auto tokens = expression::tokenize(identifier);
         return tokens.size() == 1 && tokens.front().kind == expression::Kind::Word &&
@@ -107,7 +108,8 @@ static bool handleScriptFunctionDeclaration(
     auto& state = engineState();
     size_t end = findMatchingBlockEnd(lines, ip);
     std::string error;
-    if (!validName(name)) error = "Invalid function name";
+    if (!expression::trim(parameterText).empty() && params.empty()) error = "Invalid parameter list";
+    else if (!validName(name)) error = "Invalid function name";
     else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !validName(param); }))
         error = "Invalid parameter name";
     else if (std::unordered_set<std::string>(params.begin(), params.end()).size() != params.size())
