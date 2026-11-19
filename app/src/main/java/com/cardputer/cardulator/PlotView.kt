@@ -80,20 +80,15 @@ class PlotView @JvmOverloads constructor(
     private val reusablePath = Path()
 
     private var plotLines = listOf<LineData>()
-    private var manualX = false
-    private var manualY = false
-    private var cachedMinX = -10.0
-    private var cachedMaxX = 10.0
-    private var cachedMinY = -10.0
-    private var cachedMaxY = 10.0
-    private var boundsLabelX = ""
-    private var boundsLabelY = ""
-    private var xTicks = emptyList<String>()
-    private var yTicks = emptyList<String>()
-    private var xMinManual = 0.0
-    private var xMaxManual = 0.0
-    private var yMinManual = 0.0
-    private var yMaxManual = 0.0
+    private var bounds = Bounds(-10.0, 10.0, -10.0, 10.0)
+    private val cachedMinX get() = bounds.minX
+    private val cachedMaxX get() = bounds.maxX
+    private val cachedMinY get() = bounds.minY
+    private val cachedMaxY get() = bounds.maxY
+    private val boundsLabelX get() = bounds.labelX
+    private val boundsLabelY get() = bounds.labelY
+    private val xTicks get() = bounds.xTicks
+    private val yTicks get() = bounds.yTicks
 
     // Touch inspection state
     private var isTouching = false
@@ -112,7 +107,6 @@ class PlotView @JvmOverloads constructor(
     init {
         contentDescription = context.getString(R.string.plot_accessibility)
         isFocusable = true
-        updateBounds()
         updateThemeColors()
     }
 
@@ -132,32 +126,12 @@ class PlotView @JvmOverloads constructor(
         cursorTextPaint.color = ThemePalette.fgText
     }
 
-    fun updatePlotData(lines: Array<NativePlotLine>, limits: DoubleArray) {
-        if (limits.size >= 5) {
-            manualX = limits[0] != 0.0
-            manualY = if (limits.size >= 6) limits[5] != 0.0 else manualX
-            xMinManual = limits[1]
-            xMaxManual = limits[2]
-            yMinManual = limits[3]
-            yMaxManual = limits[4]
-        }
-        plotLines = lines.map { line ->
-            LineData(line.x, line.y, rgb565ToColor(line.color), line.linestyle)
-        }
-        updateBounds()
+    internal fun updatePlotData(data: PlotData) {
+        plotLines = data.lines
+        bounds = data.bounds
         rebuildProbeIndex()
         if (isTouching) updateProbe()
         invalidate()
-    }
-
-    private fun rgb565ToColor(rgb565: Int): Int {
-        val r5 = (rgb565 shr 11) and 0x1F
-        val g6 = (rgb565 shr 5) and 0x3F
-        val b5 = rgb565 and 0x1F
-        val r = (r5 * 255) / 31
-        val g = (g6 * 255) / 63
-        val b = (b5 * 255) / 31
-        return Color.rgb(r, g, b)
     }
 
     override fun onTouchEvent(event: MotionEvent): Boolean {
@@ -185,32 +159,60 @@ class PlotView @JvmOverloads constructor(
         return true
     }
 
-    private fun updateBounds() {
-        var minX = Double.POSITIVE_INFINITY
-        var maxX = Double.NEGATIVE_INFINITY
-        var minY = Double.POSITIVE_INFINITY
-        var maxY = Double.NEGATIVE_INFINITY
-        for (line in plotLines) {
-            for (i in 0 until minOf(line.x.size, line.y.size)) {
-                val x = line.x[i]; val y = line.y[i]
-                if (!x.isFinite() || !y.isFinite()) continue
-                minX = minOf(minX, x); maxX = maxOf(maxX, x)
-                minY = minOf(minY, y); maxY = maxOf(maxY, y)
+    internal data class Bounds(val minX: Double, val maxX: Double, val minY: Double, val maxY: Double) {
+        val labelX = String.format(Locale.ROOT, "X: [%.3g, %.3g]", minX, maxX)
+        val labelY = String.format(Locale.ROOT, "Y: [%.3g, %.3g]", minY, maxY)
+        val xTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minX + (maxX - minX) * it / 4) }
+        val yTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minY + (maxY - minY) * it / 4) }
+    }
+
+    internal data class PlotData(val lines: List<LineData>, val bounds: Bounds)
+
+    companion object {
+        internal fun preparePlotData(lines: Array<NativePlotLine>, limits: DoubleArray): PlotData {
+            val plotLines = lines.map { LineData(it.x, it.y, rgb565ToColor(it.color), it.linestyle) }
+            var minX = Double.POSITIVE_INFINITY
+            var maxX = Double.NEGATIVE_INFINITY
+            var minY = Double.POSITIVE_INFINITY
+            var maxY = Double.NEGATIVE_INFINITY
+            for (line in plotLines) {
+                for (i in 0 until minOf(line.x.size, line.y.size)) {
+                    val x = line.x[i]; val y = line.y[i]
+                    if (!x.isFinite() || !y.isFinite()) continue
+                    minX = minOf(minX, x); maxX = maxOf(maxX, x)
+                    minY = minOf(minY, y); maxY = maxOf(maxY, y)
+                }
             }
+            if (!minX.isFinite()) { minX = -10.0; maxX = 10.0; minY = -10.0; maxY = 10.0 }
+            else {
+                val dx = (maxX - minX).takeIf { it.isFinite() && it > 0 } ?: 1.0
+                val dy = (maxY - minY).takeIf { it.isFinite() && it > 0 } ?: 1.0
+                minX -= dx * .05; maxX += dx * .05; minY -= dy * .05; maxY += dy * .05
+            }
+            if (limits.size >= 5) {
+                val manualX = limits[0] != 0.0
+                val manualY = if (limits.size >= 6) limits[5] != 0.0 else manualX
+                if (manualX && limits[1].isFinite() && limits[2].isFinite() && limits[1] < limits[2]) {
+                    minX = limits[1]
+                    maxX = limits[2]
+                }
+                if (manualY && limits[3].isFinite() && limits[4].isFinite() && limits[3] < limits[4]) {
+                    minY = limits[3]
+                    maxY = limits[4]
+                }
+            }
+            return PlotData(plotLines, Bounds(minX, maxX, minY, maxY))
         }
-        if (!minX.isFinite()) { minX = -10.0; maxX = 10.0; minY = -10.0; maxY = 10.0 }
-        else {
-            val dx = (maxX - minX).takeIf { it.isFinite() && it > 0 } ?: 1.0
-            val dy = (maxY - minY).takeIf { it.isFinite() && it > 0 } ?: 1.0
-            minX -= dx * .05; maxX += dx * .05; minY -= dy * .05; maxY += dy * .05
+
+        private fun rgb565ToColor(rgb565: Int): Int {
+            val r5 = (rgb565 shr 11) and 0x1F
+            val g6 = (rgb565 shr 5) and 0x3F
+            val b5 = rgb565 and 0x1F
+            val r = (r5 * 255) / 31
+            val g = (g6 * 255) / 63
+            val b = (b5 * 255) / 31
+            return Color.rgb(r, g, b)
         }
-        if (manualX && xMinManual.isFinite() && xMaxManual.isFinite() && xMinManual < xMaxManual) { minX = xMinManual; maxX = xMaxManual }
-        if (manualY && yMinManual.isFinite() && yMaxManual.isFinite() && yMinManual < yMaxManual) { minY = yMinManual; maxY = yMaxManual }
-        cachedMinX = minX; cachedMaxX = maxX; cachedMinY = minY; cachedMaxY = maxY
-        boundsLabelX = String.format(Locale.ROOT, "X: [%.3g, %.3g]", minX, maxX)
-        boundsLabelY = String.format(Locale.ROOT, "Y: [%.3g, %.3g]", minY, maxY)
-        xTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minX + (maxX - minX) * it / 4) }
-        yTicks = (0..4).map { String.format(Locale.ROOT, "%.3g", minY + (maxY - minY) * it / 4) }
     }
 
     private fun rebuildProbeIndex() {

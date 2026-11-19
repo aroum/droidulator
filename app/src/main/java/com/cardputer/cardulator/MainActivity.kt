@@ -1258,11 +1258,11 @@ class MainActivity : AppCompatActivity() {
                 toolbarKeyboard.visibility = View.GONE
 
                 val generation = ++plotRefreshGeneration
-                session.compute({ nativeGetPlotLines() to nativeGetPlotLimits() }) { result ->
+                session.compute({ PlotView.preparePlotData(nativeGetPlotLines(), nativeGetPlotLimits()) }) { result ->
                     if (isDestroyed || isFinishing || tabs[currentTabPosition] != "Plot" ||
                         generation != plotRefreshGeneration
                     ) return@compute
-                    result.onSuccess { (lines, limits) -> plotView.updatePlotData(lines, limits) }
+                    result.onSuccess { plotView.updatePlotData(it) }
                 }
             }
             "Settings" -> {
