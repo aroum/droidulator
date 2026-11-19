@@ -186,15 +186,16 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
     }
 }
 
+static bool isScriptConstant(const std::string& name) {
+    const auto& constants = engineState().user_consts;
+    return std::any_of(constants.begin(), constants.end(), [&](const UserConst& value) {
+        return value.name == name;
+    });
+}
+
 static bool executeForStep(const std::string& step, std::string& err) {
     if (step.empty()) return true;
     bool isDef = false;
-    const auto isConstant = [](const std::string& name) {
-        const auto& constants = engineState().user_consts;
-        return std::any_of(constants.begin(), constants.end(), [&](const UserConst& value) {
-            return value.name == name;
-        });
-    };
     std::vector<std::string> step_stmts = splitIntoStatements(step);
     for (auto st : step_stmts) {
         st.erase(0, st.find_first_not_of(" \t"));
@@ -207,7 +208,7 @@ static bool executeForStep(const std::string& step, std::string& err) {
                 err = "Invalid assignment name";
                 return false;
             }
-            if (isConstant(var_name)) {
+            if (isScriptConstant(var_name)) {
                 err = "Const Error";
                 return false;
             }
@@ -241,7 +242,7 @@ static bool executeForStep(const std::string& step, std::string& err) {
                 err = "Invalid assignment name";
                 return false;
             }
-            if (isConstant(lhs)) {
+            if (isScriptConstant(lhs)) {
                 err = "Const Error";
                 return false;
             }
@@ -642,6 +643,11 @@ void runScript(const std::string& code) {
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
             if (!expression::isIdentifier(var_name)) {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid assignment name");
+                ++ip;
+                continue;
+            }
+            if (isScriptConstant(var_name)) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
                 ++ip;
                 continue;
             }
