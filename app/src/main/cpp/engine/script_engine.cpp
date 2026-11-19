@@ -556,41 +556,10 @@ void runScript(const std::string& code) {
                     size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
                     if (end_ip != std::string::npos) {
                         std::string err;
-                        bool isDef = false;
-                        if (!found_block) {
-                            if (!init_str.empty()) {
-                                size_t eq = init_str.find('=');
-                                if (eq != std::string::npos) {
-                                    std::string lhs = init_str.substr(0, eq);
-                                    std::string rhs = init_str.substr(eq + 1);
-                                    auto trim = [](std::string& s) {
-                                        s.erase(0, s.find_first_not_of(" \t"));
-                                        s.erase(s.find_last_not_of(" \t") + 1);
-                                    };
-                                    trim(lhs); trim(rhs);
-                                    std::string init_err;
-                                    double val = evaluate(preprocessArrayLookups(rhs, init_err), init_err);
-                                    if (init_err.empty()) {
-                                        bool found = false;
-                                        for (auto& a : engineState().user_args) {
-                                            if (a.name == lhs) {
-                                                a.val = val;
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!found) {
-                                            engineState().user_args.push_back({lhs, val});
-                                        }
-                                    } else {
-                                        err = init_err;
-                                    }
-                                } else {
-                                    evaluateInput(preprocessArrayLookups(init_str, err), err, isDef);
-                                }
-                            }
+                        if (!found_block && !init_str.empty()) {
+                            executeForStep(init_str, err);
                         }
-                        
+
                         const bool cond_bool = err.empty() && evaluateScriptCondition(cond_str, err);
                         if (!err.empty()) {
                             engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
