@@ -360,7 +360,7 @@ class MainActivity : AppCompatActivity() {
         rebuildReplOutput()
         mainRoot.visibility = View.VISIBLE
         observeCommands()
-        session.definitionDraft?.let { showDefinitionEditorDialog(it.title, it.expression, it.hint, it.tab) }
+        session.definitionDraft?.let { definitionController.show(it.title, it.expression, it.hint, it.tab) }
         session.formulaRunDraft?.let { formulaRunner.show(it.formula, it.arguments) }
         session.scriptDraft?.let { openScriptEditor(it.originalName) }
     }
@@ -405,6 +405,14 @@ class MainActivity : AppCompatActivity() {
 
     private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
     private val searchField get() = findViewById<EditText>(R.id.search_query)
+    private val definitionController by lazy {
+        DefinitionEditorController(this, session, dialogs, highlighter, { expression, draft ->
+            val repository = calculatorRepository
+            val scripts = userScripts.toList()
+            session.runCommand(expression, definition = draft) { repository.save(scripts) }
+        }, { activeDialogs.remove(it) })
+    }
+
     private val formulaRunner by lazy {
         FormulaRunner(this, session, dialogs, { queueCommand(it) }, { activeDialogs.remove(it) })
     }
@@ -1178,7 +1186,7 @@ class MainActivity : AppCompatActivity() {
             val entry = result.entry
             val definition = result.definition
             if (definition != null) {
-                val editor = definitionEditor?.takeIf { it.draft === definition }
+                val editor = definitionController.editor?.takeIf { it.draft === definition }
                 editor?.dialog?.setCancelable(true)
                 editor?.input?.isEnabled = true
                 if (entry.isError) {
@@ -1314,7 +1322,7 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onEdit = if (isHistory) null else fun() {
-                                showDefinitionEditorDialog(getString(R.string.edit_variable, name), "$name = $value", "$name = $value", tabName)
+                                definitionController.show(getString(R.string.edit_variable, name), "$name = $value", "$name = $value", tabName)
                             },
                             onDelete = if (isHistory) null else fun() {
                                 dialogs.confirmDelete(name) {
@@ -1342,7 +1350,7 @@ class MainActivity : AppCompatActivity() {
                         dimColor = dimColor,
                         onEdit = if (!isBuiltIn) {
                             {
-                                showDefinitionEditorDialog(getString(R.string.edit_constant, name), "$name = $value", "$name = $value", tabName)
+                                definitionController.show(getString(R.string.edit_constant, name), "$name = $value", "$name = $value", tabName)
                             }
                         } else null,
                         onDelete = if (!isBuiltIn) {
@@ -1385,7 +1393,7 @@ class MainActivity : AppCompatActivity() {
                                 formulaRunner.show(formula)
                             },
                             onEdit = {
-                                showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line, tabName)
+                                definitionController.show(getString(R.string.edit_formula, name), line, line, tabName)
                             },
                             onDelete = {
                                 dialogs.confirmDelete(name) {
@@ -1445,43 +1453,6 @@ class MainActivity : AppCompatActivity() {
         filterCards()
     }
 
-    private data class DefinitionEditor(val draft: DefinitionDraft, val dialog: Dialog, val input: EditText)
-    private var definitionEditor: DefinitionEditor? = null
-
-    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, tab: String) {
-        val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
-            .also { session.definitionDraft = it }
-        val et = dialogs.definitionInput(draft, hintText) { input, text ->
-            if (!isHighlighting && !highlighter.isApplying(text)) highlighter.schedule(input)
-        }
-
-        if (initialExpr.isNotEmpty()) {
-            et.post { highlighter.apply(et.editableText) }
-        }
-
-        val dialog = dialogs.show(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
-            val valStr = et.text.toString().trim()
-            if (valStr.isEmpty()) { et.error = this@MainActivity.getString(R.string.ui_text_017); false }
-            else {
-                val expression = if (tab == "Constants" && !valStr.startsWith("const ")) "const $valStr" else valStr
-                val repository = calculatorRepository
-                val scripts = userScripts.toList()
-                if (session.runCommand(expression, definition = draft) { repository.save(scripts) }) {
-                    definitionEditor?.dialog?.setCancelable(false)
-                    et.isEnabled = false
-                }
-                false
-            }
-        })
-        definitionEditor = DefinitionEditor(draft, dialog, et)
-        dialog.setOnDismissListener {
-            activeDialogs.remove(dialog)
-            if (definitionEditor?.dialog === dialog) definitionEditor = null
-            if (isChangingConfigurations) draft.cursor = et.selectionStart
-            else if (session.definitionDraft === draft) session.definitionDraft = null
-        }
-    }
-
     private fun openScriptEditor(originalName: String?) {
         val draft = session.scriptDraft ?: ScriptDraft(
             originalName, originalName.orEmpty(),
@@ -1527,7 +1498,7 @@ class MainActivity : AppCompatActivity() {
             else -> "x = 42"
         }
 
-        showDefinitionEditorDialog(title, "", hintText, activeTab)
+        definitionController.show(title, "", hintText, activeTab)
     }
 
     private val calculatorRepository by lazy { CalculatorRepository(applicationContext, session) }
