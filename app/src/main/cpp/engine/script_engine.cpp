@@ -679,16 +679,12 @@ void runScript(const std::string& code) {
             
             // Check if LHS contains multiple variables separated by commas (tuple assignment e.g. x, y = fn())
             if (lhs.find(',') != std::string::npos) {
-                std::vector<std::string> lhs_vars;
-                size_t v_pos = 0;
-                while (v_pos < lhs.size()) {
-                    size_t comma = lhs.find(',', v_pos);
-                    std::string v = (comma == std::string::npos) ? lhs.substr(v_pos) : lhs.substr(v_pos, comma - v_pos);
-                    v.erase(0, v.find_first_not_of(" \t"));
-                    v.erase(v.find_last_not_of(" \t") + 1);
-                    if (!v.empty()) lhs_vars.push_back(v);
-                    if (comma == std::string::npos) break;
-                    v_pos = comma + 1;
+                const auto lhs_vars = expression::splitArguments(lhs);
+                if (lhs_vars.empty() || std::any_of(lhs_vars.begin(), lhs_vars.end(),
+                    [](const auto& name) { return !expression::isIdentifier(name); })) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid tuple assignment");
+                    ++ip;
+                    continue;
                 }
                 bool reserved = false;
                 for (const auto& name : lhs_vars) {
