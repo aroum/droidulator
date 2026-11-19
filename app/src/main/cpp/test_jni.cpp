@@ -42,6 +42,31 @@ int main() {
     assert(xorHelp.find("2 xor 3 = 0") != std::string::npos);
     std::cout << "[Droidulator Native Test] Initializing..." << std::endl;
     std::string err;
+    EngineContext firstSession;
+    EngineContext secondSession;
+    {
+        EngineContextScope first(firstSession);
+        bool defined = false;
+        evaluateInput("isolated_var=42", err, defined);
+        assert(defined && err.empty());
+        appendHistory(7);
+        engineState().degreesMode = false;
+        {
+            EngineContextScope second(secondSession);
+            assert(engineState().degreesMode && engineState().history.empty());
+            evaluate("isolated_var", err);
+            assert(!err.empty());
+            err.clear();
+            evaluateInput("isolated_var=3", err, defined);
+            assert(defined && err.empty());
+        }
+        assert(evaluate("isolated_var", err) == 42);
+        assert(engineState().history.size() == 1 && engineState().history[0] == 7);
+    }
+    {
+        EngineContextScope second(secondSession);
+        assert(evaluate("isolated_var", err) == 3);
+    }
     const std::pair<const char*, double> rkmCases[] = {
         {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
         {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}
@@ -75,10 +100,10 @@ int main() {
     expectNumber("1 / 10k", 1e-4);
     {
         std::string error; bool isDefinition = false;
-        user_script_funcs.push_back({"recursive_test", {"x"}, {"return recursive_test(x)"}});
+        engineState().user_script_funcs.push_back({"recursive_test", {"x"}, {"return recursive_test(x)"}});
         evaluate("recursive_test(1)", error);
         assert(error.find("recursion limit") != std::string::npos);
-        user_script_funcs.clear();
+        engineState().user_script_funcs.clear();
         evaluateInput("x=3", error, isDefinition); assert(error.empty());
         evaluateInput("flag=(x==3)", error, isDefinition); assert(error.empty());
         expectNumber("flag", 1);
@@ -101,47 +126,47 @@ int main() {
         std::string modError, percentError;
         evaluate("mod(1,0)", modError); evaluate("1%0", percentError);
         assert(modError == "Division by Zero" && percentError == modError);
-        user_args.clear(); user_arrays.clear(); user_funcs.clear();
+        engineState().user_args.clear(); engineState().user_arrays.clear(); engineState().user_funcs.clear();
     }
     {
         runScript("print(\"a+=b\")");
-        assert(script_console_output.size() == 1 && script_console_output[0] == "a+=b");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "a+=b");
         runScript("print(\"a\\\"+=b\")");
-        assert(script_console_output.size() == 1 && script_console_output[0] == "a\"+=b");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "a\"+=b");
         runScript("if(1){ print(1) }else{ print(2) }");
-        assert(script_console_output.size() == 1 && script_console_output[0] == "1");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "1");
         runScript("if(0){ print(1) }else{ print(2) }");
-        assert(script_console_output.size() == 1 && script_console_output[0] == "2");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "2");
         runScript("fn script_once(x) { return x*2 }; print(7)");
-        assert(script_console_output.size() == 1 && script_console_output[0] == "7");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "7");
         runScript("fn sign_test(x) { if(x < 0) { return -1 } else { return 1 } }; a, b = sign_test(-5)");
-        auto a = std::find_if(user_args.begin(), user_args.end(), [](const UserArg& x) { return x.name == "a"; });
-        assert(a != user_args.end() && a->val == -1);
+        auto a = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(a != engineState().user_args.end() && a->val == -1);
         runScript("fn loop_test(x) { y=0; for(i=0; i<x; i+=1) { y=y+i }; print(y); return y }; loop_test(4)");
-        assert(!script_console_output.empty() && script_console_output.front() == "6");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front() == "6");
         runScript("fn branch_test(x) { if(x<0) { return -1 } else if(x==0) { return 0 } else { return 1 } }; a,b=branch_test(0)");
-        auto branch = std::find_if(user_args.begin(), user_args.end(), [](const UserArg& x) { return x.name == "a"; });
-        assert(branch != user_args.end() && branch->val == 0);
+        auto branch = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(branch != engineState().user_args.end() && branch->val == 0);
         runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1)");
-        assert(!script_console_output.empty() && script_console_output.back().find("Arg Count Mismatch") != std::string::npos);
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("Arg Count Mismatch") != std::string::npos);
         runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1,unknown_value)");
-        assert(!script_console_output.empty() && script_console_output.back().find("Err:") != std::string::npos);
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("Err:") != std::string::npos);
         runScript("fn recursive_script(x) { return recursive_script(x) }; recursive_script(1)");
-        assert(!script_console_output.empty() && script_console_output.back().find("recursion limit") != std::string::npos);
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("recursion limit") != std::string::npos);
         runScript("for (i=0; i<5; i+=1) { if(i==1) { continue }; if(i==3) { break }; print(i) }");
-        assert(script_console_output.size() == 2 && script_console_output[0] == "0" && script_console_output[1] == "2");
+        assert(engineState().script_console_output.size() == 2 && engineState().script_console_output[0] == "0" && engineState().script_console_output[1] == "2");
         runScript("counter=0; for (i=0; i<4000; i+=1) { counter=counter+1; counter=counter+1; counter=counter+1 }; print(counter)");
-        assert(!script_console_output.empty() && script_console_output.back() == "12000");
-        user_consts.push_back({"constant_test", 8});
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back() == "12000");
+        engineState().user_consts.push_back({"constant_test", 8});
         runScript("constant_test, b = [1,2]");
-        assert(user_consts.back().val == 8 && !script_console_output.empty());
-        user_consts.clear();
-        user_script_funcs.clear();
-        user_args.clear(); user_arrays.clear();
+        assert(engineState().user_consts.back().val == 8 && !engineState().script_console_output.empty());
+        engineState().user_consts.clear();
+        engineState().user_script_funcs.clear();
+        engineState().user_args.clear(); engineState().user_arrays.clear();
     }
-    fmt_mode = 4; fmt_precision = 2;
+    engineState().fmt_mode = 4; engineState().fmt_precision = 2;
     assert(fmtNum(999.999) == "1.00e+03");
-    fmt_mode = 0; fmt_precision = 6;
+    engineState().fmt_mode = 0; engineState().fmt_precision = 6;
     for (const auto& expression : {"gcd(1e30,2)", "lcm(4000000000,4000000001)", "sum(i,-5e18,5e18,1)", "sum(i,1,400,sum(j,1,400,1))"}) {
         std::string error;
         evaluate(expression, error);
@@ -164,23 +189,23 @@ int main() {
         evaluateInput("many=" + longArrayExpression, error, isDefinition); assert(error.empty());
         expectNumber("many[2]", 62);
         parseArrayExpr("foo(a)", isArray, error); assert(!error.empty());
-        user_arrays.clear(); user_funcs.clear();
+        engineState().user_arrays.clear(); engineState().user_funcs.clear();
         for (const auto& expression : {"pi=3", "sin=2", "sqrt(x)=5", "pow=3", "f(pi)=2"}) {
             evaluateInput(expression, error, isDefinition); assert(!error.empty());
         }
         runScript("for (sin=1; sin<2; sin++) { print(sin) }");
-        assert(!script_console_output.empty() && script_console_output.front().find("Reserved name") != std::string::npos);
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front().find("Reserved name") != std::string::npos);
         runScript("print(\"sin=2\")");
-        assert(!script_console_output.empty() && script_console_output.front().find("Reserved name") == std::string::npos);
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front().find("Reserved name") == std::string::npos);
         evaluateInput("g(x)=x*2", error, isDefinition); assert(error.empty());
         expectNumber("log(100)", 2);
         evaluateInput("n(x)=x+1", error, isDefinition); assert(error.empty());
         expectNumber("sin(0)", 0);
         evaluateInput("d(x,y)=x-y", error, isDefinition); assert(error.empty());
-        user_args.push_back({"x",2}); user_args.push_back({"y",5});
+        engineState().user_args.push_back({"x",2}); engineState().user_args.push_back({"y",5});
         expectNumber("d(y,x)", 3);
         expectNumber("g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)", 22);
-        user_args.clear(); user_funcs.clear();
+        engineState().user_args.clear(); engineState().user_funcs.clear();
     }
 
     for (const auto& tc : std::vector<std::pair<std::string, double>>{
@@ -350,11 +375,11 @@ int main() {
     assert(c_eia_f.success && std::abs(c_eia_f.value - 10000000.0) < 0.001);
 
     // 7. Format tests (NORM, FLT, FIX, SCI, ENG, digit grouping for int & frac)
-    use_thousands_sep = true;
+    engineState().use_thousands_sep = true;
 
     // NORM mode (Mode 0)
-    fmt_mode = 0;
-    fmt_precision = 6;
+    engineState().fmt_mode = 0;
+    engineState().fmt_precision = 6;
     std::string s_norm_std = fmtNum(1234.567);
     std::cout << "NORM std: " << s_norm_std << std::endl;
     assert(s_norm_std == "1 234.57");
@@ -364,8 +389,8 @@ int main() {
     assert(s_norm_large.find("e+") != std::string::npos);
 
     // FLT mode (Mode 1: Pure float, no exponent, strips trailing zeros)
-    fmt_mode = 1;
-    fmt_precision = 6;
+    engineState().fmt_mode = 1;
+    engineState().fmt_precision = 6;
     std::string s_flt = fmtNum(1234.500);
     std::cout << "FLT 6dp + spaces: " << s_flt << std::endl;
     assert(s_flt == "1 234.5");
@@ -375,8 +400,8 @@ int main() {
     assert(s_flt_small == "0.000 001");
 
     // FIX mode (Mode 2: Fixed point, preserves trailing zeros)
-    fmt_mode = 2;
-    fmt_precision = 6;
+    engineState().fmt_mode = 2;
+    engineState().fmt_precision = 6;
     std::string s_fix = fmtNum(1234567.8901234);
     std::cout << "FIX 6dp + spaces: " << s_fix << std::endl;
     assert(s_fix == "1 234 567.890 123");
@@ -390,15 +415,15 @@ int main() {
     assert(s_frac == "0.000 001");
 
     // SCI mode (Mode 3: Scientific)
-    fmt_mode = 3;
-    fmt_precision = 4;
+    engineState().fmt_mode = 3;
+    engineState().fmt_precision = 4;
     std::string s_sci = fmtNum(0.0000012345);
     std::cout << "SCI 4dp + spaces: " << s_sci << std::endl;
     assert(s_sci == "1.234 5e-06");
 
     // ENG mode (Mode 4: Engineering exponent multiple of 3)
-    fmt_mode = 4;
-    fmt_precision = 3;
+    engineState().fmt_mode = 4;
+    engineState().fmt_precision = 3;
     std::string s_eng1 = fmtNum(123456.789);
     std::cout << "ENG 3dp + spaces (123k): " << s_eng1 << std::endl;
     assert(s_eng1 == "123.457e+03");
@@ -408,9 +433,9 @@ int main() {
     assert(s_eng2 == "1.235e-06");
 
     // Test without digit grouping
-    use_thousands_sep = false;
-    fmt_mode = 2; // FIX
-    fmt_precision = 6;
+    engineState().use_thousands_sep = false;
+    engineState().fmt_mode = 2; // FIX
+    engineState().fmt_precision = 6;
     std::string s_nogroup = fmtNum(0.0000012345);
     std::cout << "FIX 6dp no spaces: " << s_nogroup << std::endl;
     assert(s_nogroup == "0.000001");
@@ -424,7 +449,7 @@ int main() {
 
     // Test Case 1: Prefix 'p' cycling with auto_brackets = true
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr1 = "p";
     int cursor1 = 1;
 
@@ -519,10 +544,10 @@ int main() {
 
     // Test Case 5: User variable & constant priority (cycling "para" -> "power")
     reset_tab();
-    user_args.clear();
-    user_consts.clear();
-    user_consts.push_back({"para", 3.14});
-    user_args.push_back({"power", 42.0});
+    engineState().user_args.clear();
+    engineState().user_consts.clear();
+    engineState().user_consts.push_back({"para", 3.14});
+    engineState().user_args.push_back({"power", 42.0});
 
     std::string expr5 = "pa";
     int cursor5 = 2;
@@ -535,12 +560,12 @@ int main() {
     assert(expr5 == "para" && cursor5 == 4);
 
     // Clear user variables for clean subsequent tests
-    user_args.clear();
-    user_consts.clear();
+    engineState().user_args.clear();
+    engineState().user_consts.clear();
 
     // Test Case 6: Autocomplete with auto_brackets = false
     reset_tab();
-    auto_brackets = false;
+    engineState().auto_brackets = false;
     std::string expr6 = "p";
     int cursor6 = 1;
     handleTabCompletion(expr6, cursor6);
@@ -557,7 +582,7 @@ int main() {
 
     // Test Case 6b: de -> deg2rad() / def , deg2 -> deg2rad(), d2 -> d2r()
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr_deg2 = "deg2";
     int cursor_deg2 = 4;
     handleTabCompletion(expr_deg2, cursor_deg2);
@@ -582,26 +607,26 @@ int main() {
     double plot_res = 0.0;
     std::string plot_err = "";
     bool handled = handlePlotCommands("plot.xlim([-5, 5])", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -5.0 && plot_xlim_max == 5.0);
-    assert(plot_manual_x && !plot_manual_y);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_xlim_min == -5.0 && engineState().plot_xlim_max == 5.0);
+    assert(engineState().plot_manual_x && !engineState().plot_manual_y);
 
     handled = handlePlotCommands("plot.ylim(5, 5)", plot_err, plot_res);
-    assert(handled && !plot_err.empty() && !plot_manual_y);
+    assert(handled && !plot_err.empty() && !engineState().plot_manual_y);
     plot_err.clear();
     handled = handlePlotCommands("plot.xlim(5, -5)", plot_err, plot_res);
-    assert(handled && !plot_err.empty() && plot_xlim_min == -5.0 && plot_xlim_max == 5.0);
+    assert(handled && !plot_err.empty() && engineState().plot_xlim_min == -5.0 && engineState().plot_xlim_max == 5.0);
     plot_err.clear();
 
     handled = handlePlotCommands("plot.ylim([-10 10])", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_ylim_min == -10.0 && plot_ylim_max == 10.0);
-    assert(plot_manual_x && plot_manual_y);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_ylim_min == -10.0 && engineState().plot_ylim_max == 10.0);
+    assert(engineState().plot_manual_x && engineState().plot_manual_y);
 
     handled = handlePlotCommands("plot.xlim(-2, 2)", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -2.0 && plot_xlim_max == 2.0);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_xlim_min == -2.0 && engineState().plot_xlim_max == 2.0);
 
     // Test Case 8: conv(...) units autocomplete (mm, mmHg, mm^2, mm2, std_mm2)
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr8 = "conv(10, mm";
     int cursor8 = 11;
     handleTabCompletion(expr8, cursor8);
@@ -657,7 +682,7 @@ int main() {
     assert(c_mmhg_low.success && std::abs(c_mmhg_low.value - 1.0) < 0.001);
 
     // Test Case 10: Trigonometric & Hyperbolic functions test suite
-    degreesMode = true;
+    engineState().degreesMode = true;
     double t_sin = evaluate("sin(30)", err);
     assert(err.empty() && std::abs(t_sin - 0.5) < 1e-6);
 
@@ -699,7 +724,7 @@ int main() {
     assert(err == "Domain Error: acos(x) requires -1 <= x <= 1");
 
     // Trig in Radians Mode
-    degreesMode = false;
+    engineState().degreesMode = false;
     double t_sin_rad = evaluate("sin(pi / 6)", err);
     assert(err.empty() && std::abs(t_sin_rad - 0.5) < 1e-6);
 
@@ -708,7 +733,7 @@ int main() {
 
     double t_atan2_rad = evaluate("atan2(1, 1)", err);
     assert(err.empty() && std::abs(t_atan2_rad - M_PI / 4.0) < 1e-6);
-    degreesMode = true;
+    engineState().degreesMode = true;
 
     // Hyperbolic & Inverse Hyperbolic
     double t_sinh0 = evaluate("sinh(0)", err);
@@ -859,7 +884,7 @@ int main() {
     assert(err == "Domain Error: acsch(x) requires x != 0");
 
     // Singularity domain errors (degrees mode)
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluate("tan(90)", err);
     assert(err == "Domain Error: tan(x) undefined when cos(x) = 0");
 
@@ -934,34 +959,34 @@ int main() {
     assert(expr_acc == "conv(10, \"m/s^2\", cm/s^2" && cursor_acc == 24);
 
     // Test Case 13: Angle operations and output formatting
-    degreesMode = true;
+    engineState().degreesMode = true;
     double val_asin = evaluateInput("asin(0.5)", err, isDef);
     assert(err.empty() && std::abs(val_asin - 30.0) < 1e-6);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
-    degreesMode = false;
+    engineState().degreesMode = false;
     double val_asin_rad = evaluateInput("asin(0.5)", err, isDef);
     assert(err.empty() && std::abs(val_asin_rad - 0.5235987) < 1e-5);
-    assert(g_last_result_angle == AngleUnit::RAD);
+    assert(engineState().g_last_result_angle == AngleUnit::RAD);
 
     // Variable assignment x = asin(0.5)
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluateInput("x_angle = asin(0.5)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
     // Conversions deg2rad and rad2deg
     evaluateInput("r_angle = deg2rad(180)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::RAD);
+    assert(engineState().g_last_result_angle == AngleUnit::RAD);
 
     evaluateInput("d_angle = rad2deg(pi)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
     // Non-angle trig operations must reset g_last_result_angle to NONE
     evaluateInput("sin(30)", err, isDef);
-    assert(g_last_result_angle == AngleUnit::NONE);
+    assert(engineState().g_last_result_angle == AngleUnit::NONE);
 
     // Test Case 14: Tab completion caching verification
     reset_tab();
@@ -1039,7 +1064,7 @@ int main() {
 
     // Test Case 18: Vector & Array operations, inline indexing, domain errors in arrays
     evaluateInput("arr = [10, 20, 30, 40]", err, isDef);
-    assert(err.empty() && isDef && user_arrays.count("arr") && user_arrays["arr"].size() == 4);
+    assert(err.empty() && isDef && engineState().user_arrays.count("arr") && engineState().user_arrays["arr"].size() == 4);
     double v_arr_idx = evaluateInput("arr[2]", err, isDef);
     assert(err.empty() && std::abs(v_arr_idx - 20.0) < 1e-6);
     double v_arr_sum = evaluateInput("sum(arr)", err, isDef);
@@ -1062,10 +1087,10 @@ int main() {
     assert(err.empty() && std::abs(v_dot - 32.0) < 1e-6);
 
     // Vectorized function evaluation & domain error propagation
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluateInput("sin([0, 30, 90])", err, isDef);
-    assert(err.empty() && g_last_eval_is_array && g_last_eval_array.size() == 3);
-    assert(std::abs(g_last_eval_array[1] - 0.5) < 1e-6 && std::abs(g_last_eval_array[2] - 1.0) < 1e-6);
+    assert(err.empty() && engineState().g_last_eval_is_array && engineState().g_last_eval_array.size() == 3);
+    assert(std::abs(engineState().g_last_eval_array[1] - 0.5) < 1e-6 && std::abs(engineState().g_last_eval_array[2] - 1.0) < 1e-6);
 
     evaluateInput("asec([0.5, 2])", err, isDef);
     assert(err == "Domain Error: asec(x) requires |x| >= 1");
@@ -1088,8 +1113,8 @@ int main() {
     assert(c_temp3.success && std::abs(c_temp3.value - 0.0) < 1e-4);
 
     // Test Case 20: Script engine - session variable preservation, loops, conditionals, recursion
-    user_args.clear();
-    user_arrays.clear();
+    engineState().user_args.clear();
+    engineState().user_arrays.clear();
     evaluateInput("session_var = 100", err, isDef);
     assert(err.empty());
 
@@ -1108,7 +1133,7 @@ int main() {
         "print(total + r)\n";
     runScript(script_code);
     std::string script_out;
-    for (const auto& line : script_console_output) script_out += line + "\n";
+    for (const auto& line : engineState().script_console_output) script_out += line + "\n";
     std::cout << "Script output: " << script_out;
     // session_var(100) + sum(1..5)(15) + fact_rec(5)(120) = 235
     assert(script_out.find("235") != std::string::npos);
@@ -1121,8 +1146,8 @@ int main() {
     assert(!len_units.empty() && len_units[0] == "km");
 
     // Only the latest 128 history values are registered with the expression parser.
-    history.clear();
-    for (int i = 1; i <= 130; ++i) history.push_back(static_cast<double>(i));
+    engineState().history.clear();
+    for (int i = 1; i <= 130; ++i) engineState().history.push_back(static_cast<double>(i));
     err.clear();
     assert(evaluate("e3", err) == 3.0 && err.empty());
     err.clear();
@@ -1138,15 +1163,15 @@ int main() {
     assert(escaped_args.size() == 2 && escaped_args[1] == "c");
     clearHistory();
     for (int i = 1; i <= 130; ++i) assert(appendHistory(i) == static_cast<size_t>(i));
-    assert(history.size() == 128 && history_first_number == 3);
+    assert(engineState().history.size() == 128 && engineState().history_first_number == 3);
     err.clear(); assert(evaluate("e3", err) == 3.0 && err.empty());
     err.clear(); assert(evaluate("e130", err) == 130.0 && err.empty());
     err.clear(); evaluate("e2", err); assert(!err.empty());
     err.clear(); evaluateInput("e3=99", err, isDef); assert(!err.empty());
     runScript("e3++");
-    assert(!script_console_output.empty() && script_console_output[0].find("read-only") != std::string::npos);
+    assert(!engineState().script_console_output.empty() && engineState().script_console_output[0].find("read-only") != std::string::npos);
     runScript("print(\"e3=1\")");
-    assert(!script_console_output.empty() && script_console_output[0] == "e3=1");
+    assert(!engineState().script_console_output.empty() && engineState().script_console_output[0] == "e3=1");
     clearHistory();
     assert(appendHistory(42) == 1);
     double ratio = 0;

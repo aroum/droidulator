@@ -3,34 +3,22 @@
 #include <cctype>
 
 // Unified shared state definitions for Droidulator engine
-std::vector<double> history;
-size_t history_first_number = 1;
 size_t appendHistory(double value) {
-    if (history.size() >= MAX_HISTORY_VALUES) {
-        const size_t excess = history.size() - MAX_HISTORY_VALUES + 1;
-        history.erase(history.begin(), history.begin() + excess);
-        history_first_number += excess;
+    if (engineState().history.size() >= MAX_HISTORY_VALUES) {
+        const size_t excess = engineState().history.size() - MAX_HISTORY_VALUES + 1;
+        engineState().history.erase(engineState().history.begin(), engineState().history.begin() + excess);
+        engineState().history_first_number += excess;
     }
-    history.push_back(value);
-    return history_first_number + history.size() - 1;
+    engineState().history.push_back(value);
+    return engineState().history_first_number + engineState().history.size() - 1;
 }
-void clearHistory() { history.clear(); history_first_number = 1; }
+void clearHistory() { engineState().history.clear(); engineState().history_first_number = 1; }
 bool isHistoryName(const std::string& name) {
     return name.size() > 1 && name[0] == 'e' &&
         std::all_of(name.begin() + 1, name.end(), [](unsigned char c) { return std::isdigit(c); });
 }
-std::vector<UserArg> user_args;
-std::vector<UserConst> user_consts;
-std::vector<std::string> user_funcs;
-std::vector<CustomScriptFunc> user_script_funcs;
-std::map<std::string, std::vector<double>> user_arrays;
-std::map<std::string, std::string> user_named_scripts;
-std::vector<std::string> script_console_output;
-bool use_thousands_sep = false;
-bool degreesMode = true;
-bool auto_brackets = true;
 
-std::vector<std::string> autocomplete_words = {
+static const std::vector<std::string> builtin_autocomplete_words = {
     "sin(", "cos(", "tan(", "ctan(", "cot(", "asin(", "acos(", "atan(", "atan2(",
     "arcsin(", "arccos(", "arctan(",
     "sinh(", "cosh(", "tanh(", "asinh(", "acosh(", "atanh(",
@@ -54,7 +42,7 @@ std::vector<std::string> autocomplete_words = {
     "acsch(", "ahcsc(", "arccsch(", "arcsch(", "acosech(", "arccosech(", "ahcsch(",
     "Cnk(", "sum(", "prod(", "min(", "max(", "if(", "iff("
 };
-static const std::vector<std::string> builtin_autocomplete_words = autocomplete_words;
+
 bool isReservedName(const std::string& name) {
     if (isHistoryName(name)) return true;
     // TinyExpr also provides built-ins that are not offered by autocomplete.
@@ -72,8 +60,26 @@ bool isReservedName(const std::string& name) {
         std::find(builtin_autocomplete_words.begin(), builtin_autocomplete_words.end(), name + "(") != builtin_autocomplete_words.end();
 }
 
-void resetAutocompleteWords() { autocomplete_words = builtin_autocomplete_words; }
+void resetAutocompleteWords() { engineState().autocomplete_words = builtin_autocomplete_words; }
 void removeUserAutocompleteWord(const std::string& word) {
     if (std::find(builtin_autocomplete_words.begin(), builtin_autocomplete_words.end(), word) == builtin_autocomplete_words.end())
-        autocomplete_words.erase(std::remove(autocomplete_words.begin(), autocomplete_words.end(), word), autocomplete_words.end());
+        engineState().autocomplete_words.erase(std::remove(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), word), engineState().autocomplete_words.end());
 }
+
+namespace {
+thread_local EngineContext* activeContext = nullptr;
+}
+
+EngineContext::EngineContext() : autocomplete_words(builtin_autocomplete_words) {}
+
+EngineContext& engineState() {
+    if (activeContext) return *activeContext;
+    static EngineContext defaultContext;
+    return defaultContext;
+}
+
+EngineContextScope::EngineContextScope(EngineContext& context) : previous(activeContext) {
+    activeContext = &context;
+}
+
+EngineContextScope::~EngineContextScope() { activeContext = previous; }

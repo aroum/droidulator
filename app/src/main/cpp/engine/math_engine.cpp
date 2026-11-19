@@ -15,7 +15,7 @@ static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
 
 inline std::vector<UserFunc> getParsedUserFuncs() {
     std::vector<UserFunc> res;
-    for (const auto& f_str : user_funcs) {
+    for (const auto& f_str : engineState().user_funcs) {
         size_t eq = f_str.find('=');
         if (eq == std::string::npos) continue;
         std::string lhs = f_str.substr(0, eq);
@@ -52,10 +52,10 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     static thread_local unsigned depth = 0;
     if (depth >= 64) { err = "Function recursion limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
     struct DepthGuard { unsigned& value; explicit DepthGuard(unsigned& d) : value(d) { ++value; } ~DepthGuard() { --value; } } guard(depth);
-    auto it = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) {
+    auto it = std::find_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f) {
         return f.name == name;
     });
-    if (it == user_script_funcs.end()) {
+    if (it == engineState().user_script_funcs.end()) {
         err = "Func Not Found";
         return std::numeric_limits<double>::quiet_NaN();
     }
@@ -66,14 +66,14 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         return std::numeric_limits<double>::quiet_NaN();
     }
 
-    auto orig_args = user_args;
-    auto orig_arrays = user_arrays;
+    auto orig_args = engineState().user_args;
+    auto orig_arrays = engineState().user_arrays;
 
     for (size_t i = 0; i < func.params.size(); ++i) {
-        user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+        engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
             return a.name == func.params[i];
-        }), user_args.end());
-        user_args.push_back({func.params[i], arg_vals[i]});
+        }), engineState().user_args.end());
+        engineState().user_args.push_back({func.params[i], arg_vals[i]});
     }
 
     double ret_val = 0.0;
@@ -141,7 +141,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         if (line.rfind("print(", 0) == 0 && line.back() == ')') {
             const auto text = formatPrintString(line.substr(6, line.size() - 7), err);
             if (!err.empty()) break;
-            script_console_output.push_back(text);
+            engineState().script_console_output.push_back(text);
             ++ip; continue;
         }
 
@@ -243,16 +243,16 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     }
 
     if (step_count >= max_steps && !has_returned && err.empty()) err = "Function statement limit reached";
-    user_args = orig_args;
-    user_arrays = orig_arrays;
+    engineState().user_args = orig_args;
+    engineState().user_arrays = orig_arrays;
 
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
     return ret_val;
 }
 
 inline std::string substituteUserFuncs(std::string expr, std::string& err) {
-    if (!user_script_funcs.empty()) {
-        const auto scriptFunctions = user_script_funcs;
+    if (!engineState().user_script_funcs.empty()) {
+        const auto scriptFunctions = engineState().user_script_funcs;
         for (const auto& sf : scriptFunctions) {
             std::string search = sf.name + "(";
             size_t pos = 0;
@@ -312,7 +312,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
         }
     }
 
-    if (user_funcs.empty()) return expr;
+    if (engineState().user_funcs.empty()) return expr;
     auto funcs = getParsedUserFuncs();
     bool changed = true;
     int limit = 64;
@@ -873,15 +873,15 @@ inline std::string preprocessLen(const std::string& s) {
         int size_val = 0;
         bool found = false;
         bool is_scalar = false;
-        for (const auto& ua : user_args) {
+        for (const auto& ua : engineState().user_args) {
             if (ua.name == arg) {
                 is_scalar = true;
                 break;
             }
         }
         if (!is_scalar) {
-            if (user_arrays.find(arg) != user_arrays.end()) {
-                size_val = (int)user_arrays[arg].size();
+            if (engineState().user_arrays.find(arg) != engineState().user_arrays.end()) {
+                size_val = (int)engineState().user_arrays[arg].size();
                 found = true;
             } else {
                 bool is_arr = false;
@@ -941,8 +941,8 @@ static bool isValidLoopIdent(const std::string& s) {
 }
 
 static bool isDefinedScalarName(const std::string& s) {
-    for (const auto& ua : user_args) if (ua.name == s) return true;
-    for (const auto& uc : user_consts) if (uc.name == s) return true;
+    for (const auto& ua : engineState().user_args) if (ua.name == s) return true;
+    for (const auto& uc : engineState().user_consts) if (uc.name == s) return true;
     return false;
 }
 
@@ -1061,13 +1061,13 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     err = "Overflow Error: loop limit exceeded";
                     return res;
                 }
-                auto old_args = user_args;
-                size_t var_idx = user_args.size();
-                for (size_t ui = 0; ui < user_args.size(); ++ui) {
-                    if (user_args[ui].name == args[0]) { var_idx = ui; break; }
+                auto old_args = engineState().user_args;
+                size_t var_idx = engineState().user_args.size();
+                for (size_t ui = 0; ui < engineState().user_args.size(); ++ui) {
+                    if (engineState().user_args[ui].name == args[0]) { var_idx = ui; break; }
                 }
-                if (var_idx == user_args.size()) {
-                    user_args.push_back({args[0], 0.0});
+                if (var_idx == engineState().user_args.size()) {
+                    engineState().user_args.push_back({args[0], 0.0});
                 }
 
                 double acc = 0.0;
@@ -1076,12 +1076,12 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 else if (fname == "max") acc = -std::numeric_limits<double>::infinity();
 
                 for (int64_t idx = i_start; idx <= i_end;) {
-                    if (loopIterationsRemaining == 0) { user_args = old_args; err = "Overflow Error: loop limit exceeded"; return res; }
+                    if (loopIterationsRemaining == 0) { engineState().user_args = old_args; err = "Overflow Error: loop limit exceeded"; return res; }
                     --loopIterationsRemaining;
-                    user_args[var_idx].val = static_cast<double>(idx);
+                    engineState().user_args[var_idx].val = static_cast<double>(idx);
                     double step_v = evaluate(args[3], err);
                     if (!err.empty()) {
-                        user_args = old_args;
+                        engineState().user_args = old_args;
                         return res;
                     }
                     if (fname == "sum") acc += step_v;
@@ -1091,7 +1091,7 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     if (idx == i_end) break;
                     ++idx;
                 }
-                user_args = old_args;
+                engineState().user_args = old_args;
                 if (i_start > i_end && (fname == "min" || fname == "max")) acc = 0.0;
                 std::string rep = fmtInternal(acc);
                 res.replace(pos, close - pos + 1, rep);
@@ -1344,7 +1344,6 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
     return functions;
 }
 
-static bool s_in_array_fallback = false;
 
 double evaluate(const std::string& expr_str, std::string& err) {
     struct LoopBudgetScope {
@@ -1352,9 +1351,9 @@ double evaluate(const std::string& expr_str, std::string& err) {
         ~LoopBudgetScope() { --loopEvaluationDepth; }
     } loopBudgetScope;
     err = "";
-    g_math_domain_err = "";
-    g_last_result_angle = AngleUnit::NONE;
-    g_last_eval_is_array = false;
+    engineState().g_math_domain_err = "";
+    engineState().g_last_result_angle = AngleUnit::NONE;
+    engineState().g_last_eval_is_array = false;
     std::string help_str;
     if (preprocessHelp(expr_str, help_str)) {
         err = help_str;
@@ -1390,9 +1389,8 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    static te_parser parserTemplate;
-    static bool parserTemplateInitialized = false;
-    if (!parserTemplateInitialized) {
+    static const te_parser parserTemplate = [] {
+        te_parser parserTemplate;
         for (const auto& [name, function] : unaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
 
         parserTemplate.add_variable_or_function(te_variable{"atan2", custom_atan2});
@@ -1421,14 +1419,14 @@ double evaluate(const std::string& expr_str, std::string& err) {
         parserTemplate.add_variable_or_function(te_variable{"prod", variadic_prod, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         parserTemplate.add_variable_or_function(te_variable{"min", variadic_min, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         parserTemplate.add_variable_or_function(te_variable{"max", variadic_max, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplateInitialized = true;
-    }
+        return parserTemplate;
+    }();
 
     te_parser s_tep(parserTemplate);
-    const auto argsSnapshot = user_args;
-    const auto constsSnapshot = user_consts;
-    const auto historySnapshot = history;
-    const auto firstHistoryNumber = history_first_number;
+    const auto argsSnapshot = engineState().user_args;
+    const auto constsSnapshot = engineState().user_consts;
+    const auto historySnapshot = engineState().history;
+    const auto firstHistoryNumber = engineState().history_first_number;
     auto& var_set = s_tep.get_variables_and_functions();
     std::vector<te_variable> shadowed_builtins;
     std::vector<te_variable> added_vars;
@@ -1476,23 +1474,23 @@ double evaluate(const std::string& expr_str, std::string& err) {
     }
     
     if (!tep_ok) {
-        if (!g_math_domain_err.empty()) {
-            err = g_math_domain_err;
+        if (!engineState().g_math_domain_err.empty()) {
+            err = engineState().g_math_domain_err;
             return std::numeric_limits<double>::quiet_NaN();
         }
-        if (!s_in_array_fallback) {
-            s_in_array_fallback = true;
+        if (!engineState().s_in_array_fallback) {
+            engineState().s_in_array_fallback = true;
             bool is_arr = false;
             std::string arr_err;
             std::vector<double> arr_res = parseArrayExpr(subbed, is_arr, arr_err);
-            s_in_array_fallback = false;
+            engineState().s_in_array_fallback = false;
             if (!arr_err.empty()) {
                 err = arr_err;
                 return std::numeric_limits<double>::quiet_NaN();
             }
             if (is_arr) {
-                g_last_eval_is_array = true;
-                g_last_eval_array = arr_res;
+                engineState().g_last_eval_is_array = true;
+                engineState().g_last_eval_array = arr_res;
                 return arr_res.empty() ? 0.0 : arr_res[0];
             }
             if (!arr_res.empty()) {
@@ -1524,8 +1522,8 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (!g_math_domain_err.empty()) {
-        err = g_math_domain_err;
+    if (!engineState().g_math_domain_err.empty()) {
+        err = engineState().g_math_domain_err;
     } else if (std::isinf(val)) {
         if (preprocessed.find('/') != std::string::npos) {
             err = "Division by Zero";
@@ -1560,7 +1558,7 @@ size_t findAssignmentOperator(const std::string& text) {
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
     err = "";
     isDefinition = false;
-    g_last_result_angle = AngleUnit::NONE;
+    engineState().g_last_result_angle = AngleUnit::NONE;
     
     size_t eq_pos = findAssignmentOperator(expr_str);
     if (eq_pos != std::string::npos) {
@@ -1623,7 +1621,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
         }
         
         if (!isConstDef) {
-            for (const auto& cn : user_consts) {
+            for (const auto& cn : engineState().user_consts) {
                 if (cn.name == lhs) {
                     err = "Const Error";
                     return std::numeric_limits<double>::quiet_NaN();
@@ -1649,37 +1647,37 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             }
 
             // If a function with the same name exists, remove it first so editing updates it in-place
-            user_funcs.erase(std::remove_if(user_funcs.begin(), user_funcs.end(), [&](const std::string& fn) {
+            engineState().user_funcs.erase(std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(), [&](const std::string& fn) {
                 size_t open = fn.find('(');
                 std::string fname = (open != std::string::npos) ? fn.substr(0, open) : fn;
                 fname.erase(0, fname.find_first_not_of(" \t"));
                 fname.erase(fname.find_last_not_of(" \t") + 1);
                 return fname == target_fname;
-            }), user_funcs.end());
+            }), engineState().user_funcs.end());
 
-            user_funcs.push_back(expr_str);
+            engineState().user_funcs.push_back(expr_str);
             std::string test_err = "";
             substituteUserFuncs(lhs, test_err);
             if (!test_err.empty()) {
-                user_funcs.pop_back();
+                engineState().user_funcs.pop_back();
                 err = "Func Def Error";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             
             std::string fname_auto = target_fname + "(";
-            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), fname_auto) == autocomplete_words.end()) {
-                autocomplete_words.push_back(fname_auto);
+            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), fname_auto) == engineState().autocomplete_words.end()) {
+                engineState().autocomplete_words.push_back(fname_auto);
             }
             return 1.0;
         } else if (isConstDef) {
             double val = evaluate(rhs, err);
             if (err.empty() && !std::isnan(val)) {
-                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                     return a.name == lhs;
-                }), user_args.end());
+                }), engineState().user_args.end());
 
                 bool updated = false;
-                for (auto& cn : user_consts) {
+                for (auto& cn : engineState().user_consts) {
                     if (cn.name == lhs) {
                         cn.val = val;
                         updated = true;
@@ -1687,11 +1685,11 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                     }
                 }
                 if (!updated) {
-                    user_consts.push_back({lhs, val});
+                    engineState().user_consts.push_back({lhs, val});
                 }
                 
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return val;
             } else {
@@ -1710,28 +1708,28 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 std::string dummy_err;
                 std::vector<double> a1 = parseArrayExpr(op1, is1_arr, dummy_err);
                 std::vector<double> a2 = parseArrayExpr(op2, is2_arr, dummy_err);
-                if (op == ".*" || op == "./" || (!a1.empty() && is1_arr) || (!a2.empty() && is2_arr) || (user_arrays.find(op1) != user_arrays.end() && !user_arrays[op1].empty()) || (user_arrays.find(op2) != user_arrays.end() && !user_arrays[op2].empty())) {
+                if (op == ".*" || op == "./" || (!a1.empty() && is1_arr) || (!a2.empty() && is2_arr) || (engineState().user_arrays.find(op1) != engineState().user_arrays.end() && !engineState().user_arrays[op1].empty()) || (engineState().user_arrays.find(op2) != engineState().user_arrays.end() && !engineState().user_arrays[op2].empty())) {
                     bool is_scalar = false;
                     double scalar_res = 0;
                     std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
                     if (err.empty()) {
                         if (is_scalar) {
-                            user_arrays.erase(lhs);
-                            user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                            engineState().user_arrays.erase(lhs);
+                            engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                                 return a.name == lhs;
-                            }), user_args.end());
-                            user_args.push_back({lhs, scalar_res});
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
+                            }), engineState().user_args.end());
+                            engineState().user_args.push_back({lhs, scalar_res});
+                            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                                engineState().autocomplete_words.push_back(lhs);
                             }
                             return scalar_res;
                         } else {
-                            user_arrays[lhs] = res;
-                            user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                            engineState().user_arrays[lhs] = res;
+                            engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                                 return a.name == lhs;
-                            }), user_args.end());
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
+                            }), engineState().user_args.end());
+                            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                                engineState().autocomplete_words.push_back(lhs);
                             }
                             return 1.0;
                         }
@@ -1743,12 +1741,12 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             bool is_arr = false;
             std::vector<double> arr = parseArrayExpr(rhs, is_arr, err);
             if (err.empty() && is_arr) {
-                user_arrays[lhs] = arr;
-                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                engineState().user_arrays[lhs] = arr;
+                engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                     return a.name == lhs;
-                }), user_args.end());
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                }), engineState().user_args.end());
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return 1.0;
             }
@@ -1757,19 +1755,19 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             }
             double val = evaluate(rhs, err);
             if (err.empty() && !std::isnan(val)) {
-                if (g_last_eval_is_array) {
-                    user_arrays[lhs] = g_last_eval_array;
-                    user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                if (engineState().g_last_eval_is_array) {
+                    engineState().user_arrays[lhs] = engineState().g_last_eval_array;
+                    engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                         return a.name == lhs;
-                    }), user_args.end());
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(lhs);
+                    }), engineState().user_args.end());
+                    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                        engineState().autocomplete_words.push_back(lhs);
                     }
                     return 1.0;
                 }
-                user_arrays.erase(lhs);
+                engineState().user_arrays.erase(lhs);
                 bool found = false;
-                for (auto& arg : user_args) {
+                for (auto& arg : engineState().user_args) {
                     if (arg.name == lhs) {
                         arg.val = val;
                         found = true;
@@ -1777,11 +1775,11 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                     }
                 }
                 if (!found) {
-                    user_args.push_back({lhs, val});
+                    engineState().user_args.push_back({lhs, val});
                 }
                 
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return val;
             } else {
@@ -1794,11 +1792,6 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
     return evaluate(expr_str, err);
 }
 
-static std::string g_tab_orig_prefix = "";
-static size_t g_tab_comp_start = 0;
-static int g_tab_match_idx = -1;
-static std::string g_tab_last_inserted = "";
-static std::vector<std::string> g_tab_cached_matches;
 
 enum UnitDimension : uint32_t {
     DIM_NONE         = 0,
@@ -2013,11 +2006,11 @@ std::vector<std::string> getConvUnitMatches(const std::string& from_unit, const 
 }
 
 void resetTabState() {
-    g_tab_orig_prefix = "";
-    g_tab_last_inserted = "";
-    g_tab_comp_start = 0;
-    g_tab_match_idx = -1;
-    g_tab_cached_matches.clear();
+    engineState().g_tab_orig_prefix = "";
+    engineState().g_tab_last_inserted = "";
+    engineState().g_tab_comp_start = 0;
+    engineState().g_tab_match_idx = -1;
+    engineState().g_tab_cached_matches.clear();
 }
 
 void handleTabCompletion(std::string& expression, int& cursor_pos) {
@@ -2027,39 +2020,39 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     }
 
     bool is_continuation = false;
-    if (!g_tab_orig_prefix.empty() && !g_tab_last_inserted.empty() && g_tab_comp_start <= expression.size()) {
-        if (g_tab_comp_start + g_tab_last_inserted.size() <= expression.size() &&
-            expression.substr(g_tab_comp_start, g_tab_last_inserted.size()) == g_tab_last_inserted) {
-            if (cursor_pos >= (int)g_tab_comp_start && cursor_pos <= (int)(g_tab_comp_start + g_tab_last_inserted.size())) {
+    if (!engineState().g_tab_orig_prefix.empty() && !engineState().g_tab_last_inserted.empty() && engineState().g_tab_comp_start <= expression.size()) {
+        if (engineState().g_tab_comp_start + engineState().g_tab_last_inserted.size() <= expression.size() &&
+            expression.substr(engineState().g_tab_comp_start, engineState().g_tab_last_inserted.size()) == engineState().g_tab_last_inserted) {
+            if (cursor_pos >= (int)engineState().g_tab_comp_start && cursor_pos <= (int)(engineState().g_tab_comp_start + engineState().g_tab_last_inserted.size())) {
                 is_continuation = true;
             }
         }
     }
 
-    if (is_continuation && !g_tab_cached_matches.empty()) {
-        g_tab_match_idx = ((g_tab_match_idx + 1) % (int)g_tab_cached_matches.size() + (int)g_tab_cached_matches.size()) % (int)g_tab_cached_matches.size();
-        std::string matched_word = g_tab_cached_matches[g_tab_match_idx];
+    if (is_continuation && !engineState().g_tab_cached_matches.empty()) {
+        engineState().g_tab_match_idx = ((engineState().g_tab_match_idx + 1) % (int)engineState().g_tab_cached_matches.size() + (int)engineState().g_tab_cached_matches.size()) % (int)engineState().g_tab_cached_matches.size();
+        std::string matched_word = engineState().g_tab_cached_matches[engineState().g_tab_match_idx];
 
         std::string new_inserted;
-        if (auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
+        if (engineState().auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
             new_inserted = matched_word + ")";
-            cursor_pos = g_tab_comp_start + matched_word.size();
+            cursor_pos = engineState().g_tab_comp_start + matched_word.size();
         } else {
             new_inserted = matched_word;
-            cursor_pos = g_tab_comp_start + new_inserted.size();
+            cursor_pos = engineState().g_tab_comp_start + new_inserted.size();
         }
 
-        size_t current_len = g_tab_last_inserted.size();
-        if (g_tab_comp_start + current_len > expression.size()) {
-            current_len = expression.size() - g_tab_comp_start;
+        size_t current_len = engineState().g_tab_last_inserted.size();
+        if (engineState().g_tab_comp_start + current_len > expression.size()) {
+            current_len = expression.size() - engineState().g_tab_comp_start;
         }
-        expression.replace(g_tab_comp_start, current_len, new_inserted);
-        g_tab_last_inserted = new_inserted;
+        expression.replace(engineState().g_tab_comp_start, current_len, new_inserted);
+        engineState().g_tab_last_inserted = new_inserted;
         return;
     }
 
     if (!is_continuation) {
-        g_tab_cached_matches.clear();
+        engineState().g_tab_cached_matches.clear();
         if (cursor_pos < 0 || cursor_pos > (int)expression.size()) cursor_pos = expression.size();
         size_t start = cursor_pos;
         while (start > 0 && (std::isalnum((unsigned char)expression[start - 1]) || expression[start - 1] == '_')) {
@@ -2071,18 +2064,18 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
             return;
         }
 
-        g_tab_orig_prefix = prefix;
-        g_tab_comp_start = start;
-        g_tab_match_idx = 0;
+        engineState().g_tab_orig_prefix = prefix;
+        engineState().g_tab_comp_start = start;
+        engineState().g_tab_match_idx = 0;
     } else {
-        g_tab_match_idx++;
+        engineState().g_tab_match_idx++;
     }
 
     std::vector<std::string> matches;
     matches.reserve(16);
 
     auto check_candidate = [&](const std::string& word) {
-        if (word.rfind(g_tab_orig_prefix, 0) == 0) {
+        if (word.rfind(engineState().g_tab_orig_prefix, 0) == 0) {
             if (std::find(matches.begin(), matches.end(), word) == matches.end()) {
                 matches.push_back(word);
             }
@@ -2092,7 +2085,7 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     // Check if inside conv(...) and specifically in a unit argument position (after comma)
     bool is_in_conv = false;
     std::string from_unit = "";
-    std::string left_ctx = expression.substr(0, g_tab_comp_start);
+    std::string left_ctx = expression.substr(0, engineState().g_tab_comp_start);
     size_t last_conv = left_ctx.rfind("conv(");
     if (last_conv != std::string::npos) {
         std::string after_conv = left_ctx.substr(last_conv + 5);
@@ -2132,32 +2125,32 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     }
 
     if (is_in_conv && left_ctx.substr(last_conv + 5).find(',') != std::string::npos) {
-        matches = getConvUnitMatches(from_unit, g_tab_orig_prefix);
+        matches = getConvUnitMatches(from_unit, engineState().g_tab_orig_prefix);
     }
 
     if (matches.empty()) {
         // 1. Built-in constants (pi, e, phi) & User variables/constants first
-        for (const auto& w : autocomplete_words) {
+        for (const auto& w : engineState().autocomplete_words) {
             if (w == "pi" || w == "e" || w == "phi") check_candidate(w);
         }
-        for (const auto& arg : user_args) check_candidate(arg.name);
-        for (const auto& cn : user_consts) check_candidate(cn.name);
+        for (const auto& arg : engineState().user_args) check_candidate(arg.name);
+        for (const auto& cn : engineState().user_consts) check_candidate(cn.name);
 
         // 2. Built-in math functions & history variables (e1, e2, e3...)
-        for (const auto& w : autocomplete_words) {
+        for (const auto& w : engineState().autocomplete_words) {
             if (w != "pi" && w != "e" && w != "phi") check_candidate(w);
         }
-        for (size_t i = 0; i < history.size(); ++i) check_candidate("e" + std::to_string(history_first_number + i));
+        for (size_t i = 0; i < engineState().history.size(); ++i) check_candidate("e" + std::to_string(engineState().history_first_number + i));
 
         // 3. User formulas & scripts
-        for (const auto& func : user_funcs) {
+        for (const auto& func : engineState().user_funcs) {
             size_t paren = func.find('(');
             if (paren != std::string::npos) {
                 std::string fname = func.substr(0, paren + 1);
                 if (!fname.empty()) check_candidate(fname);
             }
         }
-        for (const auto& sf : user_script_funcs) {
+        for (const auto& sf : engineState().user_script_funcs) {
             check_candidate(sf.name + "(");
         }
     }
@@ -2167,29 +2160,29 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
         return;
     }
 
-    g_tab_cached_matches = matches;
-    g_tab_match_idx = ((g_tab_match_idx % (int)matches.size()) + (int)matches.size()) % (int)matches.size();
-    std::string matched_word = matches[g_tab_match_idx];
+    engineState().g_tab_cached_matches = matches;
+    engineState().g_tab_match_idx = ((engineState().g_tab_match_idx % (int)matches.size()) + (int)matches.size()) % (int)matches.size();
+    std::string matched_word = matches[engineState().g_tab_match_idx];
 
     std::string new_inserted;
-    if (auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
+    if (engineState().auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
         new_inserted = matched_word + ")";
-        cursor_pos = g_tab_comp_start + matched_word.size();
+        cursor_pos = engineState().g_tab_comp_start + matched_word.size();
     } else {
         new_inserted = matched_word;
-        cursor_pos = g_tab_comp_start + new_inserted.size();
+        cursor_pos = engineState().g_tab_comp_start + new_inserted.size();
     }
 
     if (is_continuation) {
-        size_t current_len = g_tab_last_inserted.size();
-        if (g_tab_comp_start + current_len > expression.size()) {
-            current_len = expression.size() - g_tab_comp_start;
+        size_t current_len = engineState().g_tab_last_inserted.size();
+        if (engineState().g_tab_comp_start + current_len > expression.size()) {
+            current_len = expression.size() - engineState().g_tab_comp_start;
         }
-        expression.replace(g_tab_comp_start, current_len, new_inserted);
+        expression.replace(engineState().g_tab_comp_start, current_len, new_inserted);
     } else {
-        expression.replace(g_tab_comp_start, g_tab_orig_prefix.size(), new_inserted);
+        expression.replace(engineState().g_tab_comp_start, engineState().g_tab_orig_prefix.size(), new_inserted);
     }
-    g_tab_last_inserted = new_inserted;
+    engineState().g_tab_last_inserted = new_inserted;
 }
 
 std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
@@ -2254,11 +2247,11 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
                 arr_ptr = &temp_arr;
                 disp_name = inline_arr_expr;
             } else {
-                if (user_arrays.find(array_name) == user_arrays.end()) {
+                if (engineState().user_arrays.find(array_name) == engineState().user_arrays.end()) {
                     err = "Array " + array_name + " not defined";
                     return expr;
                 }
-                arr_ptr = &user_arrays[array_name];
+                arr_ptr = &engineState().user_arrays[array_name];
             }
 
             double idx_val = evaluate(index_expr, err);
@@ -2305,13 +2298,13 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
     }
     
     bool is_scalar_var = false;
-    for (const auto& ua : user_args) {
+    for (const auto& ua : engineState().user_args) {
         if (ua.name == trimmed) { is_scalar_var = true; break; }
     }
     
-    if (!is_scalar_var && user_arrays.find(trimmed) != user_arrays.end()) {
+    if (!is_scalar_var && engineState().user_arrays.find(trimmed) != engineState().user_arrays.end()) {
         is_array = true;
-        return user_arrays[trimmed];
+        return engineState().user_arrays[trimmed];
     }
 
     // Binary operations on arrays: e.g. 3 * t or px .* px or 5 * sin(3*t)
@@ -2457,8 +2450,8 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                         res[i] = evaluate(func_name + "(" + fmtInternal(val) + ")", elementError);
                         if (!elementError.empty()) { err = elementError; return {}; }
                     }
-                    if (!g_math_domain_err.empty()) {
-                        err = g_math_domain_err;
+                    if (!engineState().g_math_domain_err.empty()) {
+                        err = engineState().g_math_domain_err;
                         return {};
                     }
                 }
@@ -2563,9 +2556,9 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
     }
     
-    if (user_arrays.find(trimmed) != user_arrays.end()) {
+    if (engineState().user_arrays.find(trimmed) != engineState().user_arrays.end()) {
         is_array = true;
-        return user_arrays[trimmed];
+        return engineState().user_arrays[trimmed];
     }
     
     return {};
@@ -2716,7 +2709,7 @@ std::string formatPrintString(const std::string& str, std::string& err) {
                 expr.erase(expr.find_last_not_of(" \t") + 1);
 
                 bool found_scalar = false;
-                for (const auto& ua : user_args) {
+                for (const auto& ua : engineState().user_args) {
                     if (ua.name == expr) {
                         res += fmtNum(ua.val);
                         found_scalar = true;
@@ -2725,8 +2718,8 @@ std::string formatPrintString(const std::string& str, std::string& err) {
                 }
 
                 if (!found_scalar) {
-                    if (user_arrays.find(expr) != user_arrays.end()) {
-                        const auto& arr = user_arrays[expr];
+                    if (engineState().user_arrays.find(expr) != engineState().user_arrays.end()) {
+                        const auto& arr = engineState().user_arrays[expr];
                         std::string arr_str = "[";
                         for (size_t k = 0; k < arr.size(); ++k) {
                             arr_str += fmtNum(arr[k]);
@@ -2757,12 +2750,12 @@ std::string formatPrintString(const std::string& str, std::string& err) {
         trimmed_str.erase(trimmed_str.find_last_not_of(" \t") + 1);
 
         bool is_scalar = false;
-        for (const auto& ua : user_args) {
+        for (const auto& ua : engineState().user_args) {
             if (ua.name == trimmed_str) { is_scalar = true; break; }
         }
 
-        if (!is_scalar && user_arrays.find(trimmed_str) != user_arrays.end()) {
-            const auto& arr = user_arrays[trimmed_str];
+        if (!is_scalar && engineState().user_arrays.find(trimmed_str) != engineState().user_arrays.end()) {
+            const auto& arr = engineState().user_arrays[trimmed_str];
             std::string arr_str = "[";
             for (size_t k = 0; k < arr.size(); ++k) {
                 arr_str += fmtNum(arr[k]);

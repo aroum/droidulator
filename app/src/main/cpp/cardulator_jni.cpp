@@ -32,16 +32,16 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeInit(JNIEnv *env, jobject thiz) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     clearHistory();
-    user_args.clear();
-    user_funcs.clear();
-    user_script_funcs.clear();
-    user_consts.clear();
-    user_arrays.clear();
-    user_named_scripts.clear();
-    script_console_output.clear();
+    engineState().user_args.clear();
+    engineState().user_funcs.clear();
+    engineState().user_script_funcs.clear();
+    engineState().user_consts.clear();
+    engineState().user_arrays.clear();
+    engineState().user_named_scripts.clear();
+    engineState().script_console_output.clear();
     resetAutocompleteWords();
     resetTabState();
-    degreesMode = true;
+    engineState().degreesMode = true;
     LOGI("Droidulator Native Engine Initialized.");
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
@@ -137,9 +137,9 @@ static double g_last_num_val = 0.0;
 static std::string g_last_prefix;
 static std::string g_last_suffix;
 static void prependScriptOutput(std::string& result) {
-    if (script_console_output.empty()) return;
+    if (engineState().script_console_output.empty()) return;
     std::string output;
-    for (const auto& line : script_console_output) output += line + "\n";
+    for (const auto& line : engineState().script_console_output) output += line + "\n";
     result = output + result;
     if (g_last_has_num) g_last_prefix = output + g_last_prefix;
 }
@@ -167,7 +167,7 @@ JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobject thiz, jstring input_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     g_last_eval_error = false;
-    script_console_output.clear();
+    engineState().script_console_output.clear();
     lastOutputWasArray = false;
     g_last_has_num = false;
     g_last_num_val = 0.0;
@@ -263,16 +263,16 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 return toJavaError(env, "ERROR: Reserved name");
             // Save value to first variable
             if (!assign_var1.empty()) {
-                auto it = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                auto it = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                     return a.name == assign_var1;
                 });
-                if (it != user_args.end()) {
+                if (it != engineState().user_args.end()) {
                     it->val = c_res.value;
                 } else {
-                    user_args.push_back({assign_var1, c_res.value});
+                    engineState().user_args.push_back({assign_var1, c_res.value});
                 }
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), assign_var1) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(assign_var1);
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), assign_var1) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(assign_var1);
                 }
             }
 
@@ -319,15 +319,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         sname.erase(0, sname.find_first_not_of(" \t\"'"));
         sname.erase(sname.find_last_not_of(" \t\"'") + 1);
 
-        auto it = user_named_scripts.find(sname);
-        if (it != user_named_scripts.end()) {
-            script_console_output.clear();
+        auto it = engineState().user_named_scripts.find(sname);
+        if (it != engineState().user_named_scripts.end()) {
+            engineState().script_console_output.clear();
             runScript(it->second);
             std::ostringstream out;
-            if (!script_console_output.empty()) {
-                for (size_t i = 0; i < script_console_output.size(); ++i) {
-                    out << script_console_output[i];
-                    if (i + 1 < script_console_output.size()) out << "\n";
+            if (!engineState().script_console_output.empty()) {
+                for (size_t i = 0; i < engineState().script_console_output.size(); ++i) {
+                    out << engineState().script_console_output[i];
+                    if (i + 1 < engineState().script_console_output.size()) out << "\n";
                 }
             } else {
                 out << "Done";
@@ -383,11 +383,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                     for (size_t k = i + 1; k < j; ++k) body_stmts.push_back(stmts[k]);
                     i = j;
 
-                    user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f){
+                    engineState().user_script_funcs.erase(std::remove_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f){
                         return f.name == fname;
-                    }), user_script_funcs.end());
+                    }), engineState().user_script_funcs.end());
 
-                    user_script_funcs.push_back({fname, params, body_stmts});
+                    engineState().user_script_funcs.push_back({fname, params, body_stmts});
                     resultStr = "Def OK";
                     last_is_def = true;
                 }
@@ -405,9 +405,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
                 g_last_has_num = true;
                 g_last_num_val = last_res;
                 g_last_prefix = "e" + std::to_string(history_number) + " = ";
-                if (g_last_result_angle == AngleUnit::DEG) {
+                if (engineState().g_last_result_angle == AngleUnit::DEG) {
                     g_last_suffix = " (deg)";
-                } else if (g_last_result_angle == AngleUnit::RAD) {
+                } else if (engineState().g_last_result_angle == AngleUnit::RAD) {
                     g_last_suffix = " (rad)";
                 }
                 resultStr = g_last_prefix + fmtNum(last_res) + g_last_suffix;
@@ -433,15 +433,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
             lhs.erase(0, lhs.find_first_not_of(" \t"));
         }
         if (lhs.find('(') == std::string::npos) {
-            if (user_arrays.find(lhs) != user_arrays.end()) {
-                resultStr = lhs + " = Array[" + std::to_string(user_arrays[lhs].size()) + "]";
+            if (engineState().user_arrays.find(lhs) != engineState().user_arrays.end()) {
+                resultStr = lhs + " = Array[" + std::to_string(engineState().user_arrays[lhs].size()) + "]";
             } else {
                 g_last_has_num = true;
                 g_last_num_val = result;
                 g_last_prefix = lhs + " = ";
-                if (g_last_result_angle == AngleUnit::DEG) {
+                if (engineState().g_last_result_angle == AngleUnit::DEG) {
                     g_last_suffix = " (deg)";
-                } else if (g_last_result_angle == AngleUnit::RAD) {
+                } else if (engineState().g_last_result_angle == AngleUnit::RAD) {
                     g_last_suffix = " (rad)";
                 }
                 resultStr = g_last_prefix + fmtNum(result) + g_last_suffix;
@@ -449,18 +449,18 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         } else {
             resultStr = "Def OK";
         }
-    } else if (g_last_eval_is_array) {
+    } else if (engineState().g_last_eval_is_array) {
         lastOutputWasArray = true;
         std::string trimmed = expression;
         trimmed.erase(0, trimmed.find_first_not_of(" \t"));
         trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
         std::string arr_str = "[";
-        for (size_t k = 0; k < g_last_eval_array.size(); ++k) {
-            arr_str += fmtNum(g_last_eval_array[k]);
-            if (k + 1 < g_last_eval_array.size()) arr_str += ", ";
+        for (size_t k = 0; k < engineState().g_last_eval_array.size(); ++k) {
+            arr_str += fmtNum(engineState().g_last_eval_array[k]);
+            if (k + 1 < engineState().g_last_eval_array.size()) arr_str += ", ";
         }
         arr_str += "]";
-        if (user_arrays.find(trimmed) != user_arrays.end()) {
+        if (engineState().user_arrays.find(trimmed) != engineState().user_arrays.end()) {
             resultStr = trimmed + " = " + arr_str;
         } else {
             resultStr = arr_str;
@@ -471,11 +471,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
 
         std::string label = "";
-        for (const auto& cn : user_consts) {
+        for (const auto& cn : engineState().user_consts) {
             if (cn.name == trimmed) { label = trimmed; break; }
         }
         if (label.empty()) {
-            for (const auto& arg : user_args) {
+            for (const auto& arg : engineState().user_args) {
                 if (arg.name == trimmed) { label = trimmed; break; }
             }
         }
@@ -486,9 +486,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
 
         g_last_has_num = true;
         g_last_num_val = result;
-        if (g_last_result_angle == AngleUnit::DEG) {
+        if (engineState().g_last_result_angle == AngleUnit::DEG) {
             g_last_suffix = " (deg)";
-        } else if (g_last_result_angle == AngleUnit::RAD) {
+        } else if (engineState().g_last_result_angle == AngleUnit::RAD) {
             g_last_suffix = " (rad)";
         }
 
@@ -572,13 +572,13 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRunScript(JNIEnv *env, jobj
 
     std::string code = toCppString(env, code_jstr);
 
-    script_console_output.clear();
+    engineState().script_console_output.clear();
     runScript(code);
 
     std::ostringstream out;
-    for (size_t i = 0; i < script_console_output.size(); ++i) {
-        out << script_console_output[i];
-        if (i + 1 < script_console_output.size()) out << "\n";
+    for (size_t i = 0; i < engineState().script_console_output.size(); ++i) {
+        out << engineState().script_console_output[i];
+        if (i + 1 < engineState().script_console_output.size()) out << "\n";
     }
 
     return toJavaString(env, out.str());
@@ -594,11 +594,11 @@ JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, jobject thiz) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     clearHistory();
-    for (const auto& arg : user_args) removeUserAutocompleteWord(arg.name);
-    for (const auto& array : user_arrays) removeUserAutocompleteWord(array.first);
-    user_args.clear();
-    user_arrays.clear();
-    script_console_output.clear();
+    for (const auto& arg : engineState().user_args) removeUserAutocompleteWord(arg.name);
+    for (const auto& array : engineState().user_arrays) removeUserAutocompleteWord(array.first);
+    engineState().user_args.clear();
+    engineState().user_arrays.clear();
+    engineState().script_console_output.clear();
     resetTabState();
     LOGI("History and variables cleared.");
 } catch (const std::bad_alloc&) {
@@ -616,8 +616,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeValues(JNIEnv* env, jobject
     if (!cls) return nullptr;
     auto ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;D[D)V");
     if (!ctor) return nullptr;
-    auto out = env->NewObjectArray(static_cast<jsize>(constants ? user_consts.size() + 2 :
-        history.size() + user_args.size() + user_arrays.size()), cls, nullptr);
+    auto out = env->NewObjectArray(static_cast<jsize>(constants ? engineState().user_consts.size() + 2 :
+        engineState().history.size() + engineState().user_args.size() + engineState().user_arrays.size()), cls, nullptr);
     if (!out) return nullptr;
     jsize index = 0;
     auto add = [&](const std::string& name, double value, const std::vector<double>* values = nullptr) {
@@ -643,12 +643,12 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeValues(JNIEnv* env, jobject
     if (constants) {
         add("pi", std::acos(-1.0));
         add("e", std::exp(1.0));
-        for (const auto& constant : user_consts) add(constant.name, constant.val);
+        for (const auto& constant : engineState().user_consts) add(constant.name, constant.val);
     } else {
-        for (size_t n = 0; n < history.size(); ++n)
-            add("e" + std::to_string(history_first_number + n), history[n]);
-        for (const auto& variable : user_args) add(variable.name, variable.val);
-        for (const auto& [name, values] : user_arrays) add(name, 0, &values);
+        for (size_t n = 0; n < engineState().history.size(); ++n)
+            add("e" + std::to_string(engineState().history_first_number + n), engineState().history[n]);
+        for (const auto& variable : engineState().user_args) add(variable.name, variable.val);
+        for (const auto& [name, values] : engineState().user_arrays) add(name, 0, &values);
     }
     return out;
 } catch (const std::exception&) {
@@ -661,10 +661,10 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeFormulas(JNIEnv* env, jobje
     std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     auto cls = env->FindClass("java/lang/String");
     if (!cls) return nullptr;
-    auto out = env->NewObjectArray(static_cast<jsize>(user_funcs.size()), cls, nullptr);
+    auto out = env->NewObjectArray(static_cast<jsize>(engineState().user_funcs.size()), cls, nullptr);
     if (!out) return nullptr;
-    for (jsize i = 0; i < static_cast<jsize>(user_funcs.size()); ++i) {
-        auto expression = toJavaString(env, user_funcs[i]);
+    for (jsize i = 0; i < static_cast<jsize>(engineState().user_funcs.size()); ++i) {
+        auto expression = toJavaString(env, engineState().user_funcs[i]);
         if (!expression) return nullptr;
         env->SetObjectArrayElement(out, i, expression);
         env->DeleteLocalRef(expression);
@@ -681,16 +681,16 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, j
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::ostringstream out;
     out << std::setprecision(17);
-    if (user_args.empty() && user_arrays.empty() && history.empty()) {
+    if (engineState().user_args.empty() && engineState().user_arrays.empty() && engineState().history.empty()) {
         out << "No user variables defined.";
     } else {
-        for (size_t i = 0; i < history.size(); ++i) {
-            out << "e" << (history_first_number + i) << " = " << history[i] << "\n";
+        for (size_t i = 0; i < engineState().history.size(); ++i) {
+            out << "e" << (engineState().history_first_number + i) << " = " << engineState().history[i] << "\n";
         }
-        for (const auto& arg : user_args) {
+        for (const auto& arg : engineState().user_args) {
             out << arg.name << " = " << arg.val << "\n";
         }
-        for (const auto& pair : user_arrays) {
+        for (const auto& pair : engineState().user_arrays) {
             out << pair.first << " = [";
             for (size_t i = 0; i < pair.second.size(); ++i) {
                 out << pair.second[i] << (i + 1 < pair.second.size() ? ", " : "");
@@ -711,10 +711,10 @@ JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetFormulas(JNIEnv *env, jobject thiz) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
     std::ostringstream out;
-    if (user_funcs.empty()) {
+    if (engineState().user_funcs.empty()) {
         out << "No custom formulas defined.";
     } else {
-        for (const auto& fn : user_funcs) {
+        for (const auto& fn : engineState().user_funcs) {
             out << fn << "\n";
         }
     }
@@ -734,7 +734,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetConstants(JNIEnv *env, j
     out << std::setprecision(17);
     out << "pi = 3.141592653589793\n";
     out << "e  = 2.718281828459045\n";
-    for (const auto& c : user_consts) {
+    for (const auto& c : engineState().user_consts) {
         out << c.name << " = " << c.val << "\n";
     }
     return toJavaString(env, out.str());
@@ -773,7 +773,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetHelp(JNIEnv *env, jobjec
 JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeSetDegRad(JNIEnv *env, jobject thiz, jboolean is_deg) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    degreesMode = is_deg;
+    engineState().degreesMode = is_deg;
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
 } catch (const std::exception&) {
@@ -785,9 +785,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeSetDegRad(JNIEnv *env, jobj
 JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeSetFormatSettings(JNIEnv *env, jobject thiz, jint mode, jint precision, jboolean group_digits) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    fmt_mode = mode;
-    fmt_precision = precision;
-    use_thousands_sep = group_digits;
+    engineState().fmt_mode = mode;
+    engineState().fmt_precision = precision;
+    engineState().use_thousands_sep = group_digits;
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
 } catch (const std::exception&) {
@@ -799,7 +799,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeSetFormatSettings(JNIEnv *e
 JNIEXPORT jboolean JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetDegRad(JNIEnv *, jobject) {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    return degreesMode ? JNI_TRUE : JNI_FALSE;
+    return engineState().degreesMode ? JNI_TRUE : JNI_FALSE;
 }
 
 JNIEXPORT jboolean JNICALL
@@ -808,15 +808,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteVariable(JNIEnv *env,
     if (!name_jstr) return JNI_FALSE;
     std::string name = toCppString(env, name_jstr);
 
-    auto it = std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == name; });
-    if (it != user_args.end()) {
-        user_args.erase(it, user_args.end());
+    auto it = std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) { return a.name == name; });
+    if (it != engineState().user_args.end()) {
+        engineState().user_args.erase(it, engineState().user_args.end());
         removeUserAutocompleteWord(name);
         resetTabState();
         return JNI_TRUE;
     }
-    if (user_arrays.find(name) != user_arrays.end()) {
-        user_arrays.erase(name);
+    if (engineState().user_arrays.find(name) != engineState().user_arrays.end()) {
+        engineState().user_arrays.erase(name);
         removeUserAutocompleteWord(name);
         resetTabState();
         return JNI_TRUE;
@@ -836,9 +836,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteConstant(JNIEnv *env,
     if (!name_jstr) return JNI_FALSE;
     std::string name = toCppString(env, name_jstr);
 
-    auto it = std::remove_if(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; });
-    if (it != user_consts.end()) {
-        user_consts.erase(it, user_consts.end());
+    auto it = std::remove_if(engineState().user_consts.begin(), engineState().user_consts.end(), [&](const UserConst& c) { return c.name == name; });
+    if (it != engineState().user_consts.end()) {
+        engineState().user_consts.erase(it, engineState().user_consts.end());
         removeUserAutocompleteWord(name);
         resetTabState();
         return JNI_TRUE;
@@ -858,15 +858,15 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeDeleteFormula(JNIEnv *env, 
     if (!name_jstr) return JNI_FALSE;
     std::string name = toCppString(env, name_jstr);
 
-    auto it = std::remove_if(user_funcs.begin(), user_funcs.end(), [&](const std::string& fn) {
+    auto it = std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(), [&](const std::string& fn) {
         size_t open = fn.find('(');
         std::string fname = (open != std::string::npos) ? fn.substr(0, open) : fn;
         fname.erase(0, fname.find_first_not_of(" \t"));
         fname.erase(fname.find_last_not_of(" \t") + 1);
         return fname == name;
     });
-    if (it != user_funcs.end()) {
-        user_funcs.erase(it, user_funcs.end());
+    if (it != engineState().user_funcs.end()) {
+        engineState().user_funcs.erase(it, engineState().user_funcs.end());
         removeUserAutocompleteWord(name + "(");
         resetTabState();
         return JNI_TRUE;
@@ -887,10 +887,10 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLines(JNIEnv *env, j
     if (!cls) return nullptr;
     jmethodID constructor = env->GetMethodID(cls, "<init>", "([D[DILjava/lang/String;)V");
     if (!constructor) return nullptr;
-    jobjectArray lines = env->NewObjectArray(static_cast<jsize>(plot_lines.size()), cls, nullptr);
+    jobjectArray lines = env->NewObjectArray(static_cast<jsize>(engineState().plot_lines.size()), cls, nullptr);
     if (!lines) return nullptr;
-    for (size_t i = 0; i < plot_lines.size(); ++i) {
-        const auto& line = plot_lines[i];
+    for (size_t i = 0; i < engineState().plot_lines.size(); ++i) {
+        const auto& line = engineState().plot_lines[i];
         if (line.x.size() != line.y.size() || line.x.size() > 100000) {
             throwJavaException(env, "java/lang/IllegalStateException", "Invalid plot size"); return nullptr;
         }
@@ -921,7 +921,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLines(JNIEnv *env, j
 JNIEXPORT jdoubleArray JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetPlotLimits(JNIEnv *env, jobject) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    const jdouble limits[] = {plot_manual_x ? 1.0 : 0.0, plot_xlim_min, plot_xlim_max, plot_ylim_min, plot_ylim_max, plot_manual_y ? 1.0 : 0.0, plot_hold ? 1.0 : 0.0};
+    const jdouble limits[] = {engineState().plot_manual_x ? 1.0 : 0.0, engineState().plot_xlim_min, engineState().plot_xlim_max, engineState().plot_ylim_min, engineState().plot_ylim_max, engineState().plot_manual_y ? 1.0 : 0.0, engineState().plot_hold ? 1.0 : 0.0};
     jdoubleArray result = env->NewDoubleArray(7);
     if (result) env->SetDoubleArrayRegion(result, 0, 7, limits);
     return result;
@@ -967,11 +967,11 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestorePlot(JNIEnv *env, jo
         if (env->ExceptionCheck()) return;
         restored.push_back(std::move(line));
     }
-    plot_lines = std::move(restored);
-    plot_manual_x = limits[0] != 0; plot_manual_y = limits[5] != 0;
-    plot_manual_limits = plot_manual_x || plot_manual_y;
-    plot_xlim_min = limits[1]; plot_xlim_max = limits[2]; plot_ylim_min = limits[3]; plot_ylim_max = limits[4];
-    plot_hold = limits[6] != 0;
+    engineState().plot_lines = std::move(restored);
+    engineState().plot_manual_x = limits[0] != 0; engineState().plot_manual_y = limits[5] != 0;
+    engineState().plot_manual_limits = engineState().plot_manual_x || engineState().plot_manual_y;
+    engineState().plot_xlim_min = limits[1]; engineState().plot_xlim_max = limits[2]; engineState().plot_ylim_min = limits[3]; engineState().plot_ylim_max = limits[4];
+    engineState().plot_hold = limits[6] != 0;
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
 } catch (...) {
@@ -982,7 +982,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestorePlot(JNIEnv *env, jo
 JNIEXPORT void JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeUnregisterScript(JNIEnv *env, jobject, jstring name_jstr) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);
-    user_named_scripts.erase(toCppString(env, name_jstr));
+    engineState().user_named_scripts.erase(toCppString(env, name_jstr));
 } catch (...) {
     throwJavaException(env, "java/lang/RuntimeException", "Unable to unregister script");
 }
@@ -993,7 +993,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRegisterScript(JNIEnv *env,
     std::string name = toCppString(env, name_jstr);
     std::string code = toCppString(env, code_jstr);
     if (name.empty()) return;
-    user_named_scripts[name] = code;
+    engineState().user_named_scripts[name] = code;
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return;
 } catch (const std::exception&) {
@@ -1090,10 +1090,10 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeGetScriptFunctions(JNIEnv *
     jclass stringClass = env->FindClass("java/lang/String");
     jclass arrayClass = env->FindClass("[Ljava/lang/String;");
     if (!stringClass || !arrayClass) return nullptr;
-    jobjectArray functions = env->NewObjectArray(static_cast<jsize>(user_script_funcs.size()), arrayClass, nullptr);
+    jobjectArray functions = env->NewObjectArray(static_cast<jsize>(engineState().user_script_funcs.size()), arrayClass, nullptr);
     if (!functions) return nullptr;
-    for (size_t i = 0; i < user_script_funcs.size(); ++i) {
-        const auto& fn = user_script_funcs[i];
+    for (size_t i = 0; i < engineState().user_script_funcs.size(); ++i) {
+        const auto& fn = engineState().user_script_funcs[i];
         const auto count = 2 + fn.params.size() + fn.statements.size();
         jobjectArray fields = env->NewObjectArray(static_cast<jsize>(count), stringClass, nullptr);
         if (!fields) return nullptr;
@@ -1135,9 +1135,9 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScriptFunction(JNIEn
     fn.params.assign(values.begin() + 2, values.begin() + 2 + count);
     if (std::any_of(fn.params.begin(), fn.params.end(), isReservedName)) return;
     fn.statements.assign(values.begin() + 2 + count, values.end());
-    user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(),
-        [&](const CustomScriptFunc& existing) { return existing.name == fn.name; }), user_script_funcs.end());
-    user_script_funcs.push_back(std::move(fn));
+    engineState().user_script_funcs.erase(std::remove_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+        [&](const CustomScriptFunc& existing) { return existing.name == fn.name; }), engineState().user_script_funcs.end());
+    engineState().user_script_funcs.push_back(std::move(fn));
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
 } catch (...) {
@@ -1150,13 +1150,13 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreScalar(JNIEnv *env, 
     const std::string name = toCppString(env, nameValue);
     if (name.empty() || isReservedName(name)) return;
     if (isConstant) {
-        auto it = std::find_if(user_consts.begin(), user_consts.end(), [&](const UserConst& item) { return item.name == name; });
-        if (it == user_consts.end()) user_consts.push_back({name, value}); else it->val = value;
+        auto it = std::find_if(engineState().user_consts.begin(), engineState().user_consts.end(), [&](const UserConst& item) { return item.name == name; });
+        if (it == engineState().user_consts.end()) engineState().user_consts.push_back({name, value}); else it->val = value;
     } else {
-        auto it = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& item) { return item.name == name; });
-        if (it == user_args.end()) user_args.push_back({name, value}); else it->val = value;
+        auto it = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& item) { return item.name == name; });
+        if (it == engineState().user_args.end()) engineState().user_args.push_back({name, value}); else it->val = value;
     }
-    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), name) == autocomplete_words.end()) autocomplete_words.push_back(name);
+    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), name) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(name);
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
 } catch (...) {
@@ -1172,8 +1172,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRestoreArray(JNIEnv *env, j
     std::vector<double> restored(static_cast<size_t>(count));
     if (count) env->GetDoubleArrayRegion(values, 0, count, restored.data());
     if (env->ExceptionCheck()) return;
-    user_arrays[name] = std::move(restored);
-    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), name) == autocomplete_words.end()) autocomplete_words.push_back(name);
+    engineState().user_arrays[name] = std::move(restored);
+    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), name) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(name);
 } catch (const std::bad_alloc&) {
     throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory");
 } catch (...) {
@@ -1184,9 +1184,9 @@ JNIEXPORT jdoubleArray JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeLastArray(JNIEnv *env, jobject) {
     std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
     if (!lastOutputWasArray) return nullptr;
-    auto array = env->NewDoubleArray(g_last_eval_array.size());
-    if (array && !g_last_eval_array.empty())
-        env->SetDoubleArrayRegion(array, 0, g_last_eval_array.size(), g_last_eval_array.data());
+    auto array = env->NewDoubleArray(engineState().g_last_eval_array.size());
+    if (array && !engineState().g_last_eval_array.empty())
+        env->SetDoubleArrayRegion(array, 0, engineState().g_last_eval_array.size(), engineState().g_last_eval_array.data());
     return array;
 }
 

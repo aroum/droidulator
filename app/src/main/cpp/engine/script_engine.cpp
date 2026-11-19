@@ -15,10 +15,6 @@ extern std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array
 extern std::string preprocessLen(const std::string& s);
 extern std::string preprocessVectorStats(const std::string& s);
 
-double script_return_val = 0.0;
-bool script_has_returned = false;
-std::vector<double> script_return_vec;
-bool script_return_is_vec = false;
 
 // History values are read-only in every script assignment, including for headers.
 static bool writesHistoryVariable(const std::string& code) {
@@ -73,21 +69,21 @@ static std::string reservedAssignment(const std::string& code) {
 }
 
 void runScript(const std::string& code) {
-    script_console_output.clear();
+    engineState().script_console_output.clear();
     if (writesHistoryVariable(code)) {
-        script_console_output.push_back("History variables are read-only");
+        engineState().script_console_output.push_back("History variables are read-only");
         return;
     }
     if (auto name = reservedAssignment(code); !name.empty()) {
-        script_console_output.push_back("Reserved name: " + name);
+        engineState().script_console_output.push_back("Reserved name: " + name);
         return;
     }
-    plot_lines.clear();
-    plot_hold = false;
+    engineState().plot_lines.clear();
+    engineState().plot_hold = false;
     
-    auto original_funcs = user_funcs;
-    auto original_autocomplete = autocomplete_words;
-    user_args.reserve(256);
+    auto original_funcs = engineState().user_funcs;
+    auto original_autocomplete = engineState().autocomplete_words;
+    engineState().user_args.reserve(256);
     
     std::vector<size_t> sourceLines;
     std::vector<std::string> lines = splitIntoStatements(code, &sourceLines);
@@ -97,8 +93,8 @@ void runScript(const std::string& code) {
     int step_count = 0;
     int loop_iterations = 0;
     constexpr int max_loop_iterations = 10000;
-    script_return_val = 0.0;
-    script_has_returned = false;
+    engineState().script_return_val = 0.0;
+    engineState().script_has_returned = false;
     
     struct BlockState {
         std::string type;       // "if", "for", "while"
@@ -116,7 +112,7 @@ void runScript(const std::string& code) {
     std::vector<BlockState> blocks;
     
     while (ip < lines.size() && step_count < max_steps) {
-        if (script_has_returned) break;
+        if (engineState().script_has_returned) break;
         step_count++;
 
         
@@ -129,7 +125,7 @@ void runScript(const std::string& code) {
         }
         if (line == "break" || line == "continue") {
             auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const BlockState& block) { return block.type == "for" || block.type == "while"; });
-            if (loop == blocks.rend()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + line + " outside loop"); ++ip; continue; }
+            if (loop == blocks.rend()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + line + " outside loop"); ++ip; continue; }
             const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
             const size_t end = blocks[index].end_ip;
             blocks.erase(blocks.begin() + index + 1, blocks.end());
@@ -149,8 +145,8 @@ void runScript(const std::string& code) {
             std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
             
             if (ret_parts.size() > 1) {
-                script_return_is_vec = true;
-                script_return_vec.clear();
+                engineState().script_return_is_vec = true;
+                engineState().script_return_vec.clear();
                 std::string out_str = "Return: [";
                 for (size_t r_i = 0; r_i < ret_parts.size(); ++r_i) {
                     std::string part = ret_parts[r_i];
@@ -158,37 +154,37 @@ void runScript(const std::string& code) {
                     part.erase(part.find_last_not_of(" \t") + 1);
                     std::string eval_err;
                     double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                    script_return_vec.push_back(v);
+                    engineState().script_return_vec.push_back(v);
                     out_str += fmtNum(v) + (r_i + 1 < ret_parts.size() ? ", " : "]");
                 }
-                script_return_val = script_return_vec[0];
-                script_console_output.push_back(out_str);
+                engineState().script_return_val = engineState().script_return_vec[0];
+                engineState().script_console_output.push_back(out_str);
             } else {
                 bool is_arr = false;
                 std::string parse_err;
                 std::vector<double> arr = parseArrayExpr(ret_expr, is_arr, parse_err);
                 if (is_arr && parse_err.empty()) {
-                    script_return_is_vec = true;
-                    script_return_vec = arr;
-                    script_return_val = arr.empty() ? 0.0 : arr[0];
+                    engineState().script_return_is_vec = true;
+                    engineState().script_return_vec = arr;
+                    engineState().script_return_val = arr.empty() ? 0.0 : arr[0];
                     std::string out_str = "Return: [";
                     for (size_t r_i = 0; r_i < arr.size(); ++r_i) {
                         out_str += fmtNum(arr[r_i]) + (r_i + 1 < arr.size() ? ", " : "]");
                     }
-                    script_console_output.push_back(out_str);
+                    engineState().script_console_output.push_back(out_str);
                 } else {
                     std::string eval_err;
-                    script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
-                    script_return_is_vec = false;
-                    script_return_vec = {script_return_val};
+                    engineState().script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
+                    engineState().script_return_is_vec = false;
+                    engineState().script_return_vec = {engineState().script_return_val};
                     if (!eval_err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                     } else {
-                        script_console_output.push_back("Return: " + fmtNum(script_return_val));
+                        engineState().script_console_output.push_back("Return: " + fmtNum(engineState().script_return_val));
                     }
                 }
             }
-            script_has_returned = true;
+            engineState().script_has_returned = true;
             break;
         }
 
@@ -202,7 +198,7 @@ void runScript(const std::string& code) {
                 fname.erase(0, fname.find_first_not_of(" \t"));
                 fname.erase(fname.find_last_not_of(" \t") + 1);
                 if (isReservedName(fname)) {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + fname);
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + fname);
                     const size_t end = findMatchingBlockEnd(lines, ip);
                     ip = end == std::string::npos ? lines.size() : end + 1;
                     continue;
@@ -221,7 +217,7 @@ void runScript(const std::string& code) {
                     p_pos = comma + 1;
                 }
                 if (std::any_of(params.begin(), params.end(), isReservedName)) {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved parameter");
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved parameter");
                     const size_t end = findMatchingBlockEnd(lines, ip);
                     ip = end == std::string::npos ? lines.size() : end + 1;
                     continue;
@@ -244,13 +240,13 @@ void runScript(const std::string& code) {
                     ip = k + 1;
                 }
 
-                user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f){
+                engineState().user_script_funcs.erase(std::remove_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f){
                     return f.name == fname;
-                }), user_script_funcs.end());
+                }), engineState().user_script_funcs.end());
 
-                user_script_funcs.push_back({fname, params, body_stmts});
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), fname + "(") == autocomplete_words.end()) {
-                    autocomplete_words.push_back(fname + "(");
+                engineState().user_script_funcs.push_back({fname, params, body_stmts});
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), fname + "(") == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(fname + "(");
                 }
                 continue;
             }
@@ -262,7 +258,7 @@ void runScript(const std::string& code) {
             double result = 0.0;
             if (handlePlotCommands(line, err, result)) {
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 }
                 ip++;
                 continue;
@@ -275,9 +271,9 @@ void runScript(const std::string& code) {
             std::string err;
             std::string output = formatPrintString(expr, err);
             if (!err.empty()) {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
             } else {
-                script_console_output.push_back(output);
+                engineState().script_console_output.push_back(output);
             }
             ip++;
         }
@@ -307,7 +303,7 @@ void runScript(const std::string& code) {
 
                     
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
                         blocks.push_back({ "if", true, ip, end_ip, "", 0.0, 0.0, "", "" });
@@ -322,11 +318,11 @@ void runScript(const std::string& code) {
                         }
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
                 ip++;
             }
         }
@@ -353,7 +349,7 @@ void runScript(const std::string& code) {
                         bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                         
                         if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             ip = blocks.back().end_ip;
                         } else if (cond_bool) {
                             blocks.back().condition_met = true;
@@ -367,12 +363,12 @@ void runScript(const std::string& code) {
                             }
                         }
                     } else {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
                         ip++;
                     }
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
                 ip++;
             }
         }
@@ -386,7 +382,7 @@ void runScript(const std::string& code) {
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
                 ip++;
             }
         }
@@ -420,11 +416,11 @@ void runScript(const std::string& code) {
                     bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                     
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                         if (found_block) blocks.erase(blocks.begin() + block_idx);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
-                        if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
+                        if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                         if (!found_block) {
                             blocks.push_back({ "while", true, ip, end_ip, "", 0.0, 0.0, cond_str, "" });
                         }
@@ -436,11 +432,11 @@ void runScript(const std::string& code) {
                         ip = end_ip;
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
                 ip++;
             }
         }
@@ -521,7 +517,7 @@ void runScript(const std::string& code) {
                                     double val = evaluate(preprocessArrayLookups(rhs, init_err), init_err);
                                     if (init_err.empty()) {
                                         bool found = false;
-                                        for (auto& a : user_args) {
+                                        for (auto& a : engineState().user_args) {
                                             if (a.name == lhs) {
                                                 a.val = val;
                                                 found = true;
@@ -529,7 +525,7 @@ void runScript(const std::string& code) {
                                             }
                                         }
                                         if (!found) {
-                                            user_args.push_back({lhs, val});
+                                            engineState().user_args.push_back({lhs, val});
                                         }
                                     } else {
                                         err = init_err;
@@ -541,7 +537,7 @@ void runScript(const std::string& code) {
                         }
                         
                         if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             if (found_block) blocks.erase(blocks.begin() + block_idx);
                             ip = end_ip + 1;
                         } else {
@@ -550,11 +546,11 @@ void runScript(const std::string& code) {
                             bool cond_bool = (cond_err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
                             
                             if (!cond_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + cond_err);
+                                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + cond_err);
                                 if (found_block) blocks.erase(blocks.begin() + block_idx);
                                 ip = end_ip + 1;
                             } else if (cond_bool) {
-                                if (++loop_iterations > max_loop_iterations) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
+                                if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                                 if (!found_block) {
                                     blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
                                 }
@@ -567,15 +563,15 @@ void runScript(const std::string& code) {
                             }
                         }
                     } else {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
                         ip++;
                     }
                 } else {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
                     ip++;
                 }
             } else {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
                 ip++;
             }
         }
@@ -604,7 +600,7 @@ void runScript(const std::string& code) {
                                     var_name.erase(var_name.find_last_not_of(" \t") + 1);
                                     char op = st[st.size() - 1];
                                     bool found = false;
-                                    for (auto& arg : user_args) {
+                                    for (auto& arg : engineState().user_args) {
                                         if (arg.name == var_name) {
                                             if (op == '+') arg.val += 1.0;
                                             else arg.val -= 1.0;
@@ -613,7 +609,7 @@ void runScript(const std::string& code) {
                                         }
                                     }
                                     if (!found) {
-                                        user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
+                                        engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
                                     }
                                 } else if (st.find('=') != std::string::npos) {
                                     size_t eq = st.find('=');
@@ -632,7 +628,7 @@ void runScript(const std::string& code) {
                                     double val = evaluate(preprocessLen(preprocessArrayLookups(rhs, err)), err);
                                     if (err.empty()) {
                                         bool found = false;
-                                        for (auto& a : user_args) {
+                                        for (auto& a : engineState().user_args) {
                                             if (a.name == lhs) {
                                                 a.val = val;
                                                 found = true;
@@ -640,7 +636,7 @@ void runScript(const std::string& code) {
                                             }
                                         }
                                         if (!found) {
-                                            user_args.push_back({lhs, val});
+                                            engineState().user_args.push_back({lhs, val});
                                         }
                                     }
                                 } else {
@@ -667,10 +663,10 @@ void runScript(const std::string& code) {
             std::string var_name = line.substr(0, line.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
-            if (isReservedName(var_name)) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + var_name); ip++; continue; }
+            if (isReservedName(var_name)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + var_name); ip++; continue; }
             char op = line[line.size() - 1];
             bool found = false;
-            for (auto& arg : user_args) {
+            for (auto& arg : engineState().user_args) {
                 if (arg.name == var_name) {
                     if (op == '+') arg.val += 1.0;
                     else arg.val -= 1.0;
@@ -679,29 +675,29 @@ void runScript(const std::string& code) {
                 }
             }
             if (!found) {
-                user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
+                engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
             }
             ip++;
         }
         // Array element assignment: A[idx] = expr
         else if (std::string name, idx_expr, val_expr; parseArrayElementAssignment(line, name, idx_expr, val_expr)) {
-            if (user_arrays.find(name) == user_arrays.end()) {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Array " + name + " not defined");
+            if (engineState().user_arrays.find(name) == engineState().user_arrays.end()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Array " + name + " not defined");
                 ip++;
             } else {
                 std::string err;
                 double idx_val = evaluate(preprocessArrayLookups(idx_expr, err), err);
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 } else {
                     err.clear();
                     double val_val = evaluate(preprocessArrayLookups(val_expr, err), err);
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                     } else {
-                        auto& arr = user_arrays[name];
+                        auto& arr = engineState().user_arrays[name];
                         if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
-                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid or out of bounds index");
+                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid or out of bounds index");
                         } else {
                             arr[static_cast<size_t>(idx_val) - 1] = val_val;
                         }
@@ -739,9 +735,9 @@ void runScript(const std::string& code) {
                 }
                 bool reserved = false;
                 for (const auto& name : lhs_vars) {
-                    if (isReservedName(name) || std::any_of(user_consts.begin(), user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }
+                    if (isReservedName(name) || std::any_of(engineState().user_consts.begin(), engineState().user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }
                 }
-                if (reserved) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const or reserved name"); ip++; continue; }
+                if (reserved) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const or reserved name"); ip++; continue; }
                 
                 // Evaluate RHS expression
                 bool is_arr = false;
@@ -755,8 +751,8 @@ void runScript(const std::string& code) {
                     std::string fn_name = rhs.substr(0, open_p);
                     fn_name.erase(0, fn_name.find_first_not_of(" \t"));
                     fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    const auto found = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) { return f.name == fn_name; });
-                    if (found != user_script_funcs.end()) {
+                    const auto found = std::find_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f) { return f.name == fn_name; });
+                    if (found != engineState().user_script_funcs.end()) {
                         executed_fn = true;
                         const auto argText = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
                         auto argExprs = argText.find_first_not_of(" \t") == std::string::npos ? std::vector<std::string>{} : splitPlotArgs(argText);
@@ -768,14 +764,14 @@ void runScript(const std::string& code) {
                         if (parse_err.empty()) executeScriptFunc(fn_name, evaluated, parse_err, &vals);
                     }
                 }
-                if (!parse_err.empty()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + parse_err); ip++; continue; }
+                if (!parse_err.empty()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + parse_err); ip++; continue; }
 
                 if (!executed_fn) {
                     vals = parseArrayExpr(rhs, is_arr, parse_err);
                     if (!is_arr || !parse_err.empty()) {
                         std::string eval_err;
                         double single_v = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
-                        if (!eval_err.empty()) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err); ip++; continue; }
+                        if (!eval_err.empty()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err); ip++; continue; }
                         vals = {single_v};
                     }
                 }
@@ -783,9 +779,9 @@ void runScript(const std::string& code) {
                 for (size_t var_i = 0; var_i < lhs_vars.size(); ++var_i) {
                     const std::string& var_name = lhs_vars[var_i];
                     double val = (var_i < vals.size()) ? vals[var_i] : 0.0;
-                    user_arrays.erase(var_name);
+                    engineState().user_arrays.erase(var_name);
                     bool found = false;
-                    for (auto& a : user_args) {
+                    for (auto& a : engineState().user_args) {
                         if (a.name == var_name) {
                             a.val = val;
                             found = true;
@@ -793,27 +789,27 @@ void runScript(const std::string& code) {
                         }
                     }
                     if (!found) {
-                        user_args.push_back({var_name, val});
+                        engineState().user_args.push_back({var_name, val});
                     }
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), var_name) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(var_name);
+                    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), var_name) == engineState().autocomplete_words.end()) {
+                        engineState().autocomplete_words.push_back(var_name);
                     }
                 }
-                if (script_has_returned) break;
+                if (engineState().script_has_returned) break;
                 ip++;
                 continue;
             }
             
-            if (isReservedName(lhs)) { script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + lhs); ip++; continue; }
+            if (isReservedName(lhs)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + lhs); ip++; continue; }
             bool is_const_assign = false;
-            for (const auto& cn : user_consts) {
+            for (const auto& cn : engineState().user_consts) {
                 if (cn.name == lhs) {
                     is_const_assign = true;
                     break;
                 }
             }
             if (is_const_assign) {
-                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
                 ip++;
                 continue;
             }
@@ -832,11 +828,11 @@ void runScript(const std::string& code) {
                 std::vector<double> a1 = parseArrayExpr(op1, is1_arr, dummy_err);
                 std::vector<double> a2 = parseArrayExpr(op2, is2_arr, dummy_err);
                 bool op1_is_scalar = false, op2_is_scalar = false;
-                for (const auto& ua : user_args) {
+                for (const auto& ua : engineState().user_args) {
                     if (ua.name == op1) op1_is_scalar = true;
                     if (ua.name == op2) op2_is_scalar = true;
                 }
-                if (op == ".*" || op == "./" || (is1_arr && !a1.empty()) || (is2_arr && !a2.empty()) || (!op1_is_scalar && user_arrays.find(op1) != user_arrays.end() && !user_arrays[op1].empty()) || (!op2_is_scalar && user_arrays.find(op2) != user_arrays.end() && !user_arrays[op2].empty())) {
+                if (op == ".*" || op == "./" || (is1_arr && !a1.empty()) || (is2_arr && !a2.empty()) || (!op1_is_scalar && engineState().user_arrays.find(op1) != engineState().user_arrays.end() && !engineState().user_arrays[op1].empty()) || (!op2_is_scalar && engineState().user_arrays.find(op2) != engineState().user_arrays.end() && !engineState().user_arrays[op2].empty())) {
                     is_arr_op = true;
                 }
             }
@@ -846,11 +842,11 @@ void runScript(const std::string& code) {
                 double scalar_res = 0;
                 std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 } else if (is_scalar) {
-                    user_arrays.erase(lhs);
+                    engineState().user_arrays.erase(lhs);
                     bool found = false;
-                    for (auto& a : user_args) {
+                    for (auto& a : engineState().user_args) {
                         if (a.name == lhs) {
                             a.val = scalar_res;
                             found = true;
@@ -858,25 +854,25 @@ void runScript(const std::string& code) {
                         }
                     }
                     if (!found) {
-                        user_args.push_back({lhs, scalar_res});
+                        engineState().user_args.push_back({lhs, scalar_res});
                     }
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(lhs);
+                    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                        engineState().autocomplete_words.push_back(lhs);
                     }
                 } else {
-                    user_arrays[lhs] = res;
+                    engineState().user_arrays[lhs] = res;
                 }
             } else {
                 bool is_arr = false;
                 std::string parse_arr_err;
                 std::vector<double> arr = parseArrayExpr(rhs, is_arr, parse_arr_err);
                 if (is_arr && parse_arr_err.empty()) {
-                    user_arrays[lhs] = arr;
-                    user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                    engineState().user_arrays[lhs] = arr;
+                    engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                         return a.name == lhs;
-                    }), user_args.end());
+                    }), engineState().user_args.end());
                 } else {
-                    user_arrays.erase(lhs);
+                    engineState().user_arrays.erase(lhs);
                     // Pre-expand len() so that expressions like len(Y) become scalars
                     // before we scan rhs for array variable references.
                     std::string len_err;
@@ -885,12 +881,12 @@ void runScript(const std::string& code) {
                     // If so, evaluate the expression element-wise substituting each array value.
                     std::string source_arr_name;
                     const std::vector<double>* source_arr = nullptr;
-                    for (const auto& kv : user_arrays) {
+                    for (const auto& kv : engineState().user_arrays) {
                         if (kv.second.empty()) continue;
                         const std::string& aname = kv.first;
                         // Skip if aname is also defined as a scalar variable in user_args
                         bool is_scalar_var = false;
-                        for (const auto& arg : user_args) {
+                        for (const auto& arg : engineState().user_args) {
                             if (arg.name == aname) { is_scalar_var = true; break; }
                         }
                         if (is_scalar_var) continue;
@@ -921,16 +917,16 @@ void runScript(const std::string& code) {
                         }
                         if (name_is_id) {
                             int x_idx = -1;
-                            for (size_t k = 0; k < user_args.size(); ++k) {
-                                if (user_args[k].name == source_arr_name) { x_idx = (int)k; break; }
+                            for (size_t k = 0; k < engineState().user_args.size(); ++k) {
+                                if (engineState().user_args[k].name == source_arr_name) { x_idx = (int)k; break; }
                             }
                             bool created_var = false;
                             double old_val = 0.0;
                             if (x_idx != -1) {
-                                old_val = user_args[x_idx].val;
+                                old_val = engineState().user_args[x_idx].val;
                             } else {
-                                user_args.push_back({source_arr_name, 0.0});
-                                x_idx = (int)user_args.size() - 1;
+                                engineState().user_args.push_back({source_arr_name, 0.0});
+                                x_idx = (int)engineState().user_args.size() - 1;
                                 created_var = true;
                             }
                             std::string prep_err;
@@ -940,36 +936,36 @@ void runScript(const std::string& code) {
                             bool all_ok = true;
                             std::string eval_err;
                             for (double val : sourceValues) {
-                                auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
-                                if (current == user_args.end()) user_args.push_back({source_arr_name, val});
+                                auto current = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
+                                if (current == engineState().user_args.end()) engineState().user_args.push_back({source_arr_name, val});
                                 else current->val = val;
                                 eval_err.clear();
                                 double y = evaluate(prep_rhs, eval_err);
                                 if (!eval_err.empty()) { all_ok = false; break; }
                                 elem_res.push_back(y);
                             }
-                            auto current = std::find_if(user_args.begin(), user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
-                            if (created_var) { if (current != user_args.end()) user_args.erase(current); }
-                            else if (current != user_args.end()) current->val = old_val;
-                            else user_args.push_back({source_arr_name, old_val});
+                            auto current = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) { return a.name == source_arr_name; });
+                            if (created_var) { if (current != engineState().user_args.end()) engineState().user_args.erase(current); }
+                            else if (current != engineState().user_args.end()) current->val = old_val;
+                            else engineState().user_args.push_back({source_arr_name, old_val});
 
                             if (!all_ok) {
-                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+                                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                             } else {
-                                user_arrays[lhs] = elem_res;
-                                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                                engineState().user_arrays[lhs] = elem_res;
+                                engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                                     return a.name == lhs;
-                                }), user_args.end());
+                                }), engineState().user_args.end());
                             }
                         } else {
                             std::string eval_err;
                             double val = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
                             if (!eval_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+                                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                             } else {
-                                user_arrays.erase(lhs);
+                                engineState().user_arrays.erase(lhs);
                                 bool found = false;
-                                for (auto& a : user_args) {
+                                for (auto& a : engineState().user_args) {
                                     if (a.name == lhs) {
                                         a.val = val;
                                         found = true;
@@ -977,10 +973,10 @@ void runScript(const std::string& code) {
                                     }
                                 }
                                 if (!found) {
-                                    user_args.push_back({lhs, val});
+                                    engineState().user_args.push_back({lhs, val});
                                 }
-                                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                    autocomplete_words.push_back(lhs);
+                                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                                    engineState().autocomplete_words.push_back(lhs);
                                 }
                             }
                         }
@@ -989,10 +985,10 @@ void runScript(const std::string& code) {
                         std::string prep_rhs = preprocessArrayLookups(preprocessLen(rhs), eval_err);
                         double val = evaluate(prep_rhs, eval_err);
                         if (!eval_err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                         } else {
                             bool found = false;
-                            for (auto& a : user_args) {
+                            for (auto& a : engineState().user_args) {
                                 if (a.name == lhs) {
                                     a.val = val;
                                     found = true;
@@ -1000,16 +996,16 @@ void runScript(const std::string& code) {
                                 }
                             }
                             if (!found) {
-                                user_args.push_back({lhs, val});
+                                engineState().user_args.push_back({lhs, val});
                             }
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
+                            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                                engineState().autocomplete_words.push_back(lhs);
                             }
                         }
                     }
                 }
             }
-            if (script_has_returned) break;
+            if (engineState().script_has_returned) break;
             ip++;
             continue;
         }
@@ -1019,30 +1015,30 @@ void runScript(const std::string& code) {
                 double result = 0.0;
                 if (handlePlotCommands(line, err, result)) {
                     if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                     }
                 }
             } else {
                 bool isDef = false;
                 std::string eval_err;
                 evaluateInput(line, eval_err, isDef);
-                if (!eval_err.empty()) script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+                if (!eval_err.empty()) engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
             }
             ip++;
         }
     }
     
     if (step_count >= max_steps) {
-        script_console_output.push_back("L:" + std::to_string(sourceLines[std::min(ip, sourceLines.size() - 1)]) + " Err: Script statement limit reached");
+        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[std::min(ip, sourceLines.size() - 1)]) + " Err: Script statement limit reached");
     }
     
-    user_funcs = original_funcs;
-    autocomplete_words = original_autocomplete;
-    for (const auto& arg : user_args) {
-        if (std::find(autocomplete_words.begin(), autocomplete_words.end(), arg.name) == autocomplete_words.end()) autocomplete_words.push_back(arg.name);
+    engineState().user_funcs = original_funcs;
+    engineState().autocomplete_words = original_autocomplete;
+    for (const auto& arg : engineState().user_args) {
+        if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), arg.name) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(arg.name);
     }
-    for (const auto& array : user_arrays) {
-        if (std::find(autocomplete_words.begin(), autocomplete_words.end(), array.first) == autocomplete_words.end()) autocomplete_words.push_back(array.first);
+    for (const auto& array : engineState().user_arrays) {
+        if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), array.first) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(array.first);
     }
     // Note: user_arrays intentionally not restored — scripts may define arrays
     // that affect subsequent plot rendering (e.g., x, y1) or global state.

@@ -20,7 +20,7 @@ required.update(re.findall(r'te_variable\{"([^"]+)"', math))
 tiny = (engine.parent / 'tinyexpr-plusplus/tinyexpr.cpp').read_text()
 tiny = tiny.split('te_parser::m_functions =')[1].split('//--------------------------------------------------')[0]
 required.update(re.findall(r'\{\s*"([^"]+)"', tiny))
-state = (engine / 'app_state.cpp').read_text().split('autocomplete_words = {')[1].split('};')[0]
+state = (engine / 'app_state.cpp').read_text().split('builtin_autocomplete_words = {')[1].split('};')[0]
 for word in re.findall(r'"([^"]+)"', state):
     name = word.split('(')[0].strip()
     if name in {'fn', 'def', 'const'}:

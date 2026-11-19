@@ -189,9 +189,5 @@ inline std::vector<std::string> splitIntoStatements(const std::string& code, std
     return statements;
 }
 
-extern double script_return_val;
-extern bool script_has_returned;
-extern std::vector<double> script_return_vec;
-extern bool script_return_is_vec;
 
 void runScript(const std::string& code);
