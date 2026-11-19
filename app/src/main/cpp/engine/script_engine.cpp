@@ -97,18 +97,22 @@ static bool handleScriptFunctionDeclaration(
         return text;
     };
     const auto name = trim(line.substr(keywordLength, open - keywordLength));
-    std::vector<std::string> params;
-    for (size_t pos = open + 1; pos < close;) {
-        const size_t comma = std::min(line.find(',', pos), close);
-        auto param = trim(line.substr(pos, comma - pos));
-        if (!param.empty()) params.push_back(std::move(param));
-        pos = comma + 1;
-    }
+    const auto params = expression::splitArguments(line.substr(open + 1, close - open - 1));
+    const auto validName = [](const std::string& identifier) {
+        const auto tokens = expression::tokenize(identifier);
+        return tokens.size() == 1 && tokens.front().kind == expression::Kind::Word &&
+            tokens.front().text == identifier;
+    };
 
     auto& state = engineState();
     size_t end = findMatchingBlockEnd(lines, ip);
     std::string error;
-    if (isReservedName(name)) error = "Reserved name: " + name;
+    if (!validName(name)) error = "Invalid function name";
+    else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !validName(param); }))
+        error = "Invalid parameter name";
+    else if (std::unordered_set<std::string>(params.begin(), params.end()).size() != params.size())
+        error = "Duplicate parameter";
+    else if (isReservedName(name)) error = "Reserved name: " + name;
     else if (std::any_of(params.begin(), params.end(), isReservedName)) error = "Reserved parameter";
     if (!error.empty()) {
         state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: " + error);

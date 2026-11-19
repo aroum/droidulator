@@ -231,6 +231,9 @@ int main() {
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("fn duplicate_params(x,x) { return x }");
+        assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+            [](const CustomScriptFunc& function) { return function.name == "duplicate_params"; }));
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
