@@ -1595,11 +1595,15 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
             target_fname.erase(target_fname.find_last_not_of(" \t") + 1);
             const size_t close_p = lhs.find(')', open_p);
-            std::stringstream parameterStream(lhs.substr(open_p + 1, close_p - open_p - 1));
-            std::string parameter;
-            while (std::getline(parameterStream, parameter, ',')) {
-                parameter.erase(0, parameter.find_first_not_of(" \t"));
-                parameter.erase(parameter.find_last_not_of(" \t") + 1);
+            const auto parameters = expression::splitArguments(lhs.substr(open_p + 1, close_p - open_p - 1));
+            std::set<std::string> parameterNames;
+            for (const auto& parameter : parameters) {
+                const auto tokens = expression::tokenize(parameter);
+                if (tokens.size() != 1 || tokens.front().kind != expression::Kind::Word ||
+                    tokens.front().text != parameter || !parameterNames.insert(parameter).second) {
+                    err = "Func Def Error: invalid or duplicate parameter";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
                 if (isReservedName(parameter)) { err = "Reserved parameter: " + parameter; return std::numeric_limits<double>::quiet_NaN(); }
             }
 
