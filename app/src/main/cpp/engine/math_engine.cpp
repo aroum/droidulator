@@ -30,7 +30,7 @@ std::vector<UserFunc> getParsedUserFuncs() {
         rhs.erase(rhs.find_last_not_of(" \t") + 1);
         
         size_t paren_open = lhs.find('(');
-        size_t paren_close = lhs.find(')');
+        const size_t paren_close = paren_open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(lhs, paren_open);
         if (paren_open == std::string::npos || paren_close == std::string::npos || paren_close < paren_open) continue;
         
         std::string name = lhs.substr(0, paren_open);
@@ -1545,7 +1545,11 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             std::string target_fname = lhs.substr(0, open_p);
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
             target_fname.erase(target_fname.find_last_not_of(" \t") + 1);
-            const size_t close_p = lhs.find(')', open_p);
+            const size_t close_p = expression::matchingGroupEnd(lhs, open_p);
+            if (close_p == std::string::npos) {
+                err = "Func Def Error: mismatched parameters";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             if (!expression::trim(std::string_view(lhs).substr(close_p + 1)).empty()) {
                 err = "Func Def Error: unexpected text after parameters";
                 return std::numeric_limits<double>::quiet_NaN();

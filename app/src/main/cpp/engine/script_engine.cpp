@@ -88,7 +88,7 @@ static bool handleScriptFunctionDeclaration(
     else return false;
 
     const size_t open = line.find('(');
-    const size_t close = line.find(')', open);
+    const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
     if (open == std::string::npos || close == std::string::npos) return false;
 
     const auto trim = [](std::string text) {
