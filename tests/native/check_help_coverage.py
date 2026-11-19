@@ -16,6 +16,8 @@ for line in catalog.splitlines():
 math = (engine / 'math_engine.cpp').read_text()
 unary = math.split('unaryFunctions() {')[1].split('return functions;')[0]
 required = set(re.findall(r'\{"([^"]+)"', unary))
+binary = math.split('binaryFunctions() {')[1].split('return functions;')[0]
+required.update(re.findall(r'\{"([^"]+)"', binary))
 required.update(re.findall(r'te_variable\{"([^"]+)"', math))
 tiny = (engine.parent / 'tinyexpr-plusplus/tinyexpr.cpp').read_text()
 tiny = tiny.split('te_parser::m_functions =')[1].split('//--------------------------------------------------')[0]

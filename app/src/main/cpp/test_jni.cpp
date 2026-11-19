@@ -105,6 +105,11 @@ int main() {
     assert(evaluate("2^3!", err) == 64 && err.empty());
     assert(std::isnan(evaluate("(-3)!", err)) && err.find("Domain Error") != std::string::npos);
     err.clear();
+    assert(expression::ArithmeticExpression::evaluate("logb(8,2)+C(5,2)+mod(7,3)", err,
+        lookupScalar, lookupUnary, lookupArray, lookupBinary) == 14 && err.empty());
+    assert(evaluate("dot(3,4)+P(3,2)", err) == 18 && err.empty());
+    assert(std::isnan(evaluate("mod(1,0)", err)) && err == "Division by Zero");
+    err.clear();
     assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
     assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
     err.clear();

@@ -1298,17 +1298,38 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
 }
 
 
-static UnaryFunction lookupUnary(std::string_view name) {
+using BinaryFunction = expression::ArithmeticExpression::BinaryFunction;
+static const std::map<std::string, BinaryFunction>& binaryFunctions() {
+    static const std::map<std::string, BinaryFunction> functions = {
+        {"atan2", custom_atan2}, {"logb", custom_logb}, {"mod", custom_mod},
+        {"C", custom_C}, {"Cnk", custom_C}, {"P", custom_P},
+        {"rUni", custom_rUni}, {"rNor", custom_rNor}, {"dot", custom_dot},
+    };
+    return functions;
+}
+
+static bool shadowsBuiltin(std::string_view name) {
     const auto& state = engineState();
     for (const auto& variable : state.user_args)
-        if (variable.name == name) return nullptr;
+        if (variable.name == name) return true;
     for (const auto& constant : state.user_consts)
-        if (constant.name == name) return nullptr;
+        if (constant.name == name) return true;
     for (const auto& function : state.user_script_funcs)
-        if (function.name == name) return nullptr;
+        if (function.name == name) return true;
     for (const auto& definition : state.user_funcs)
         if (expression::trim(std::string_view(definition).substr(0, definition.find('('))) == name)
-            return nullptr;
+            return true;
+    return false;
+}
+
+static BinaryFunction lookupBinary(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
+    const auto found = binaryFunctions().find(std::string(name));
+    return found == binaryFunctions().end() ? nullptr : found->second;
+}
+
+static UnaryFunction lookupUnary(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
     const auto found = unaryFunctions().find(std::string(name));
     return found == unaryFunctions().end() ? nullptr : found->second;
 }
@@ -1361,7 +1382,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray)) {
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary)) {
         if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
     }
@@ -1394,22 +1415,10 @@ double evaluate(const std::string& expr_str, std::string& err) {
     static const te_parser parserTemplate = [] {
         te_parser parserTemplate;
         for (const auto& [name, function] : unaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
+        for (const auto& [name, function] : binaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
 
-        parserTemplate.add_variable_or_function(te_variable{"atan2", custom_atan2});
-
-
-        
-        
-        parserTemplate.add_variable_or_function(te_variable{"logb", custom_logb});
-        parserTemplate.add_variable_or_function(te_variable{"mod", custom_mod});
-        parserTemplate.add_variable_or_function(te_variable{"C", custom_C});
-        parserTemplate.add_variable_or_function(te_variable{"Cnk", custom_C});
-        parserTemplate.add_variable_or_function(te_variable{"P", custom_P});
         parserTemplate.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         parserTemplate.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"rUni", custom_rUni});
-        parserTemplate.add_variable_or_function(te_variable{"rNor", custom_rNor});
-        parserTemplate.add_variable_or_function(te_variable{"dot", custom_dot});
         parserTemplate.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
         
         parserTemplate.add_variable_or_function(te_variable{"mean", variadic_mean, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});

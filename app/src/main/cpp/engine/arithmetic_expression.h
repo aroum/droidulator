@@ -12,13 +12,15 @@ namespace expression {
 class ArithmeticExpression {
 public:
     using UnaryFunction = double (*)(double);
+    using BinaryFunction = double (*)(double, double);
+    using BinaryLookup = BinaryFunction (*)(std::string_view);
     using UnaryLookup = UnaryFunction (*)(std::string_view);
     using ArrayLookup = const std::vector<double>* (*)(std::string_view);
     using ScalarLookup = std::optional<double> (*)(std::string_view);
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
                                           ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
-                                          ArrayLookup arrays = nullptr) {
+                                          ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr) {
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
@@ -29,6 +31,10 @@ public:
             if (node.op == '[') {
                 if (!arrays) return std::nullopt;
                 node.array = arrays(node.symbol);
+                continue;
+            }
+            if (node.op == 'g') {
+                if (!binary || !(node.binaryFunction = binary(node.symbol))) return std::nullopt;
                 continue;
             }
             if (node.op == 'f') {
@@ -73,6 +79,7 @@ public:
                     }
                     node.value = (*node.array)[static_cast<size_t>(left) - 1];
                     break;
+                case 'g': node.value = node.binaryFunction(left, right); break;
                 case 'f': node.value = node.function(left); break;
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
@@ -102,6 +109,7 @@ private:
         std::string_view symbol{};
         UnaryFunction function = nullptr;
         const std::vector<double>* array = nullptr;
+        BinaryFunction binaryFunction = nullptr;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -171,8 +179,16 @@ private:
                 if (next < tokens.size() && (tokens[next].text == "(" || tokens[next].text == "[")) {
                     const bool index = tokens[next++].text == "[";
                     const auto argument = parse(0, depth + 1);
-                    if (argument == invalid || next == tokens.size() || tokens[next++].text != (index ? "]" : ")")) return invalid;
-                    left = add({0, index ? '[' : 'f', argument, 0, token.text});
+                    if (argument == invalid) return invalid;
+                    if (!index && next < tokens.size() && tokens[next].kind == Kind::Comma) {
+                        ++next;
+                        const auto second = parse(0, depth + 1);
+                        if (second == invalid) return invalid;
+                        left = add({0, 'g', argument, second, token.text});
+                    } else {
+                        left = add({0, index ? '[' : 'f', argument, 0, token.text});
+                    }
+                    if (next == tokens.size() || tokens[next++].text != (index ? "]" : ")")) return invalid;
                 } else {
                     left = add({0, 0, 0, 0, token.text});
                 }
