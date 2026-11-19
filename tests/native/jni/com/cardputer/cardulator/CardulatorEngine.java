@@ -10,7 +10,7 @@ public class CardulatorEngine {
   native double nativeGetLastNumericVal();
   native NativeValue[] nativeValues(boolean constants);
   native NativeFormula[] nativeFormulas();
-  native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
+  native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
   native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
   native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
@@ -32,7 +32,10 @@ public class CardulatorEngine {
     String withNul = e.nativeEvaluate("print(\"a\u0000b\")");
     if (!withNul.contains("a\u0000b")) throw new AssertionError("NUL in output");
     for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
-    String all=e.nativeGetVariables(); if (!all.contains("e3 = 3") || !all.contains("e130 = 130") || all.contains("e2 = 2\n")) throw new AssertionError(all);
+    NativeValue[] history = e.nativeValues(false);
+    if (history.length != 128 || !history[0].name.equals("e3") || history[0].scalar != 3 ||
+        !history[127].name.equals("e130") || history[127].scalar != 130)
+      throw new AssertionError("typed history eviction or ordering");
     if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
     String[] printedError = e.nativeEvaluateDetailed("print(\"ERROR: x\")");
     if (!printedError[0].equals("ok") || !printedError[1].equals("ERROR: x")) throw new AssertionError("print status");
@@ -50,13 +53,16 @@ public class CardulatorEngine {
       String output = e.nativeEvaluate(tc[0]);
       if (output.startsWith("ERROR") || e.nativeGetLastNumericVal() != Double.parseDouble(tc[1])) throw new AssertionError(tc[0] + ": " + output);
     }
-    e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false); if (!e.nativeGetVariables().contains("x = inf")) throw new AssertionError("infinity");
-    e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN}); if (!e.nativeGetVariables().contains("arr = [1, nan]")) throw new AssertionError("array");
+    e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false);
+    e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN});
     NativeValue[] snapshot = e.nativeValues(false);
     if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("x") && v.scalar == Double.POSITIVE_INFINITY && v.elements == null))
       throw new AssertionError("typed scalar");
     if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("arr") && v.elements.length == 2 && Double.isNaN(v.elements[1])))
       throw new AssertionError("typed array");
+    e.nativeRestoreScalar("jni_const", 42, true);
+    if (java.util.Arrays.stream(e.nativeValues(true)).noneMatch(v -> v.name.equals("jni_const") && v.scalar == 42 && v.elements == null))
+      throw new AssertionError("typed constant");
     e.nativeEvaluate("jni_formula(x)=x^2");
     if (java.util.Arrays.stream(e.nativeFormulas()).noneMatch(f -> f.name.equals("jni_formula") && f.parameters.length == 1 && f.parameters[0].equals("x") && f.body.equals("x^2")))
       throw new AssertionError("formula snapshot");
