@@ -405,27 +405,9 @@ class MainActivity : AppCompatActivity() {
 
     private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
     private val searchField get() = findViewById<EditText>(R.id.search_query)
-    private val unitsReference by lazy {
-        assets.open("units.dat").bufferedReader().use { UnitsReference(it.lineSequence()) }
-    }
+    private val unitsPanel by lazy { UnitsPanel(this, itemsContainer, menuCards, dialogs) }
 
-    private fun renderUnits() {
-        itemsContainer.removeAllViews()
-        val notice = TextView(this).apply {
-            text = getString(R.string.units_search_hint)
-            setTextColor(ThemePalette.fgDim)
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(dp(8), dp(8), dp(8), dp(8))
-        }
-        itemsContainer.addView(notice)
-        for (entry in unitsReference.search(searchField.text.toString())) {
-            val detail = getString(R.string.unit_reference_detail, entry.name, entry.aliases, entry.definition, entry.name)
-            val card = menuCards.create(entry.name, entry.aliases.ifEmpty { entry.definition },
-                ThemePalette.bgCard, ThemePalette.fgText, ThemePalette.fgDim, onEdit = null, onDelete = null)
-            card.setOnClickListener { dialogs.showHelpDetail(entry.name, detail) }
-            itemsContainer.addView(card)
-        }
-    }
+    private fun renderUnits() = unitsPanel.render(searchField.text.toString())
 
     private fun filterCards() {
         if (tabs[currentTabPosition] == "Units") {
