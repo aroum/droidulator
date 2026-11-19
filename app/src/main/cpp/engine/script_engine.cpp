@@ -212,11 +212,6 @@ void runScript(const std::string& code) {
         size_t start_ip;        // For loops/conditionals: start of block header
         size_t end_ip;          // Ultimate end of the block (the matching end/endif/endfor/endwhile)
         
-        std::string var;
-        double end_val;
-        double step_val;
-        
-        std::string cond_str;
         std::string step_str;
     };
     std::vector<BlockState> blocks;
@@ -300,10 +295,10 @@ void runScript(const std::string& code) {
                         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                         ip = end_ip + 1;
                     } else if (cond_bool) {
-                        blocks.push_back({ "if", true, ip, end_ip, "", 0.0, 0.0, "", "" });
+                        blocks.push_back({ "if", true, ip, end_ip, "" });
                         ip++;
                     } else {
-                        blocks.push_back({ "if", false, ip, end_ip, "", 0.0, 0.0, "", "" });
+                        blocks.push_back({ "if", false, ip, end_ip, "" });
                         size_t next_branch = findMatchingBlockEnd(lines, ip, true);
                         if (next_branch != std::string::npos) {
                             ip = next_branch;
@@ -406,7 +401,7 @@ void runScript(const std::string& code) {
                     } else if (cond_bool) {
                         if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                         if (!found_block) {
-                            blocks.push_back({ "while", true, ip, end_ip, "", 0.0, 0.0, cond_str, "" });
+                            blocks.push_back({ "while", true, ip, end_ip, "" });
                         }
                         ip++;
                     } else {
@@ -528,7 +523,7 @@ void runScript(const std::string& code) {
                         } else if (cond_bool) {
                             if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
                             if (!found_block) {
-                                blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
+                                blocks.push_back({ "for", true, ip, end_ip, step_str });
                             }
                             ip++;
                         } else {
