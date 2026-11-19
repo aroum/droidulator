@@ -7,7 +7,7 @@
 #include <vector>
 
 namespace expression {
-enum class Kind { Word, String, Open, Close, Comma, Operator, Other };
+enum class Kind { Number, Word, String, Open, Close, Comma, Operator, Other };
 
 struct Token {
     Kind kind;
@@ -22,7 +22,23 @@ inline std::vector<Token> tokenize(std::string_view source) {
         const unsigned char c = source[i++];
         if (std::isspace(c)) continue;
         Kind kind = Kind::Other;
-        if (std::isalnum(c) || c == '_') {
+        auto digit = [&](size_t pos) { return pos < source.size() && source[pos] >= '0' && source[pos] <= '9'; };
+        if (digit(start) || (c == '.' && digit(i))) {
+            kind = Kind::Number;
+            while (digit(i)) ++i;
+            if (c != '.' && i < source.size() && source[i] == '.') {
+                ++i;
+                while (digit(i)) ++i;
+            }
+            if (i < source.size() && (source[i] == 'e' || source[i] == 'E')) {
+                size_t exponent = i + 1;
+                if (exponent < source.size() && (source[exponent] == '+' || source[exponent] == '-')) ++exponent;
+                if (digit(exponent)) {
+                    i = exponent + 1;
+                    while (digit(i)) ++i;
+                }
+            }
+        } else if (std::isalpha(c) || c == '_') {
             kind = Kind::Word;
             while (i < source.size() &&
                    (std::isalnum(static_cast<unsigned char>(source[i])) || source[i] == '_')) ++i;

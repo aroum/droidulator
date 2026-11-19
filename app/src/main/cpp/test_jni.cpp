@@ -77,6 +77,17 @@ int main() {
     const auto arguments = expression::splitArguments(R"(max(1, 2), 'm, x', [1,2])");
     assert((arguments == std::vector<std::string>{"max(1, 2)", "'m, x'", "[1,2]"}));
     assert(expression::splitArguments("x, [1, 2)").empty());
+    const std::pair<const char*, double> arithmeticCases[] = {
+        {"2+3*4", 14}, {"(2+3)*4", 20}, {"2^3^2", 64}, {"-2^2", 4},
+        {"2^-3", 0.125}, {"-(1+.5e+1)", -6}
+    };
+    for (const auto& [text, expected] : arithmeticCases) {
+        assert(expression::ArithmeticExpression::evaluate(text, err) == expected);
+        assert(evaluate(text, err) == expected && err.empty());
+    }
+    assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
+    assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
+    err.clear();
     const std::pair<const char*, double> rkmCases[] = {
         {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
         {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}

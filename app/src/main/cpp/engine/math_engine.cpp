@@ -1,4 +1,4 @@
-#include "expression_tokens.h"
+#include "arithmetic_expression.h"
 #include "math_engine.h"
 #include "script_engine.h"
 #include "tinyexpr.h"
@@ -1337,6 +1337,9 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err))
+        return *arithmetic;
+
     std::string subbed = substituteUserFuncs(expr_str, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
 
