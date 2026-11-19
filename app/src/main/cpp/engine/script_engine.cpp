@@ -197,6 +197,10 @@ static bool executeForStep(const std::string& step, std::string& err) {
             std::string var_name = st.substr(0, st.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
+            if (!expression::isIdentifier(var_name)) {
+                err = "Invalid assignment name";
+                return false;
+            }
             char op = st[st.size() - 1];
             bool found = false;
             for (auto& arg : engineState().user_args) {
@@ -231,6 +235,10 @@ static bool executeForStep(const std::string& step, std::string& err) {
                 s.erase(s.find_last_not_of(" \t") + 1);
             };
             trim(lhs); trim(rhs);
+            if (!expression::isIdentifier(lhs)) {
+                err = "Invalid assignment name";
+                return false;
+            }
             const auto expanded = preprocessArrayLookups(rhs, err);
             if (!err.empty()) return false;
             double val = evaluate(preprocessLen(expanded), err);
