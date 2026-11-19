@@ -634,6 +634,11 @@ void runScript(const std::string& code) {
             std::string var_name = line.substr(0, line.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
+            if (!expression::isIdentifier(var_name)) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid assignment name");
+                ++ip;
+                continue;
+            }
             if (isReservedName(var_name)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + var_name); ip++; continue; }
             char op = line[line.size() - 1];
             bool found = false;
