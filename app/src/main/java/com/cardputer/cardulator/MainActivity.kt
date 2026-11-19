@@ -1172,9 +1172,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun queueCommand(input: String, scriptName: String? = null): Boolean {
         val repo = calculatorRepository
+        val scripts = userScripts.toList()
         val plotStorage = PlotStateStorage(applicationContext)
         val accepted = session.runCommand(input, scriptName) {
-            repo.save()
+            repo.save(scripts)
             if (scriptName != null || input.startsWith("plot(") ||
                 input.startsWith("plot.") || input.startsWith("run(")) {
                 plotStorage.save(nativeGetPlotLines(), nativeGetPlotLimits())
@@ -1784,7 +1785,8 @@ class MainActivity : AppCompatActivity() {
             else {
                 val expression = if (tab == "Constants" && !valStr.startsWith("const ")) "const $valStr" else valStr
                 val repository = calculatorRepository
-                if (session.runCommand(expression, definition = draft) { repository.save() }) {
+                val scripts = userScripts.toList()
+                if (session.runCommand(expression, definition = draft) { repository.save(scripts) }) {
                     definitionEditor?.dialog?.setCancelable(false)
                     et.isEnabled = false
                 }
@@ -1850,7 +1852,11 @@ class MainActivity : AppCompatActivity() {
 
     private val calculatorRepository by lazy { CalculatorRepository(applicationContext, session) }
 
-    private fun saveUserDataToStorage() = calculatorRepository.save()
+    private fun saveUserDataToStorage() {
+        val repository = calculatorRepository
+        val scripts = userScripts.toList()
+        session.compute({ repository.save(scripts) }) {}
+    }
 
     private fun loadUserDataFromStorage(restoreEngine: Boolean) {
         calculatorRepository.load(restoreEngine) {

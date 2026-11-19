@@ -6,7 +6,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
     private val storage = UserDataStorage(context)
     private val userScripts get() = session.userScripts
 
-    fun save() {
+    fun save(scripts: List<Pair<String, String>>) {
         try {
             if (session.storageLoadFailed) return
             val json = org.json.JSONObject()
@@ -31,7 +31,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
 
             // Save scripts
             val scriptsArray = org.json.JSONArray()
-            for (s in userScripts) {
+            for (s in scripts) {
                 val scriptObj = org.json.JSONObject()
                 scriptObj.put("name", s.first)
                 scriptObj.put("code", s.second)
