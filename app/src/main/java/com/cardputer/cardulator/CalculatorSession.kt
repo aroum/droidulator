@@ -4,7 +4,13 @@ import androidx.lifecycle.ViewModel
 
 data class ScriptDraft(val originalName: String?, var name: String, var code: String)
 
+data class DefinitionDraft(
+    val title: String, val hint: String, val tab: String,
+    var expression: String, var cursor: Int = expression.length
+)
+
 class CalculatorSession : ViewModel() {
+    var definitionDraft: DefinitionDraft? = null
     var scriptDraft: ScriptDraft? = null
     var initialized = false
     var storageLoadFailed = false

@@ -412,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         rebuildReplOutput()
         mainRoot.visibility = View.VISIBLE
+        session.definitionDraft?.let { showDefinitionEditorDialog(it.title, it.expression, it.hint, it.tab) }
         session.scriptDraft?.let { openScriptEditor(it.originalName) }
     }
 
@@ -1434,9 +1435,7 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onEdit = if (isHistory) null else fun() {
-                                showDefinitionEditorDialog(getString(R.string.edit_variable, name), "$name = $value", "$name = $value") { newExpr ->
-                                    saveDefinition(newExpr, tabName)
-                                }
+                                showDefinitionEditorDialog(getString(R.string.edit_variable, name), "$name = $value", "$name = $value", tabName)
                             },
                             onDelete = if (isHistory) null else fun() {
                                 showConfirmDeleteDialog(name) {
@@ -1468,10 +1467,7 @@ class MainActivity : AppCompatActivity() {
                         dimColor = dimColor,
                         onEdit = if (!isBuiltIn) {
                             {
-                                showDefinitionEditorDialog(getString(R.string.edit_constant, name), "$name = $value", "$name = $value") { newExpr ->
-                                    val fullExpr = if (newExpr.startsWith("const ")) newExpr else "const $newExpr"
-                                    saveDefinition(fullExpr, tabName)
-                                }
+                                showDefinitionEditorDialog(getString(R.string.edit_constant, name), "$name = $value", "$name = $value", tabName)
                             }
                         } else null,
                         onDelete = if (!isBuiltIn) {
@@ -1515,9 +1511,7 @@ class MainActivity : AppCompatActivity() {
                                 showRunFormulaDialog(line)
                             },
                             onEdit = {
-                                showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line) { newFormula ->
-                                    saveDefinition(newFormula, tabName)
-                                }
+                                showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line, tabName)
                             },
                             onDelete = {
                                 showConfirmDeleteDialog(name) {
@@ -1939,15 +1933,18 @@ class MainActivity : AppCompatActivity() {
         return true
     }
 
-    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, onSave: (String) -> Boolean) {
+    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, tab: String) {
+        val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
+            .also { session.definitionDraft = it }
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
         val fgDim = ThemePalette.fgDim
 
         val et = EditText(this).apply {
             inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setText(initialExpr)
-            setSelection(initialExpr.length)
+            setText(draft.expression)
+            setSelection(draft.cursor.coerceIn(0, length()))
+            doAfterTextChanged { draft.expression = it.toString() }
             hint = hintText
             typeface = android.graphics.Typeface.MONOSPACE
             background = rounded(bgSoft)
@@ -1969,11 +1966,19 @@ class MainActivity : AppCompatActivity() {
             et.post { applySyntaxHighlighting(et.editableText) }
         }
 
-        showGruvboxCustomDialog(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
+        val dialog = showGruvboxCustomDialog(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
             val valStr = et.text.toString().trim()
             if (valStr.isEmpty()) { et.error = this@MainActivity.getString(R.string.ui_text_017); false }
-            else onSave(valStr)
+            else {
+                val expression = if (tab == "Constants" && !valStr.startsWith("const ")) "const $valStr" else valStr
+                saveDefinition(expression, tab)
+            }
         })
+        dialog.setOnDismissListener {
+            activeDialogs.remove(dialog)
+            if (isChangingConfigurations) draft.cursor = et.selectionStart
+            else session.definitionDraft = null
+        }
     }
 
     private fun openScriptEditor(originalName: String?) {
@@ -2250,10 +2255,7 @@ class MainActivity : AppCompatActivity() {
             else -> "x = 42"
         }
 
-        showDefinitionEditorDialog(title, "", hintText) { expr ->
-            val fullExpr = if (activeTab == "Constants" && !expr.startsWith("const ")) "const $expr" else expr
-            saveDefinition(fullExpr, activeTab)
-        }
+        showDefinitionEditorDialog(title, "", hintText, activeTab)
     }
 
     private fun savePlotState() {
