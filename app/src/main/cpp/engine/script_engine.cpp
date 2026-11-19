@@ -75,6 +75,63 @@ static bool evaluateScriptCondition(const std::string& condition, std::string& e
     return error.empty() && !std::isnan(value) && value != 0.0;
 }
 
+static bool handleScriptFunctionDeclaration(
+    const std::vector<std::string>& lines, size_t sourceLine, size_t& ip
+) {
+    const auto& line = lines[ip];
+    size_t keywordLength;
+    if (line.rfind("fn ", 0) == 0) keywordLength = 3;
+    else if (line.rfind("def ", 0) == 0) keywordLength = 4;
+    else if (line.rfind("function ", 0) == 0) keywordLength = 9;
+    else return false;
+
+    const size_t open = line.find('(');
+    const size_t close = line.find(')', open);
+    if (open == std::string::npos || close == std::string::npos) return false;
+
+    const auto trim = [](std::string text) {
+        text.erase(0, text.find_first_not_of(" \t"));
+        text.erase(text.find_last_not_of(" \t") + 1);
+        return text;
+    };
+    const auto name = trim(line.substr(keywordLength, open - keywordLength));
+    std::vector<std::string> params;
+    for (size_t pos = open + 1; pos < close;) {
+        const size_t comma = std::min(line.find(',', pos), close);
+        auto param = trim(line.substr(pos, comma - pos));
+        if (!param.empty()) params.push_back(std::move(param));
+        pos = comma + 1;
+    }
+
+    auto& state = engineState();
+    size_t end = findMatchingBlockEnd(lines, ip);
+    std::string error;
+    if (isReservedName(name)) error = "Reserved name: " + name;
+    else if (std::any_of(params.begin(), params.end(), isReservedName)) error = "Reserved parameter";
+    if (!error.empty()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: " + error);
+        ip = end == std::string::npos ? lines.size() : end + 1;
+        return true;
+    }
+
+    // Declarations without braces can also terminate with an explicit end.
+    if (end == std::string::npos) {
+        end = ip + 1;
+        while (end < lines.size() && lines[end] != "end") ++end;
+    }
+    std::vector<std::string> body(lines.begin() + ip + 1, lines.begin() + end);
+    ip = end + 1;
+    auto& functions = state.user_script_funcs;
+    functions.erase(std::remove_if(functions.begin(), functions.end(), [&](const CustomScriptFunc& function) {
+        return function.name == name;
+    }), functions.end());
+    functions.push_back({name, std::move(params), std::move(body)});
+    auto& words = state.autocomplete_words;
+    const auto completion = name + "(";
+    if (std::find(words.begin(), words.end(), completion) == words.end()) words.push_back(completion);
+    return true;
+}
+
 void runScript(const std::string& code) {
     engineState().script_console_output.clear();
     if (writesHistoryVariable(code)) {
@@ -195,70 +252,8 @@ void runScript(const std::string& code) {
             break;
         }
 
-        // fn / def / function declaration
-        if (line.rfind("fn ", 0) == 0 || line.rfind("def ", 0) == 0 || line.rfind("function ", 0) == 0) {
-            size_t open_paren = line.find('(');
-            size_t close_paren = line.find(')', open_paren);
-            if (open_paren != std::string::npos && close_paren != std::string::npos) {
-                size_t kw_len = (line.rfind("fn ", 0) == 0) ? 3 : ((line.rfind("def ", 0) == 0) ? 4 : 9);
-                std::string fname = line.substr(kw_len, open_paren - kw_len);
-                fname.erase(0, fname.find_first_not_of(" \t"));
-                fname.erase(fname.find_last_not_of(" \t") + 1);
-                if (isReservedName(fname)) {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + fname);
-                    const size_t end = findMatchingBlockEnd(lines, ip);
-                    ip = end == std::string::npos ? lines.size() : end + 1;
-                    continue;
-                }
-                
-                std::string params_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                std::vector<std::string> params;
-                size_t p_pos = 0;
-                while (p_pos < params_str.size()) {
-                    size_t comma = params_str.find(',', p_pos);
-                    std::string p = (comma == std::string::npos) ? params_str.substr(p_pos) : params_str.substr(p_pos, comma - p_pos);
-                    p.erase(0, p.find_first_not_of(" \t"));
-                    p.erase(p.find_last_not_of(" \t") + 1);
-                    if (!p.empty()) params.push_back(p);
-                    if (comma == std::string::npos) break;
-                    p_pos = comma + 1;
-                }
-                if (std::any_of(params.begin(), params.end(), isReservedName)) {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved parameter");
-                    const size_t end = findMatchingBlockEnd(lines, ip);
-                    ip = end == std::string::npos ? lines.size() : end + 1;
-                    continue;
-                }
+        if (handleScriptFunctionDeclaration(lines, sourceLines[ip], ip)) continue;
 
-                size_t end_ip = findMatchingBlockEnd(lines, ip);
-                std::vector<std::string> body_stmts;
-                if (end_ip != std::string::npos) {
-                    for (size_t k = ip + 1; k < end_ip && k < lines.size(); ++k) {
-                        body_stmts.push_back(lines[k]);
-                    }
-                    ip = end_ip + 1;
-                } else {
-                    // Fallback to searching for 'end' line if block doesn't use braces
-                    size_t k = ip + 1;
-                    while (k < lines.size() && lines[k] != "end") {
-                        body_stmts.push_back(lines[k]);
-                        k++;
-                    }
-                    ip = k + 1;
-                }
-
-                engineState().user_script_funcs.erase(std::remove_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f){
-                    return f.name == fname;
-                }), engineState().user_script_funcs.end());
-
-                engineState().user_script_funcs.push_back({fname, params, body_stmts});
-                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), fname + "(") == engineState().autocomplete_words.end()) {
-                    engineState().autocomplete_words.push_back(fname + "(");
-                }
-                continue;
-            }
-        }
-        
         // plot commands
         if (line.rfind("plot", 0) == 0) {
             std::string err;
