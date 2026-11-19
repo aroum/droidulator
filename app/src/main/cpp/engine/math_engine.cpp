@@ -708,13 +708,8 @@ inline std::string preprocessLen(const std::string& s) {
     return res;
 }
 
-static bool isValidLoopIdent(const std::string& s) {
-    if (s.empty() || s == "pi" || s == "e" || s == "phi") return false;
-    if (!std::isalpha((unsigned char)s[0]) && s[0] != '_') return false;
-    for (char c : s) {
-        if (!std::isalnum((unsigned char)c) && c != '_') return false;
-    }
-    return true;
+static bool isValidLoopIdent(const std::string& name) {
+    return name != "pi" && name != "e" && name != "phi" && expression::isIdentifier(name);
 }
 
 static bool isDefinedScalarName(const std::string& s) {
@@ -724,14 +719,10 @@ static bool isDefinedScalarName(const std::string& s) {
 }
 
 static bool exprReferencesIdent(const std::string& expr, const std::string& ident) {
-    size_t pos = 0;
-    while ((pos = expr.find(ident, pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)expr[pos - 1]) && expr[pos - 1] != '_'));
-        bool next_ok = (pos + ident.size() == expr.size() || (!std::isalnum((unsigned char)expr[pos + ident.size()]) && expr[pos + ident.size()] != '_'));
-        if (prev_ok && next_ok) return true;
-        pos += ident.size();
-    }
-    return false;
+    const auto tokens = expression::tokenize(expr);
+    return std::any_of(tokens.begin(), tokens.end(), [&](const auto& token) {
+        return token.kind == expression::Kind::Word && token.text == ident;
+    });
 }
 
 static std::string preprocessInlineConditionalsAndLoops(const std::string& s, std::string& err) {
