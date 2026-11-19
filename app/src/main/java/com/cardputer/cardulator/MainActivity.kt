@@ -361,6 +361,7 @@ class MainActivity : AppCompatActivity() {
         mainRoot.visibility = View.VISIBLE
         observeCommands()
         session.definitionDraft?.let { showDefinitionEditorDialog(it.title, it.expression, it.hint, it.tab) }
+        session.formulaRunDraft?.let { showRunFormulaDialog(it.formula, it.arguments) }
         session.scriptDraft?.let { openScriptEditor(it.originalName) }
     }
 
@@ -1581,7 +1582,7 @@ class MainActivity : AppCompatActivity() {
         dialogs.show(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
     }
 
-    private fun showRunFormulaDialog(formula: NativeFormula) {
+    private fun showRunFormulaDialog(formula: NativeFormula, arguments: List<String> = emptyList()) {
         val formulaLine = formula.expression
         val cleanName = formula.name
         val params = formula.parameters
@@ -1597,10 +1598,12 @@ class MainActivity : AppCompatActivity() {
 
         val inputFields = mutableListOf<Pair<String, EditText>>()
 
-        for (param in params) {
+        for ((index, param) in params.withIndex()) {
             val et = EditText(this).apply {
                 inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
                 hint = getString(R.string.value_for_param, param)
+                setText(arguments.getOrNull(index).orEmpty())
+                setSelection(text.length)
                 typeface = android.graphics.Typeface.MONOSPACE
                 background = rounded(bgSoft)
                 setTextColor(fgColor)
@@ -1653,7 +1656,9 @@ class MainActivity : AppCompatActivity() {
 
         fun updateLiveResult() {
             cancelPreview()
-            val argValues = inputFields.map { it.second.text.toString().trim() }
+            val draftArguments = inputFields.map { it.second.text.toString() }
+            session.formulaRunDraft = FormulaRunDraft(formula, draftArguments)
+            val argValues = draftArguments.map { it.trim() }
             val hasEmptyInput = argValues.any { it.isEmpty() }
             if (hasEmptyInput && params.isNotEmpty()) {
                 currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
@@ -1732,6 +1737,7 @@ class MainActivity : AppCompatActivity() {
         )
         formulaDialog.setOnDismissListener { dismissed ->
             cancelPreview()
+            if (!isChangingConfigurations) session.formulaRunDraft = null
             activeDialogs.remove(dismissed)
         }
     }

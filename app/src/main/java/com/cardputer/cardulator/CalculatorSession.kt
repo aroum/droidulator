@@ -17,6 +17,8 @@ data class DefinitionDraft(
     var expression: String, var cursor: Int = expression.length
 )
 
+data class FormulaRunDraft(val formula: NativeFormula, val arguments: List<String>)
+
 class CalculatorSession : ViewModel() {
     private val engineDelegate = lazy { CardulatorEngine() }
     val engine by engineDelegate
@@ -71,6 +73,7 @@ class CalculatorSession : ViewModel() {
     }
 
     var definitionDraft: DefinitionDraft? = null
+    var formulaRunDraft: FormulaRunDraft? = null
     var scriptDraft: ScriptDraft? = null
     var initialized = false
     var storageLoadFailed = false
