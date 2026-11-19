@@ -478,21 +478,10 @@ inline std::string preprocessExpression(const std::string& s) {
                                 dec_part += s_clean[i++];
                             }
                         }
-                        if (c == 'k' && dec_part.size() == 2) {
-                            double base_val = std::atof(num.c_str());
-                            double dec_val = std::atof(dec_part.c_str());
-                            double total = base_val * 1000.0 + dec_val;
-                            res.erase(res.size() - num.size());
-                            std::ostringstream oss;
-                            oss << total;
-                            res += oss.str();
-                        } else {
-                            if (!dec_part.empty()) {
-                                res += "." + dec_part;
-                            }
-                            res.insert(res.size() - num.size() - (dec_part.empty() ? 0 : dec_part.size() + 1), "(");
-                            res += " * " + mult + ")";
-                        }
+                        const auto literalStart = res.size() - num.size();
+                        res.insert(literalStart, "(");
+                        if (!dec_part.empty()) res += "." + dec_part;
+                        res += " * " + mult + ")";
                         continue;
                     }
                 }

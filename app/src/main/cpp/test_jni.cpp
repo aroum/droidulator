@@ -42,6 +42,15 @@ int main() {
     assert(xorHelp.find("2 xor 3 = 0") != std::string::npos);
     std::cout << "[Droidulator Native Test] Initializing..." << std::endl;
     std::string err;
+    const std::pair<const char*, double> rkmCases[] = {
+        {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
+        {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}
+    };
+    for (const auto& [expression, expected] : rkmCases) {
+        assert(std::abs(evaluate(expression, err) - expected) < 1e-9);
+        assert(err.empty());
+    }
+
     bool isDef = false;
 
     // 1. Basic math test
