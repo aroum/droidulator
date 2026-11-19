@@ -150,8 +150,11 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
         for (auto part : parts) {
             part.erase(0, part.find_first_not_of(" \t"));
             part.erase(part.find_last_not_of(" \t") + 1);
-            std::string partError;
-            values.push_back(evaluate(preprocessArrayLookups(part, partError), partError));
+            const auto expanded = preprocessArrayLookups(part, error);
+            if (!error.empty()) break;
+            const double value = evaluate(expanded, error);
+            if (!error.empty()) break;
+            values.push_back(value);
         }
     } else {
         values = parseArrayExpr(expressionText, isArray, error);
