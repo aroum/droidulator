@@ -401,6 +401,8 @@ class MainActivity : AppCompatActivity() {
             override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, true)
         }
 
+    private val menuCards by lazy { CalculatorMenuCards(this) }
+
     private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
     private val searchField get() = findViewById<EditText>(R.id.search_query)
     private val unitsReference by lazy {
@@ -418,7 +420,7 @@ class MainActivity : AppCompatActivity() {
         itemsContainer.addView(notice)
         for (entry in unitsReference.search(searchField.text.toString())) {
             val detail = getString(R.string.unit_reference_detail, entry.name, entry.aliases, entry.definition, entry.name)
-            val card = createMenuItemCard(entry.name, entry.aliases.ifEmpty { entry.definition },
+            val card = menuCards.create(entry.name, entry.aliases.ifEmpty { entry.definition },
                 ThemePalette.bgCard, ThemePalette.fgText, ThemePalette.fgDim, onEdit = null, onDelete = null)
             card.setOnClickListener { dialogs.showHelpDetail(entry.name, detail) }
             itemsContainer.addView(card)
@@ -1303,7 +1305,7 @@ class MainActivity : AppCompatActivity() {
                     val raw = session.engine.nativeGetHelp("help($topic)")
                     val detail = raw.lineSequence().filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
 
-                    val card = createMenuItemCard(topic, detail.lineSequence().firstOrNull().orEmpty(),
+                    val card = menuCards.create(topic, detail.lineSequence().firstOrNull().orEmpty(),
                         cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
                     card.tag = "$topic $detail"
                     card.setOnClickListener {
@@ -1331,7 +1333,7 @@ class MainActivity : AppCompatActivity() {
                         val value = line.expressionValue()
 
                         val isHistory = name.matches(Regex("e[0-9]+"))
-                        val cardView = createMenuItemCard(
+                        val cardView = menuCards.create(
                             title = name,
                             subtitle = "= $value",
                             cardBgColor = cardBgColor,
@@ -1358,7 +1360,7 @@ class MainActivity : AppCompatActivity() {
                     val value = entry.expressionValue()
                     val isBuiltIn = (name == "pi" || name == "e")
 
-                    val cardView = createMenuItemCard(
+                    val cardView = menuCards.create(
                         title = name,
                         subtitle = "= $value ${if (isBuiltIn) getString(R.string.builtin_constant) else ""}",
                         cardBgColor = cardBgColor,
@@ -1399,7 +1401,7 @@ class MainActivity : AppCompatActivity() {
                         val line = formula.expression
                         val bodySubtitle = "= ${formula.body}"
 
-                        val cardView = createMenuItemCard(
+                        val cardView = menuCards.create(
                             title = name,
                             subtitle = bodySubtitle,
                             cardBgColor = cardBgColor,
@@ -1438,7 +1440,7 @@ class MainActivity : AppCompatActivity() {
                         val scriptName = script.first
                         val scriptCode = script.second
 
-                        val cardView = createMenuItemCard(
+                        val cardView = menuCards.create(
                             title = scriptName,
                             subtitle = scriptCode.lines().firstOrNull()?.take(60) ?: "",
                             runLabel = getString(R.string.action_run),
@@ -1467,62 +1469,6 @@ class MainActivity : AppCompatActivity() {
             }
         }
         filterCards()
-    }
-
-    private fun createMenuItemCard(
-        title: String,
-        subtitle: String,
-        cardBgColor: Int,
-        textColor: Int,
-        dimColor: Int,
-        onRun: (() -> Unit)? = null,
-        runLabel: String = getString(R.string.action_eval),
-        onEdit: (() -> Unit)?,
-        onDelete: (() -> Unit)?
-    ): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.CENTER_VERTICAL
-            background = GradientDrawable().apply { setColor(cardBgColor); cornerRadius = dp(8).toFloat() }
-            tag = "$title $subtitle"
-            setPadding(dp(6), dp(2), dp(6), dp(2))
-            layoutParams = LinearLayout.LayoutParams(-1, -2).apply { bottomMargin = dp(3) }
-        }
-        val labels = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            layoutParams = LinearLayout.LayoutParams(0, -2, 1f)
-        }
-        fun label(value: String, size: Float, color: Int) = TextView(this).apply {
-            text = value
-            textSize = size
-            setTextColor(color)
-            typeface = android.graphics.Typeface.MONOSPACE
-            maxLines = 1
-            ellipsize = android.text.TextUtils.TruncateAt.END
-        }
-        labels.addView(label(title, 15f, textColor))
-        labels.addView(label(subtitle, 13f, dimColor))
-        container.addView(labels)
-        fun action(icon: Int, description: String, color: Int, callback: () -> Unit) {
-            container.addView(com.google.android.material.button.MaterialButton(this).apply {
-                layoutParams = LinearLayout.LayoutParams(dp(36), dp(36)).apply { marginStart = dp(4) }
-                contentDescription = description
-                setIconResource(icon)
-                iconSize = dp(20)
-                iconPadding = 0
-                iconGravity = com.google.android.material.button.MaterialButton.ICON_GRAVITY_TEXT_START
-                iconTint = ColorStateList.valueOf(ThemePalette.bgDarkText)
-                backgroundTintList = ColorStateList.valueOf(color)
-                cornerRadius = dp(8)
-                setPadding(0, 0, 0, 0)
-                setOnClickListener { callback() }
-            })
-        }
-        onRun?.let { action(R.drawable.ic_run, runLabel, ThemePalette.yellow, it) }
-        onEdit?.let { action(R.drawable.ic_edit, getString(R.string.ui_text_009), ThemePalette.green, it) }
-        onDelete?.let { action(R.drawable.ic_close, getString(R.string.ui_text_010), ThemePalette.red, it) }
-
-        return container
     }
 
     private fun showRunFormulaDialog(formula: NativeFormula, arguments: List<String> = emptyList()) {
