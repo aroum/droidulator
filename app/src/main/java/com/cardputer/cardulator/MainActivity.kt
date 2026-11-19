@@ -1217,7 +1217,7 @@ class MainActivity : AppCompatActivity() {
             if (script != null && !entry.isError) {
                 val log = entry.rawOutput
                 appendRawOutput(getString(R.string.script_output_entry, script, log))
-                showScriptOutputDialog(getString(R.string.script_output_title, script), log)
+                dialogs.showScriptOutput(getString(R.string.script_output_title, script), log)
             } else {
                 appendOutputEntry(entry)
                 if (entry.isError) showErrorOverlay(entry.rawOutput.removePrefix("ERROR: "))
@@ -1551,36 +1551,6 @@ class MainActivity : AppCompatActivity() {
         onDelete?.let { action(R.drawable.ic_close, getString(R.string.ui_text_010), ThemePalette.red, it) }
 
         return container
-    }
-
-    private fun showScriptOutputDialog(title: String, logText: String) {
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val borderColor = ThemePalette.borderColor
-
-        val tvOut = TextView(this).apply {
-            text = if (logText.isBlank()) getString(R.string.script_output_empty) else logText
-            setTextColor(fgColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(dp(20), dp(16), dp(20), dp(16))
-        }
-
-        val scrollContainer = ScrollView(this).apply {
-            val bgDrawable = GradientDrawable().apply {
-                setColor(bgSoft)
-                setStroke(dp(2), borderColor)
-                cornerRadius = dp(8).toFloat()
-            }
-            background = bgDrawable
-            isScrollbarFadingEnabled = false
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(400))
-            lp.setMargins(0, dp(8), 0, dp(8))
-            layoutParams = lp
-            addView(tvOut)
-        }
-
-        dialogs.show(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
     }
 
     private fun showRunFormulaDialog(formula: NativeFormula, arguments: List<String> = emptyList()) {

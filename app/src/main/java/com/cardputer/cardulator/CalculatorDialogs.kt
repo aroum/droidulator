@@ -19,6 +19,36 @@ internal class CalculatorDialogs(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
+    fun showScriptOutput(title: String, logText: String) {
+        val bgSoft = ThemePalette.bgSoft
+        val fgColor = ThemePalette.fgText
+        val borderColor = ThemePalette.borderColor
+
+        val tvOut = TextView(activity).apply {
+            text = if (logText.isBlank()) activity.getString(R.string.script_output_empty) else logText
+            setTextColor(fgColor)
+            textSize = 13f
+            typeface = android.graphics.Typeface.MONOSPACE
+            setPadding(dp(20), dp(16), dp(20), dp(16))
+        }
+
+        val scrollContainer = ScrollView(activity).apply {
+            val bgDrawable = GradientDrawable().apply {
+                setColor(bgSoft)
+                setStroke(dp(2), borderColor)
+                cornerRadius = dp(8).toFloat()
+            }
+            background = bgDrawable
+            isScrollbarFadingEnabled = false
+            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, dp(400))
+            lp.setMargins(0, dp(8), 0, dp(8))
+            layoutParams = lp
+            addView(tvOut)
+        }
+
+        show(title, scrollContainer, positiveText = activity.getString(R.string.ui_text_015), showCancel = false) {}
+    }
+
     fun show(
         title: String,
         contentView: View,
