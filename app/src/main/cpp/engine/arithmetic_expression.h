@@ -11,10 +11,12 @@ namespace expression {
 // so evaluating an arbitrarily long operator chain does not recurse.
 class ArithmeticExpression {
 public:
+    using UnaryFunction = double (*)(double);
+    using UnaryLookup = UnaryFunction (*)(std::string_view);
     using ScalarLookup = std::optional<double> (*)(std::string_view);
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
-                                          ScalarLookup lookup = nullptr) {
+                                          ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr) {
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
@@ -22,6 +24,10 @@ public:
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
             if (node.symbol.empty()) continue;
+            if (node.op == 'f') {
+                if (!unary || !(node.function = unary(node.symbol))) return std::nullopt;
+                continue;
+            }
             if (!lookup) return std::nullopt;
             const auto value = lookup(node.symbol);
             if (!value) return std::nullopt;
@@ -32,6 +38,7 @@ public:
             const double left = parser.nodes[node.left].value;
             const double right = parser.nodes[node.right].value;
             switch (node.op) {
+                case 'f': node.value = node.function(left); break;
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
                 case '*': node.value = left * right; break;
@@ -58,6 +65,7 @@ private:
         size_t left = 0;
         size_t right = 0;
         std::string_view symbol{};
+        UnaryFunction function = nullptr;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -96,7 +104,14 @@ private:
             left = add({negative ? -value : value});
         } else {
             if (token.kind == Kind::Word) {
-                left = add({0, 0, 0, 0, token.text});
+                if (next < tokens.size() && tokens[next].text == "(") {
+                    ++next;
+                    const auto argument = parse(0, depth + 1);
+                    if (argument == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
+                    left = add({0, 'f', argument, 0, token.text});
+                } else {
+                    left = add({0, 0, 0, 0, token.text});
+                }
             } else if (token.text == "(") {
                 left = parse(0, depth + 1);
                 if (left == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;

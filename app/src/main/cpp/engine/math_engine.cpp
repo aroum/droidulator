@@ -1319,6 +1319,21 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
 }
 
 
+static UnaryFunction lookupUnary(std::string_view name) {
+    const auto& state = engineState();
+    for (const auto& variable : state.user_args)
+        if (variable.name == name) return nullptr;
+    for (const auto& constant : state.user_consts)
+        if (constant.name == name) return nullptr;
+    for (const auto& function : state.user_script_funcs)
+        if (function.name == name) return nullptr;
+    for (const auto& definition : state.user_funcs)
+        if (expression::trim(std::string_view(definition).substr(0, definition.find('('))) == name)
+            return nullptr;
+    const auto found = unaryFunctions().find(std::string(name));
+    return found == unaryFunctions().end() ? nullptr : found->second;
+}
+
 static std::optional<double> lookupScalar(std::string_view name) {
     const auto& state = engineState();
     if (name.size() > 1 && name.front() == 'e') {
@@ -1361,8 +1376,10 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar))
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary)) {
+        if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
+    }
 
     std::string subbed = substituteUserFuncs(expr_str, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();

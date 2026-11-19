@@ -87,6 +87,11 @@ int main() {
         assert(expression::ArithmeticExpression::evaluate(text, err) == expected);
         assert(evaluate(text, err) == expected && err.empty());
     }
+    assert(expression::ArithmeticExpression::evaluate("abs(-sqrt(9))+fact(3)", err,
+        lookupScalar, lookupUnary) == 9 && err.empty());
+    assert(evaluate("sin(30)+cos(60)", err) > 0.999999 && err.empty());
+    assert(std::isnan(evaluate("sqrt(-1)", err)) && err.find("Domain Error") != std::string::npos);
+    err.clear();
     assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
     assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
     err.clear();
