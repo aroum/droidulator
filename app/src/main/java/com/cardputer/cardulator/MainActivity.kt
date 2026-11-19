@@ -405,6 +405,8 @@ class MainActivity : AppCompatActivity() {
 
     private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
     private val searchField get() = findViewById<EditText>(R.id.search_query)
+    private val helpPanel by lazy { HelpPanel(itemsContainer, menuCards, dialogs) }
+
     private val unitsPanel by lazy { UnitsPanel(this, itemsContainer, menuCards, dialogs) }
 
     private fun renderUnits() = unitsPanel.render(searchField.text.toString())
@@ -1281,21 +1283,7 @@ class MainActivity : AppCompatActivity() {
         val dimColor = ThemePalette.fgDim
 
         when (tabName) {
-            "Help" -> {
-                val topics = session.engine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }.toList()
-                for (topic in topics) {
-                    val raw = session.engine.nativeGetHelp("help($topic)")
-                    val detail = raw.lineSequence().filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
-
-                    val card = menuCards.create(topic, detail.lineSequence().firstOrNull().orEmpty(),
-                        cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
-                    card.tag = "$topic $detail"
-                    card.setOnClickListener {
-                        dialogs.showHelpDetail(topic, detail)
-                    }
-                    itemsContainer.addView(card)
-                }
-            }
+            "Help" -> helpPanel.render(session.engine)
             "Variables" -> {
                 val lines = session.engine.nativeValues(false).filter {
                     showEVars || !it.name.matches(Regex("e[0-9]+"))
