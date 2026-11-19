@@ -1607,7 +1607,8 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 if (isReservedName(parameter)) { err = "Reserved parameter: " + parameter; return std::numeric_limits<double>::quiet_NaN(); }
             }
 
-            // If a function with the same name exists, remove it first so editing updates it in-place
+            auto previousFunctions = engineState().user_funcs;
+            // Replace the definition provisionally while checking substitution.
             engineState().user_funcs.erase(std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(), [&](const std::string& fn) {
                 size_t open = fn.find('(');
                 std::string fname = (open != std::string::npos) ? fn.substr(0, open) : fn;
@@ -1620,7 +1621,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             std::string test_err = "";
             substituteUserFuncs(lhs, test_err);
             if (!test_err.empty()) {
-                engineState().user_funcs.pop_back();
+                engineState().user_funcs = std::move(previousFunctions);
                 err = "Func Def Error";
                 return std::numeric_limits<double>::quiet_NaN();
             }
