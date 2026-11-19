@@ -111,6 +111,7 @@ class MainActivity : AppCompatActivity() {
     private var isEnterSendMode = true
 
     private var currentTabPosition = 0
+    private var plotRefreshGeneration = 0L
     private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings", "Help", "Units")
     private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display, R.string.help_tab, R.string.units_tab).map(::getString).toTypedArray()
     private fun tabTitle(tab: String): String = when (tab) {
@@ -1254,7 +1255,13 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
 
-                plotView.updatePlotData(session.engine.nativeGetPlotLines(), session.engine.nativeGetPlotLimits())
+                val generation = ++plotRefreshGeneration
+                session.compute({ nativeGetPlotLines() to nativeGetPlotLimits() }) { result ->
+                    if (isDestroyed || isFinishing || tabs[currentTabPosition] != "Plot" ||
+                        generation != plotRefreshGeneration
+                    ) return@compute
+                    result.onSuccess { (lines, limits) -> plotView.updatePlotData(lines, limits) }
+                }
             }
             "Settings" -> {
                 scrollView.visibility = View.GONE
