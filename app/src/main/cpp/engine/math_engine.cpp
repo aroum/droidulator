@@ -267,21 +267,12 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 if (depth > 0) { err = "Mismatched Brackets"; return expr; }
                 
                 std::string args_str = expr.substr(start, end - start);
-                std::vector<std::string> args;
-                int arg_depth = 0;
-                std::string current_arg = "";
-                for (char c : args_str) {
-                    if (c == '(') arg_depth++;
-                    else if (c == ')') arg_depth--;
-                    if (c == ',' && arg_depth == 0) {
-                        args.push_back(current_arg);
-                        current_arg = "";
-                    } else {
-                        current_arg += c;
-                    }
+                auto args = expression::splitArguments(args_str);
+                if (!expression::trim(args_str).empty() && args.empty()) {
+                    err = "Invalid function arguments";
+                    return expr;
                 }
-                if (!current_arg.empty() || args_str.empty()) args.push_back(current_arg);
-                
+
                 std::vector<double> arg_vals;
                 for (auto& a_str : args) {
                     a_str.erase(0, a_str.find_first_not_of(" \t"));
