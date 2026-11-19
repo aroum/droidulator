@@ -3,6 +3,7 @@ package com.cardputer.cardulator
 import android.os.Handler
 import android.os.Looper
 import androidx.lifecycle.ViewModel
+import androidx.lifecycle.MutableLiveData
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
@@ -24,6 +25,35 @@ class CalculatorSession : ViewModel() {
             val result = runCatching { engine.operation() }
             if (!Thread.currentThread().isInterrupted) main.post { completed(result) }
         }
+
+    data class CommandResult(val entry: ReplDisplayItem, val showPlot: Boolean, val scriptName: String?)
+    internal val commandResult = MutableLiveData<CommandResult?>(null)
+    internal var commandRunning = false
+        private set
+
+    fun runCommand(input: String, scriptName: String? = null, persist: CardulatorEngine.() -> Unit): Boolean {
+        if (commandRunning) return false
+        commandRunning = true
+        compute({
+            val entry = if (scriptName == null) evaluateEntry(input) else
+                ReplDisplayItem("", nativeRunScript(input), false, isRawText = true)
+            if (!entry.isError) persist()
+            entry
+        }) { result ->
+            commandRunning = false
+            val entry = result.getOrElse {
+                ReplDisplayItem(input, it.localizedMessage.orEmpty(), true)
+            }
+            if (scriptName == null && replHistory.lastOrNull() != input) {
+                replHistory.add(input)
+                if (replHistory.size > 500) replHistory.removeAt(0)
+            }
+            val showPlot = !entry.isError && scriptName == null &&
+                (input.startsWith("plot(") || input.startsWith("plot."))
+            commandResult.value = CommandResult(entry, showPlot, scriptName)
+        }
+        return true
+    }
 
     override fun onCleared() {
         engineQueue.execute { if (engineDelegate.isInitialized()) engine.close() }

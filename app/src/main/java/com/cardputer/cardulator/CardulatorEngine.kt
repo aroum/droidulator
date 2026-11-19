@@ -34,6 +34,19 @@ class CardulatorEngine : AutoCloseable {
     }
 
     private external fun nativeInit()
+    fun evaluateEntry(input: String): ReplDisplayItem {
+        val evaluation = nativeEvaluateDetailed(input)
+        val isError = evaluation[0] == "error"
+        val hasNum = !isError && nativeHasLastNumeric()
+        return ReplDisplayItem(
+            input = input, rawOutput = evaluation[1], isError = isError, hasNum = hasNum,
+            arrayValues = if (!isError && !hasNum) nativeLastArray() else null,
+            numVal = if (hasNum) nativeGetLastNumericVal() else 0.0,
+            prefix = if (hasNum) nativeGetLastNumericPrefix() else "",
+            suffix = if (hasNum) nativeGetLastNumericSuffix() else ""
+        )
+    }
+
     external fun nativeEvaluate(input: String): String
     external fun nativeEvaluateDetailed(input: String): Array<String>
     external fun nativeEvaluatePreview(input: String): String

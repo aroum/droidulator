@@ -306,6 +306,16 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun finishStartup() {
+        if (session.commandRunning) {
+            session.commandResult.observe(this, object : androidx.lifecycle.Observer<CalculatorSession.CommandResult?> {
+                override fun onChanged(value: CalculatorSession.CommandResult?) {
+                    if (value == null) return
+                    session.commandResult.removeObserver(this)
+                    finishStartup()
+                }
+            })
+            return
+        }
         if (!session.initialized) {
             val isNewEngine = session.engine.initializeOnce()
             loadUserDataFromStorage(isNewEngine)
@@ -412,6 +422,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         rebuildReplOutput()
         mainRoot.visibility = View.VISIBLE
+        observeCommands()
         session.definitionDraft?.let { showDefinitionEditorDialog(it.title, it.expression, it.hint, it.tab) }
         session.scriptDraft?.let { openScriptEditor(it.originalName) }
     }
@@ -1112,21 +1123,9 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun appendOutputEntry(input: String, res: String, isError: Boolean) {
-        val hasNum = !isError && session.engine.nativeHasLastNumeric()
-        replDisplayItems.add(
-            ReplDisplayItem(
-                input = input,
-                rawOutput = res,
-                isError = isError,
-                hasNum = hasNum,
-                arrayValues = if (!isError && !hasNum) session.engine.nativeLastArray() else null,
-                numVal = if (hasNum) session.engine.nativeGetLastNumericVal() else 0.0,
-                prefix = if (hasNum) session.engine.nativeGetLastNumericPrefix() else "",
-                suffix = if (hasNum) session.engine.nativeGetLastNumericSuffix() else ""
-            )
-        )
-        val entrySsb = formatHighlightedReplEntry(input, res, isError)
+    private fun appendOutputEntry(entry: ReplDisplayItem) {
+        replDisplayItems.add(entry)
+        val entrySsb = formatHighlightedReplEntry(entry.input, entry.rawOutput, entry.isError)
         if (replDisplayItems.size > 500) {
             replDisplayItems.removeAt(0)
             rebuildReplOutput()
@@ -1230,53 +1229,54 @@ class MainActivity : AppCompatActivity() {
 
     private fun submitCurrentInput() {
         val input = etInput.text.toString().trim()
-        if (input.isEmpty()) return
-
+        if (input.isEmpty() || !queueCommand(input)) return
         isSubmitting = true
-        try {
-            etInput.setText("")
+        try { etInput.setText("") } finally { isSubmitting = false }
+    }
 
-            val evaluation = session.engine.nativeEvaluateDetailed(input)
-            val res = evaluation[1]
-            val isError = evaluation[0] == "error"
-            if (isError) {
-                val errDetails = res.substring(7)
-                showErrorOverlay(errDetails)
-            } else {
-                dismissErrorOverlay()
+    private fun queueCommand(input: String, scriptName: String? = null): Boolean {
+        val repo = calculatorRepository
+        val plotStorage = PlotStateStorage(applicationContext)
+        val accepted = session.runCommand(input, scriptName) {
+            repo.save()
+            if (scriptName != null || input.startsWith("plot(") ||
+                input.startsWith("plot.") || input.startsWith("run(")) {
+                plotStorage.save(nativeGetPlotLines(), nativeGetPlotLimits())
             }
-            appendOutputEntry(input, res, isError)
+        }
+        if (accepted && (scriptName != null || tabs[currentTabPosition] != "REPL")) hideSoftKeyboard()
+        return accepted
+    }
 
-            // Always add to history (even if command had an error, so Up Arrow can recall it)
-            if (replHistory.isEmpty() || replHistory.last() != input) {
-                replHistory.add(input)
-                if (replHistory.size > 500) replHistory.removeAt(0)
+    // Keep engine controls from waiting on the worker's native lock while a
+    // mutating command is running. Rendering and system navigation stay free.
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean =
+        if (readyForCommands && session.commandRunning) true else super.dispatchTouchEvent(event)
+
+    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
+        if (readyForCommands && session.commandRunning && event.keyCode != KeyEvent.KEYCODE_BACK) true
+        else super.dispatchKeyEvent(event)
+
+    private var readyForCommands = false
+
+    private fun observeCommands() {
+        readyForCommands = true
+        session.commandResult.observe(this) { result ->
+            if (result == null) return@observe
+            session.commandResult.value = null
+            val entry = result.entry
+            val script = result.scriptName
+            if (script != null && !entry.isError) {
+                val log = entry.rawOutput
+                appendRawOutput(getString(R.string.script_output_entry, script, log))
+                showScriptOutputDialog(getString(R.string.script_output_title, script), log)
+            } else {
+                appendOutputEntry(entry)
+                if (entry.isError) showErrorOverlay(entry.rawOutput.removePrefix("ERROR: "))
+                else dismissErrorOverlay()
             }
             replHistoryIndex = -1
-
-            if (!isError) {
-                saveUserDataToStorage()
-                if (input.startsWith("plot(") || input.startsWith("plot.") || input.startsWith("run(")) savePlotState()
-                // Switch to Plot tab if a plot command was issued successfully
-                if (input.startsWith("plot(") || input.startsWith("plot.")) {
-                    val plotIdx = tabs.indexOf("Plot")
-                    if (plotIdx != -1) {
-                        spinnerTabs.setSelection(plotIdx)
-                    }
-                }
-            }
-        } finally {
-            isSubmitting = false
-        }
-        if (tabs[currentTabPosition] == "REPL") {
-            etInput.requestFocus()
-            etInput.post {
-                etInput.requestFocus()
-                val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-                imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
-            }
-        } else {
-            hideSoftKeyboard()
+            if (result.showPlot) spinnerTabs.setSelection(tabs.indexOf("Plot"))
         }
     }
 
@@ -1521,11 +1521,7 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onRun = {
-                                val log = session.engine.nativeRunScript(scriptCode)
-                                savePlotState()
-                                saveUserDataToStorage()
-                                appendRawOutput(getString(R.string.script_output_entry, scriptName, log))
-                                showScriptOutputDialog(getString(R.string.script_output_title, scriptName), log)
+                                queueCommand(scriptCode, scriptName)
                             },
                             onEdit = {
                                 openScriptEditor(scriptName)
@@ -1893,17 +1889,9 @@ class MainActivity : AppCompatActivity() {
 
         btnExport.setOnClickListener {
             if (currentEvalExpr.isNotEmpty() && currentRes.isNotEmpty() && currentRes != getString(R.string.enter_arguments)) {
-                val evaluation = session.engine.nativeEvaluateDetailed(currentEvalExpr)
-                val res = evaluation[1]
-                val isErr = evaluation[0] == "error"
-                appendOutputEntry(currentEvalExpr, res, isErr)
-                if (replHistory.isEmpty() || replHistory.last() != currentEvalExpr) {
-                    replHistory.add(currentEvalExpr)
-                    if (replHistory.size > 500) replHistory.removeAt(0)
+                if (queueCommand(currentEvalExpr)) {
+                    Toast.makeText(this, R.string.ui_text_016, Toast.LENGTH_SHORT).show()
                 }
-                saveUserDataToStorage()
-                Toast.makeText(this@MainActivity, this@MainActivity.getString(R.string.ui_text_016), Toast.LENGTH_SHORT).show()
-                refreshTabContent(tabs[currentTabPosition])
             }
         }
 
@@ -2197,14 +2185,11 @@ class MainActivity : AppCompatActivity() {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
             setTextColor(btnFg)
             setOnClickListener {
+                if (session.commandRunning) return@setOnClickListener
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    val log = session.engine.nativeRunScript(newCode)
-                    savePlotState()
-                    saveUserDataToStorage()
-                    appendRawOutput(getString(R.string.script_output_entry, newName, log))
-                    showScriptOutputDialog(getString(R.string.script_output_title, newName), log)
+                    queueCommand(newCode, newName)
                 } else {
                     Toast.makeText(this@MainActivity, this@MainActivity.getString(R.string.ui_text_018), Toast.LENGTH_SHORT).show()
                 }
@@ -2215,6 +2200,7 @@ class MainActivity : AppCompatActivity() {
             backgroundTintList = ColorStateList.valueOf(btnAqua)
             iconTint = ColorStateList.valueOf(btnFg)
             setOnClickListener {
+                if (session.commandRunning) return@setOnClickListener
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
@@ -2253,14 +2239,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         showDefinitionEditorDialog(title, "", hintText, activeTab)
-    }
-
-    private fun savePlotState() {
-        try {
-            PlotStateStorage(this).save(session.engine.nativeGetPlotLines(), session.engine.nativeGetPlotLimits())
-        } catch (error: Exception) {
-            android.util.Log.e("Droidulator", "Unable to snapshot plot", error)
-        }
     }
 
     private val calculatorRepository by lazy { CalculatorRepository(applicationContext, session) }
