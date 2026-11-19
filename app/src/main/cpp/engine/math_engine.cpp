@@ -861,27 +861,17 @@ std::string preprocessVectorStats(const std::string& s) {
 
     // 1. Process 2-argument vector function: dot(A, B)
     size_t pos = 0;
-    while ((pos = res.find("dot(", pos)) != std::string::npos) {
+    while ((pos = expression::callOffset(res, "dot", pos)) != std::string::npos) {
         bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
         if (!prev_ok) { pos += 4; continue; }
         
-        int depth = 1;
-        int bracket_depth = 0;
-        size_t close = pos + 4;
-        size_t comma = std::string::npos;
-        while (close < res.size() && depth > 0) {
-            if (res[close] == '(') depth++;
-            else if (res[close] == ')') depth--;
-            else if (res[close] == '[') bracket_depth++;
-            else if (res[close] == ']') bracket_depth--;
-            else if (res[close] == ',' && depth == 1 && bracket_depth == 0) comma = close;
-            if (depth > 0) close++;
-        }
-        if (depth > 0 || comma == std::string::npos) break;
+        const size_t close = expression::matchingGroupEnd(res, pos + 3);
+        if (close == std::string::npos) break;
+        const auto arguments = expression::splitArguments(res.substr(pos + 4, close - pos - 4));
+        if (arguments.size() != 2) { pos += 4; continue; }
+        const auto& arg1_str = arguments[0];
+        const auto& arg2_str = arguments[1];
 
-        std::string arg1_str = res.substr(pos + 4, comma - pos - 4);
-        std::string arg2_str = res.substr(comma + 1, close - comma - 1);
-        
         bool is1_arr = false, is2_arr = false;
         std::string err1, err2;
         auto vec1 = parseArrayExpr(arg1_str, is1_arr, err1);
