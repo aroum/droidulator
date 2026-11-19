@@ -161,12 +161,6 @@ class MainActivity : AppCompatActivity() {
     private var convTabMatchIdx: Int = 0
     private var convTabCachedMatches: List<String>? = null
 
-    companion object {
-        private val unitsInstallLock = Any()
-        @Volatile private var unitsReady = false
-
-
-    }
 
     private val welcomeMessage get() = getString(R.string.ui_text_026)
 
@@ -231,65 +225,23 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         // Bind the complete screen before its first visible frame.
         findViewById<View>(R.id.main_root).visibility = View.INVISIBLE
-        if (unitsReady) {
-            finishStartup()
-            return
-        }
-
-        // File extraction and comparison can be slow on cold start.
-        Thread {
-            try {
-                synchronized(unitsInstallLock) {
-                    if (!unitsReady) {
-                        installUnitsData().also { CardulatorEngine.nativeInitUnits(it) }
-                        unitsReady = true
-                    }
+        UnitsDatabase.initialize(applicationContext) { failure ->
+            if (isFinishing || isDestroyed) return@initialize
+            when (failure) {
+                null -> finishStartup()
+                is UnsatisfiedLinkError -> {
+                    android.util.Log.e("Droidulator", "Unable to load calculator engine", failure)
+                    AlertDialog.Builder(this).setMessage(R.string.engine_load_error)
+                        .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                        .setOnCancelListener { finish() }.show()
                 }
-                runOnUiThread {
-                    if (!isFinishing && !isDestroyed) finishStartup()
-                }
-            } catch (error: UnsatisfiedLinkError) {
-                runOnUiThread {
-                    if (!isFinishing && !isDestroyed) {
-                        android.util.Log.e("Droidulator", "Unable to load calculator engine", error)
-                        AlertDialog.Builder(this).setMessage(R.string.engine_load_error)
-                            .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
-                            .setOnCancelListener { finish() }.show()
-                    }
-                }
-            } catch (error: Exception) {
-                runOnUiThread {
-                    if (!isFinishing && !isDestroyed) {
-                        android.util.Log.e("Droidulator", "Unable to install units data", error)
-                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_001), Toast.LENGTH_LONG).show()
-                        finish()
-                    }
-                }
-            }
-        }.start()
-    }
-
-    private fun installUnitsData(): String {
-        // Keep each upstream database version separate so app updates replace old data.
-        val unitsDir = java.io.File(filesDir, "gnu-units-2.27")
-        check(unitsDir.isDirectory || unitsDir.mkdirs()) { "Unable to create units database directory" }
-        for (name in listOf("currency.units", "crypto.units", "metal_prices.units", "cpi.units", "elements.units", "units.dat")) {
-            val destination = android.util.AtomicFile(java.io.File(unitsDir, name))
-            val expected = assets.open(name).use { it.readBytes() }
-            val current = try { destination.openRead().use { it.readBytes() } }
-                catch (_: java.io.FileNotFoundException) { null }
-            if (current == null || !current.contentEquals(expected)) {
-                val stream = destination.startWrite()
-                try {
-                    stream.write(expected)
-                    destination.finishWrite(stream)
-                } catch (error: Exception) {
-                    destination.failWrite(stream)
-                    throw error
+                else -> {
+                    android.util.Log.e("Droidulator", "Unable to install units data", failure)
+                    Toast.makeText(this, R.string.ui_text_001, Toast.LENGTH_LONG).show()
+                    finish()
                 }
             }
         }
-        return java.io.File(unitsDir, "units.dat").absolutePath
     }
 
     private fun finishStartup() {
