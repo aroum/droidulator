@@ -1250,9 +1250,6 @@ class MainActivity : AppCompatActivity() {
     override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean =
         if (readyForCommands && session.commandRunning) true else super.dispatchTouchEvent(event)
 
-    override fun dispatchKeyEvent(event: KeyEvent): Boolean =
-        if (readyForCommands && session.commandRunning && event.keyCode != KeyEvent.KEYCODE_BACK) true
-        else super.dispatchKeyEvent(event)
 
     private var readyForCommands = false
 
@@ -2367,6 +2364,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (readyForCommands && session.commandRunning && event.keyCode != KeyEvent.KEYCODE_BACK)
+            return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             dismissErrorOverlay()
         }
