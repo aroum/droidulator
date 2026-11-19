@@ -68,6 +68,13 @@ static std::string reservedAssignment(const std::string& code) {
     return {};
 }
 
+static bool evaluateScriptCondition(const std::string& condition, std::string& error) {
+    const auto expression = preprocessArrayLookups(condition, error);
+    if (!error.empty()) return false;
+    const double value = evaluate(expression, error);
+    return error.empty() && !std::isnan(value) && value != 0.0;
+}
+
 void runScript(const std::string& code) {
     engineState().script_console_output.clear();
     if (writesHistoryVariable(code)) {
@@ -294,12 +301,7 @@ void runScript(const std::string& code) {
                 size_t end_ip = findMatchingBlockEnd(lines, ip);
                 if (end_ip != std::string::npos) {
                     std::string err;
-                    std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                    double cond_val = 0;
-                    if (err.empty()) {
-                        cond_val = evaluate(prep_cond, err);
-                    }
-                    bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
+                    const bool cond_bool = evaluateScriptCondition(cond_str, err);
 
                     
                     if (!err.empty()) {
@@ -341,12 +343,7 @@ void runScript(const std::string& code) {
                         cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
                         
                         std::string err;
-                        std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                        double cond_val = 0;
-                        if (err.empty()) {
-                            cond_val = evaluate(prep_cond, err);
-                        }
-                        bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
+                        const bool cond_bool = evaluateScriptCondition(cond_str, err);
                         
                         if (!err.empty()) {
                             engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
@@ -408,12 +405,7 @@ void runScript(const std::string& code) {
                 size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
                 if (end_ip != std::string::npos) {
                     std::string err;
-                    std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                    double cond_val = 0;
-                    if (err.empty()) {
-                        cond_val = evaluate(prep_cond, err);
-                    }
-                    bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
+                    const bool cond_bool = evaluateScriptCondition(cond_str, err);
                     
                     if (!err.empty()) {
                         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
@@ -536,31 +528,22 @@ void runScript(const std::string& code) {
                             }
                         }
                         
+                        const bool cond_bool = err.empty() && evaluateScriptCondition(cond_str, err);
                         if (!err.empty()) {
                             engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             if (found_block) blocks.erase(blocks.begin() + block_idx);
                             ip = end_ip + 1;
-                        } else {
-                            std::string cond_err;
-                            double cond_val = evaluate(preprocessArrayLookups(cond_str, cond_err), cond_err);
-                            bool cond_bool = (cond_err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
-                            
-                            if (!cond_err.empty()) {
-                                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + cond_err);
-                                if (found_block) blocks.erase(blocks.begin() + block_idx);
-                                ip = end_ip + 1;
-                            } else if (cond_bool) {
-                                if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
-                                if (!found_block) {
-                                    blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
-                                }
-                                ip++;
-                            } else {
-                                if (found_block) {
-                                    blocks.erase(blocks.begin() + block_idx);
-                                }
-                                ip = end_ip + 1;
+                        } else if (cond_bool) {
+                            if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
+                            if (!found_block) {
+                                blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
                             }
+                            ip++;
+                        } else {
+                            if (found_block) {
+                                blocks.erase(blocks.begin() + block_idx);
+                            }
+                            ip = end_ip + 1;
                         }
                     } else {
                         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
