@@ -2417,62 +2417,52 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
     }
     
-    if ((trimmed.front() == '[' && trimmed.back() == ']') || (trimmed.front() == '(' && trimmed.back() == ')' && trimmed.find(',') != std::string::npos)) {
-        is_array = true;
-        std::string inner = trimmed.substr(1, trimmed.size() - 2);
-        if (trimmed.front() == '[' && inner.find(':') != std::string::npos && inner.find(',') == std::string::npos)
-            return parseArrayExpr(inner, is_array, err);
-        std::vector<double> res;
-        bool in_inner_quotes = false;
-        std::string current_val_str = "";
-        
-        for (size_t i = 0; i <= inner.size(); ++i) {
-            char c = (i < inner.size()) ? inner[i] : ',';
-            if (c == '"') {
-                in_inner_quotes = !in_inner_quotes;
+    const bool bracketed = trimmed.front() == '[' && trimmed.back() == ']';
+    const bool parenthesized = trimmed.front() == '(' && trimmed.back() == ')';
+    if (bracketed || parenthesized) {
+        const std::string inner = trimmed.substr(1, trimmed.size() - 2);
+        const auto elements = expression::splitArguments(inner);
+        if (bracketed || elements.size() > 1) {
+            is_array = true;
+            if (elements.empty() && !expression::trim(inner).empty()) {
+                err = "Math Error";
+                return {};
             }
-            if (c == ',' && !in_inner_quotes) {
-                current_val_str.erase(0, current_val_str.find_first_not_of(" \t"));
-                current_val_str.erase(current_val_str.find_last_not_of(" \t") + 1);
-                if (!current_val_str.empty()) {
-                    std::string prep_err;
-                    std::string prep = preprocessArrayLookups(current_val_str, prep_err);
-                    if (!prep_err.empty()) {
-                        err = prep_err;
-                        return {};
-                    }
-                    double val = evaluate(prep, prep_err);
-                    if (!prep_err.empty()) {
-                        err = prep_err;
-                        return {};
-                    }
-                    res.push_back(val);
+            if (bracketed && elements.size() == 1) {
+                std::vector<char> groups;
+                for (const auto& token : expression::tokenize(inner)) {
+                    if (token.kind == expression::Kind::Open) groups.push_back(token.text.front());
+                    else if (token.kind == expression::Kind::Close) expression::closeGroup(groups, token.text.front());
+                    else if (groups.empty() && token.text == ":") return parseArrayExpr(inner, is_array, err);
                 }
-                current_val_str = "";
-            } else {
-                current_val_str += c;
             }
+            std::vector<double> values;
+            values.reserve(elements.size());
+            for (const auto& element : elements) {
+                if (element.empty()) continue;
+                const auto expanded = preprocessArrayLookups(element, err);
+                if (!err.empty()) return {};
+                const double value = evaluate(expanded, err);
+                if (!err.empty()) return {};
+                values.push_back(value);
+            }
+            return values;
         }
-        return res;
     }
-    
+
     if (trimmed.find(':') != std::string::npos) {
-        // Find colons that are range separators, not negative signs or other constructs
         size_t first_col = std::string::npos;
         size_t second_col = std::string::npos;
-        
-        // Scan for colons outside quotes/parens
-        int pdepth = 0;
-        for (size_t i = 0; i < trimmed.size(); ++i) {
-            char c = trimmed[i];
-            if (c == '(' || c == '[') pdepth++;
-            else if (c == ')' || c == ']') { if (pdepth > 0) pdepth--; }
-            else if (c == ':' && pdepth == 0) {
-                if (first_col == std::string::npos) first_col = i;
-                else if (second_col == std::string::npos) { second_col = i; break; }
+        std::vector<char> groups;
+        for (const auto& token : expression::tokenize(trimmed)) {
+            if (token.kind == expression::Kind::Open) groups.push_back(token.text.front());
+            else if (token.kind == expression::Kind::Close && !expression::closeGroup(groups, token.text.front())) break;
+            else if (groups.empty() && token.text == ":") {
+                if (first_col == std::string::npos) first_col = token.start;
+                else { second_col = token.start; break; }
             }
         }
-        
+
         if (first_col != std::string::npos) {
             is_array = true;
             std::string start_str = trimmed.substr(0, first_col);

@@ -188,6 +188,9 @@ int main() {
         expectNumber("q(2)", 1); expectNumber("q(-2)", 0);
         evaluateInput("a=[1,2,4]", error, isDefinition); assert(error.empty());
         bool isArray = false;
+        auto nested = parseArrayExpr("[atan2(1,1), 2]", isArray, error);
+        assert(error.empty() && isArray && nested.size() == 2);
+        assert(std::abs(nested[1] - 2) < 1e-12);
         auto range = parseArrayExpr("[0:0.1:1]", isArray, error); assert(error.empty() && isArray && range.size() == 11);
         auto inverse = parseArrayExpr("1 ./ a", isArray, error); assert(error.empty() && isArray && inverse.size() == 3 && inverse[2] == .25);
         auto scaled = parseArrayExpr("a * -2", isArray, error); assert(error.empty() && isArray && scaled[1] == -4);
