@@ -285,6 +285,7 @@ int main() {
         std::string emptyArgumentError;
         evaluate("empty_argument_test(,1)", emptyArgumentError);
         assert(!emptyArgumentError.empty());
+        assert(preprocessFactorial("\"3!\"") == "\"3!\"");
         assert(preprocessPercentage("\"50%\"") == "\"50%\"");
         assert(preprocessLen("\"len(missing_array)\"") == "\"len(missing_array)\"");
         assert(expression::callOffset("\"f(1)\" + f(2)", "f") == 9);

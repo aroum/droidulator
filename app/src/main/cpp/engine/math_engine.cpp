@@ -531,6 +531,15 @@ inline std::string preprocessFactorial(const std::string& s) {
     std::string res;
     res.reserve(s.size());
     for (size_t i = 0; i < s.size(); ++i) {
+        // Copy string tokens intact before applying postfix operators.
+        if (s[i] == '"' || s[i] == '\'') {
+            const auto tokens = expression::tokenize(std::string_view(s).substr(i));
+            if (!tokens.empty() && tokens.front().kind == expression::Kind::String) {
+                res += tokens.front().text;
+                i += tokens.front().text.size() - 1;
+                continue;
+            }
+        }
         if (s[i] != '!' || (i + 1 < s.size() && s[i + 1] == '=') || res.empty()) {
             res += s[i];
             continue;
