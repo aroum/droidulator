@@ -193,7 +193,7 @@ static bool isScriptConstant(const std::string& name) {
     });
 }
 
-static bool executeForStep(const std::string& step, std::string& err) {
+static bool executeScriptAssignments(const std::string& step, std::string& err) {
     if (step.empty()) return true;
     bool isDef = false;
     std::vector<std::string> step_stmts = splitIntoStatements(step);
@@ -212,6 +212,10 @@ static bool executeForStep(const std::string& step, std::string& err) {
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
             if (!expression::isIdentifier(var_name)) {
                 err = "Invalid assignment name";
+                return false;
+            }
+            if (isReservedName(var_name)) {
+                err = "Reserved name: " + var_name;
                 return false;
             }
             if (isScriptConstant(var_name)) {
@@ -563,7 +567,7 @@ void runScript(const std::string& code) {
                     if (end_ip != std::string::npos) {
                         std::string err;
                         if (!found_block && !init_str.empty()) {
-                            executeForStep(init_str, err);
+                            executeScriptAssignments(init_str, err);
                         }
 
                         const bool cond_bool = err.empty() && evaluateScriptCondition(cond_str, err);
@@ -607,7 +611,7 @@ void runScript(const std::string& code) {
                 ++ip;
             } else {
                 std::string stepError;
-                if (block->type == "for" && !executeForStep(block->step_str, stepError)) {
+                if (block->type == "for" && !executeScriptAssignments(block->step_str, stepError)) {
                     engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[block->start_ip]) + " Err: " + stepError);
                     break;
                 }
@@ -616,34 +620,11 @@ void runScript(const std::string& code) {
         }
         // Increment / Decrement: i++ or i--
         else if (line.size() > 2 && (line.substr(line.size() - 2) == "++" || line.substr(line.size() - 2) == "--")) {
-            std::string var_name = line.substr(0, line.size() - 2);
-            var_name.erase(0, var_name.find_first_not_of(" \t"));
-            var_name.erase(var_name.find_last_not_of(" \t") + 1);
-            if (!expression::isIdentifier(var_name)) {
-                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid assignment name");
-                ++ip;
-                continue;
+            std::string error;
+            if (!executeScriptAssignments(line, error)) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
             }
-            if (isScriptConstant(var_name)) {
-                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
-                ++ip;
-                continue;
-            }
-            if (isReservedName(var_name)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + var_name); ip++; continue; }
-            char op = line[line.size() - 1];
-            bool found = false;
-            for (auto& arg : engineState().user_args) {
-                if (arg.name == var_name) {
-                    if (op == '+') arg.val += 1.0;
-                    else arg.val -= 1.0;
-                    found = true;
-                    break;
-                }
-            }
-            if (!found) {
-                engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
-            }
-            ip++;
+            ++ip;
         }
         // Array element assignment: A[idx] = expr
         else if (std::string name, idx_expr, val_expr; parseArrayElementAssignment(line, name, idx_expr, val_expr)) {
