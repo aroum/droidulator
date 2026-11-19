@@ -3,6 +3,8 @@
 #include "math_engine.h"
 #include "plot_engine.h"
 #include <iostream>
+#include <string_view>
+#include <unordered_set>
 
 extern double evaluate(const std::string& expr_str, std::string& err);
 extern double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
@@ -973,13 +975,20 @@ void runScript(const std::string& code) {
         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[std::min(ip, sourceLines.size() - 1)]) + " Err: Script statement limit reached");
     }
     
-    engineState().user_funcs = original_funcs;
-    engineState().autocomplete_words = original_autocomplete;
-    for (const auto& arg : engineState().user_args) {
-        if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), arg.name) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(arg.name);
+    auto& state = engineState();
+    state.user_funcs = std::move(original_funcs);
+    state.autocomplete_words = std::move(original_autocomplete);
+    std::unordered_set<std::string_view> knownWords;
+    const auto maxWords = state.autocomplete_words.size() + state.user_args.size() + state.user_arrays.size();
+    knownWords.reserve(maxWords);
+    // Keep the keys valid while appending completion words.
+    state.autocomplete_words.reserve(maxWords);
+    knownWords.insert(state.autocomplete_words.begin(), state.autocomplete_words.end());
+    for (const auto& arg : state.user_args) {
+        if (knownWords.insert(arg.name).second) state.autocomplete_words.push_back(arg.name);
     }
-    for (const auto& array : engineState().user_arrays) {
-        if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), array.first) == engineState().autocomplete_words.end()) engineState().autocomplete_words.push_back(array.first);
+    for (const auto& array : state.user_arrays) {
+        if (knownWords.insert(array.first).second) state.autocomplete_words.push_back(array.first);
     }
     // Note: user_arrays intentionally not restored — scripts may define arrays
     // that affect subsequent plot rendering (e.g., x, y1) or global state.
