@@ -274,6 +274,10 @@ int main() {
             [](const UserArg& arg) { return arg.name == "loop_constant_test"; }));
         runScript("for_array=[0]; for(i=0; i<2; for_array[1]=for_array[1]+1) { i++ }");
         assert(engineState().user_arrays.at("for_array")[0] == 2);
+        runScript("loop_type_test=[1,2]; for(loop_type_test=3; 0; i++) {}");
+        assert(engineState().user_arrays.count("loop_type_test") == 0);
+        std::string loopTypeError;
+        assert(evaluate("loop_type_test", loopTypeError) == 3 && loopTypeError.empty());
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

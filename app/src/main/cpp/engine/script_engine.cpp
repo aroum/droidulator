@@ -222,6 +222,7 @@ static bool executeScriptAssignments(const std::string& step, std::string& err) 
                 err = "Const Error";
                 return false;
             }
+            engineState().user_arrays.erase(var_name);
             char op = st[st.size() - 1];
             bool found = false;
             for (auto& arg : engineState().user_args) {
@@ -260,6 +261,7 @@ static bool executeScriptAssignments(const std::string& step, std::string& err) 
             if (!err.empty()) return false;
             double val = evaluate(preprocessLen(expanded), err);
             if (err.empty()) {
+                engineState().user_arrays.erase(lhs);
                 bool found = false;
                 for (auto& a : engineState().user_args) {
                     if (a.name == lhs) {
