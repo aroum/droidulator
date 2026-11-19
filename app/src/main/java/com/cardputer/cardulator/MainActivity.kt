@@ -20,7 +20,6 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
-import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 
 
@@ -36,17 +35,6 @@ data class ReplDisplayItem(
         val isRawText: Boolean = false
     )
 
-class CalculatorSession : ViewModel() {
-    var initialized = false
-    var storageLoadFailed = false
-    val userScripts = mutableListOf(
-        Pair("fibonacci", "x = 1\ny = 1\nfor (i = 1; i <= 10; i++) {\n  print(x)\n  tmp = x + y\n  x = y\n  y = tmp\n}"),
-        Pair("factorial_test", "n = 5\nres = 1\nfor (i = 1; i <= n; i++) {\n  res = res * i\n}\nprint(res)")
-    )
-
-    val replHistory = mutableListOf<String>()
-    val replDisplayItems = mutableListOf<ReplDisplayItem>()
-}
 
 class MainActivity : AppCompatActivity() {
 
@@ -424,6 +412,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         rebuildReplOutput()
         mainRoot.visibility = View.VISIBLE
+        session.scriptDraft?.let { openScriptEditor(it.originalName) }
     }
 
     private fun rounded(color: Int) = GradientDrawable().apply {
@@ -1573,18 +1562,7 @@ class MainActivity : AppCompatActivity() {
                                 showScriptOutputDialog(getString(R.string.script_output_title, scriptName), log)
                             },
                             onEdit = {
-                                showFullScriptEditorDialog(scriptName, scriptCode) { newName, newCode ->
-                                    if (userScripts.withIndex().any { it.index != i && it.value.first == newName }) {
-                                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_008), Toast.LENGTH_LONG).show()
-                                        return@showFullScriptEditorDialog false
-                                    }
-                                    if (newName != scriptName) CardulatorEngine.nativeUnregisterScript(scriptName)
-                                    userScripts[i] = Pair(newName, newCode)
-                                    CardulatorEngine.nativeRegisterScript(newName, newCode)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                    true
-                                }
+                                openScriptEditor(scriptName)
                             },
                             onDelete = {
                                 showConfirmDeleteDialog(scriptName) {
@@ -1998,10 +1976,36 @@ class MainActivity : AppCompatActivity() {
         })
     }
 
-    private fun showFullScriptEditorDialog(initialName: String, initialCode: String, onSave: (String, String) -> Boolean) {
+    private fun openScriptEditor(originalName: String?) {
+        val draft = session.scriptDraft ?: ScriptDraft(
+            originalName, originalName.orEmpty(),
+            userScripts.firstOrNull { it.first == originalName }?.second.orEmpty()
+        ).also { session.scriptDraft = it }
+        showFullScriptEditorDialog(draft) { name, code ->
+            val index = userScripts.indexOfFirst { it.first == draft.originalName }
+            if (userScripts.withIndex().any { it.index != index && it.value.first == name }) {
+                Toast.makeText(this, R.string.ui_text_008, Toast.LENGTH_LONG).show()
+                return@showFullScriptEditorDialog false
+            }
+            if (index >= 0) {
+                if (draft.originalName != name) CardulatorEngine.nativeUnregisterScript(userScripts[index].first)
+                userScripts[index] = name to code
+            } else userScripts.add(name to code)
+            CardulatorEngine.nativeRegisterScript(name, code)
+            saveUserDataToStorage()
+            if (tabs[currentTabPosition] == "Scripts") refreshTabContent("Scripts")
+            true
+        }
+    }
+
+    private fun showFullScriptEditorDialog(draft: ScriptDraft, onSave: (String, String) -> Boolean) {
         val dialog = trackDialog(Dialog(this, R.style.GruvboxFullscreenDialog))
         dialog.setContentView(R.layout.dialog_script_editor)
 
+        dialog.setOnDismissListener {
+            activeDialogs.remove(dialog)
+            if (!isChangingConfigurations) session.scriptDraft = null
+        }
         val root = dialog.findViewById<LinearLayout>(R.id.script_editor_root)
         applySystemInsets(root)
         val btnNavLeft = dialog.findViewById<Button>(R.id.btn_script_nav_left)
@@ -2026,7 +2030,8 @@ class MainActivity : AppCompatActivity() {
         root.setBackgroundColor(bgColor)
 
         etName.apply {
-            setText(initialName)
+            setText(draft.name)
+            doAfterTextChanged { draft.name = it.toString() }
             background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
@@ -2050,7 +2055,8 @@ class MainActivity : AppCompatActivity() {
             true
         }
         etCode.apply {
-            setText(initialCode)
+            setText(draft.code)
+            doAfterTextChanged { draft.code = it.toString() }
             background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
@@ -2068,7 +2074,7 @@ class MainActivity : AppCompatActivity() {
             })
         }
 
-        if (initialCode.isNotEmpty()) {
+        if (draft.code.isNotEmpty()) {
             etCode.post { applySyntaxHighlighting(etCode.editableText) }
         }
 
@@ -2233,17 +2239,7 @@ class MainActivity : AppCompatActivity() {
     private fun showAddItemDialog() {
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Scripts") {
-            showFullScriptEditorDialog("", "") { name, code ->
-                if (userScripts.any { it.first == name }) {
-                    Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_008), Toast.LENGTH_LONG).show()
-                    return@showFullScriptEditorDialog false
-                }
-                userScripts.add(Pair(name, code))
-                CardulatorEngine.nativeRegisterScript(name, code)
-                saveUserDataToStorage()
-                refreshTabContent("Scripts")
-                true
-            }
+            openScriptEditor(null)
             return
         }
 
