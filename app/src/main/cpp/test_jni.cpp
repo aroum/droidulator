@@ -110,6 +110,9 @@ int main() {
     assert(evaluate("dot(3,4)+P(3,2)", err) == 18 && err.empty());
     assert(std::isnan(evaluate("mod(1,0)", err)) && err == "Division by Zero");
     err.clear();
+    assert(expression::ArithmeticExpression::evaluate("sum(1,mean(2,4),gcd(8,12,16))", err,
+        lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic) == 8 && err.empty());
+    assert(evaluate("sum(ast_index, 1, 3, ast_index^2)", err) == 14 && err.empty());
     assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
     assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
     err.clear();

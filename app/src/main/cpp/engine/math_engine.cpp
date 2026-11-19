@@ -1,5 +1,6 @@
 #include "arithmetic_expression.h"
 #include <charconv>
+#include <tuple>
 #include "math_engine.h"
 #include "script_engine.h"
 #include "tinyexpr.h"
@@ -1308,6 +1309,35 @@ static const std::map<std::string, BinaryFunction>& binaryFunctions() {
     return functions;
 }
 
+struct VariadicBuiltin {
+    te_fun24 legacy;
+    expression::ArithmeticExpression::VariadicFunction evaluate;
+};
+
+template<te_fun24 Function>
+static constexpr VariadicBuiltin variadicBuiltin{
+    Function, [](const expression::ArithmeticExpression::Arguments& args) {
+        return std::apply(Function, args);
+    }
+};
+
+static const std::map<std::string, VariadicBuiltin>& variadicFunctions() {
+    static const std::map<std::string, VariadicBuiltin> functions = {
+        {"gcd", variadicBuiltin<variadic_gcd>},
+        {"lcm", variadicBuiltin<variadic_lcm>},
+        {"mean", variadicBuiltin<variadic_mean>},
+        {"median", variadicBuiltin<variadic_median>},
+        {"mode", variadicBuiltin<variadic_mode>},
+        {"var", variadicBuiltin<variadic_var>},
+        {"std", variadicBuiltin<variadic_std>},
+        {"sum", variadicBuiltin<variadic_sum>},
+        {"prod", variadicBuiltin<variadic_prod>},
+        {"min", variadicBuiltin<variadic_min>},
+        {"max", variadicBuiltin<variadic_max>},
+    };
+    return functions;
+}
+
 static bool shadowsBuiltin(std::string_view name) {
     const auto& state = engineState();
     for (const auto& variable : state.user_args)
@@ -1332,6 +1362,12 @@ static UnaryFunction lookupUnary(std::string_view name) {
     if (shadowsBuiltin(name)) return nullptr;
     const auto found = unaryFunctions().find(std::string(name));
     return found == unaryFunctions().end() ? nullptr : found->second;
+}
+
+static expression::ArithmeticExpression::VariadicFunction lookupVariadic(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
+    const auto found = variadicFunctions().find(std::string(name));
+    return found == variadicFunctions().end() ? nullptr : found->second.evaluate;
 }
 
 static const std::vector<double>* lookupArray(std::string_view name) {
@@ -1382,7 +1418,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary)) {
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic)) {
         if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
     }
@@ -1417,19 +1453,11 @@ double evaluate(const std::string& expr_str, std::string& err) {
         for (const auto& [name, function] : unaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
         for (const auto& [name, function] : binaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
 
-        parserTemplate.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         parserTemplate.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
         
-        parserTemplate.add_variable_or_function(te_variable{"mean", variadic_mean, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"median", variadic_median, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"mode", variadic_mode, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"var", variadic_var, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"std", variadic_std, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"sum", variadic_sum, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"prod", variadic_prod, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"min", variadic_min, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        parserTemplate.add_variable_or_function(te_variable{"max", variadic_max, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
+        for (const auto& [name, function] : variadicFunctions())
+            parserTemplate.add_variable_or_function(te_variable{name, function.legacy,
+                static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
         return parserTemplate;
     }();
 

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "expression_tokens.h"
+#include <array>
 #include <cmath>
 #include <cstdlib>
 #include <limits>
@@ -11,6 +12,10 @@ namespace expression {
 // so evaluating an arbitrarily long operator chain does not recurse.
 class ArithmeticExpression {
 public:
+    static constexpr size_t maxArguments = 24;
+    using Arguments = std::array<double, maxArguments>;
+    using VariadicFunction = double (*)(const Arguments&);
+    using VariadicLookup = VariadicFunction (*)(std::string_view);
     using UnaryFunction = double (*)(double);
     using BinaryFunction = double (*)(double, double);
     using BinaryLookup = BinaryFunction (*)(std::string_view);
@@ -20,7 +25,8 @@ public:
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
                                           ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
-                                          ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr) {
+                                          ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr,
+                                          VariadicLookup variadic = nullptr) {
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
@@ -33,9 +39,18 @@ public:
                 node.array = arrays(node.symbol);
                 continue;
             }
-            if (node.op == 'g') {
-                if (!binary || !(node.binaryFunction = binary(node.symbol))) return std::nullopt;
-                continue;
+            if (node.op == 'c') {
+                const auto& arguments = parser.callArguments[node.right];
+                const auto arity = arguments.size();
+                const auto& first = parser.nodes[arguments.front()];
+                // Four-argument reductions can bind their first argument as a loop index.
+                if (arity == 4 && !first.op && !first.symbol.empty() &&
+                    (node.symbol == "sum" || node.symbol == "prod" ||
+                     node.symbol == "min" || node.symbol == "max")) return std::nullopt;
+                if (arity == 1 && unary && (node.function = unary(node.symbol))) continue;
+                if (arity == 2 && binary && (node.binaryFunction = binary(node.symbol))) continue;
+                if (variadic && (node.variadicFunction = variadic(node.symbol))) continue;
+                return std::nullopt;
             }
             if (node.op == 'f') {
                 if (!unary || !(node.function = unary(node.symbol))) return std::nullopt;
@@ -49,7 +64,7 @@ public:
         for (auto& node : parser.nodes) {
             if (!node.op) continue;
             const double left = parser.nodes[node.left].value;
-            const double right = parser.nodes[node.right].value;
+            const double right = node.op == 'c' ? 0 : parser.nodes[node.right].value;
             if (node.op >= 'A' && node.op <= 'I') {
                 if (!std::isfinite(left) || !std::isfinite(right)) {
                     error = std::isnan(left) || std::isnan(right) ? "Math Error" : "Overflow Error";
@@ -79,7 +94,20 @@ public:
                     }
                     node.value = (*node.array)[static_cast<size_t>(left) - 1];
                     break;
-                case 'g': node.value = node.binaryFunction(left, right); break;
+                case 'c': {
+                    const auto& args = parser.callArguments[node.right];
+                    if (node.function) {
+                        node.value = node.function(parser.nodes[args[0]].value);
+                    } else if (node.binaryFunction) {
+                        node.value = node.binaryFunction(parser.nodes[args[0]].value, parser.nodes[args[1]].value);
+                    } else {
+                        Arguments values;
+                        values.fill(std::numeric_limits<double>::quiet_NaN());
+                        for (size_t i = 0; i < args.size(); ++i) values[i] = parser.nodes[args[i]].value;
+                        node.value = node.variadicFunction(values);
+                    }
+                    break;
+                }
                 case 'f': node.value = node.function(left); break;
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
@@ -110,6 +138,7 @@ private:
         UnaryFunction function = nullptr;
         const std::vector<double>* array = nullptr;
         BinaryFunction binaryFunction = nullptr;
+        VariadicFunction variadicFunction = nullptr;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -117,6 +146,7 @@ private:
     static constexpr size_t invalid = std::string_view::npos;
     std::vector<Token> tokens;
     std::vector<Node> nodes;
+    std::vector<std::vector<size_t>> callArguments;
     size_t next = 0;
 
     size_t add(Node node) {
@@ -180,13 +210,19 @@ private:
                     const bool index = tokens[next++].text == "[";
                     const auto argument = parse(0, depth + 1);
                     if (argument == invalid) return invalid;
-                    if (!index && next < tokens.size() && tokens[next].kind == Kind::Comma) {
-                        ++next;
-                        const auto second = parse(0, depth + 1);
-                        if (second == invalid) return invalid;
-                        left = add({0, 'g', argument, second, token.text});
+                    if (index) {
+                        left = add({0, '[', argument, 0, token.text});
                     } else {
-                        left = add({0, index ? '[' : 'f', argument, 0, token.text});
+                        std::vector<size_t> args{argument};
+                        while (next < tokens.size() && tokens[next].kind == Kind::Comma) {
+                            if (args.size() == maxArguments) return invalid;
+                            ++next;
+                            const auto arg = parse(0, depth + 1);
+                            if (arg == invalid) return invalid;
+                            args.push_back(arg);
+                        }
+                        left = add({0, 'c', argument, callArguments.size(), token.text});
+                        callArguments.push_back(std::move(args));
                     }
                     if (next == tokens.size() || tokens[next++].text != (index ? "]" : ")")) return invalid;
                 } else {
