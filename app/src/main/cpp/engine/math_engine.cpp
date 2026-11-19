@@ -1595,6 +1595,10 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
             target_fname.erase(target_fname.find_last_not_of(" \t") + 1);
             const size_t close_p = lhs.find(')', open_p);
+            if (!expression::trim(std::string_view(lhs).substr(close_p + 1)).empty()) {
+                err = "Func Def Error: unexpected text after parameters";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             const auto parameters = expression::splitArguments(lhs.substr(open_p + 1, close_p - open_p - 1));
             std::set<std::string> parameterNames;
             for (const auto& parameter : parameters) {
