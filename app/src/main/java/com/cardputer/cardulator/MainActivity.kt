@@ -38,6 +38,7 @@ data class ReplDisplayItem(
 
 class MainActivity : AppCompatActivity() {
 
+    private val dialogs by lazy { CalculatorDialogs(this, ::trackDialog) }
     private val activeDialogs = mutableSetOf<Dialog>()
 
     private fun trackDialog(dialog: Dialog): Dialog {
@@ -497,7 +498,7 @@ class MainActivity : AppCompatActivity() {
             setTextIsSelectable(true)
         }
         val scroll = ScrollView(this).apply { addView(body) }
-        showGruvboxCustomDialog(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
+        dialogs.show(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
     }
 
     private fun filterCards() {
@@ -838,7 +839,7 @@ class MainActivity : AppCompatActivity() {
                 text = this@MainActivity.getString(R.string.ui_text_002)
                 setTextColor(ThemePalette.fgText)
             }
-            showGruvboxCustomDialog(getString(R.string.clear_session_title), message, positiveText = getString(R.string.action_clear)) {
+            dialogs.show(getString(R.string.clear_session_title), message, positiveText = getString(R.string.action_clear)) {
                 clearSessionAndHistory()
             }
             true
@@ -865,7 +866,7 @@ class MainActivity : AppCompatActivity() {
                 textSize = 14f
                 typeface = android.graphics.Typeface.MONOSPACE
             }
-            showGruvboxCustomDialog(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
+            dialogs.show(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
                 when (activeTab) {
                     "Variables" -> session.engine.nativeValues(false)
                         .filterNot { it.name.matches(Regex("e[0-9]+")) }
@@ -1353,7 +1354,7 @@ class MainActivity : AppCompatActivity() {
             typeface = android.graphics.Typeface.MONOSPACE
         }
 
-        showGruvboxCustomDialog(getString(R.string.delete_confirm_title), tvMsg, positiveText = getString(R.string.action_delete)) {
+        dialogs.show(getString(R.string.delete_confirm_title), tvMsg, positiveText = getString(R.string.action_delete)) {
             onConfirmDelete()
             Toast.makeText(this, getString(R.string.deleted_item, itemName), Toast.LENGTH_SHORT).show()
         }
@@ -1599,120 +1600,6 @@ class MainActivity : AppCompatActivity() {
         return container
     }
 
-    private fun showGruvboxCustomDialog(
-        title: String,
-        contentView: View,
-        positiveText: String? = getString(R.string.action_save),
-        showCancel: Boolean = true,
-        customButtons: List<View>? = null,
-        positiveValidator: (() -> Boolean)? = null,
-        onPositive: (() -> Unit)? = null
-    ): Dialog {
-        val dialog = trackDialog(Dialog(this, androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar))
-        val bgColor = ThemePalette.bg
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val btnAqua = ThemePalette.aqua
-        val borderColor = ThemePalette.borderColor
-
-        dialog.window?.apply {
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            val dialogDrawable = GradientDrawable().apply {
-                setColor(bgColor)
-                setStroke(dp(2), borderColor)
-                cornerRadius = dp(8).toFloat()
-            }
-            setBackgroundDrawable(dialogDrawable)
-            setDimAmount(0.6f)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            if (android.os.Build.VERSION.SDK_INT < 35) statusBarColor = bgSoft
-            val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
-            controller.isAppearanceLightStatusBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgSoft) > 0.5
-        }
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bgColor)
-            setPadding(dp(36), dp(32), dp(36), dp(32))
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = title
-            setTextColor(fgColor)
-            textSize = 16f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, 0, 0, dp(16))
-        }
-
-        root.addView(tvTitle)
-
-        (contentView.parent as? ViewGroup)?.removeView(contentView)
-        if (contentView is ScrollView) {
-            root.addView(contentView, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
-        } else {
-            root.addView(contentView)
-        }
-
-        val btnBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.END
-            setPadding(0, dp(20), 0, 0)
-        }
-
-        if (customButtons != null) {
-            for (btn in customButtons) {
-                if (btn.parent != null) {
-                    (btn.parent as ViewGroup).removeView(btn)
-                }
-                btnBar.addView(btn)
-            }
-        } else {
-            if (showCancel) {
-                val btnCancel = Button(this).apply {
-                    text = this@MainActivity.getString(R.string.ui_text_011)
-                    setTextColor(fgColor)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 13f
-                    setOnClickListener { dialog.dismiss() }
-                }
-                btnBar.addView(btnCancel)
-            }
-
-            if (positiveText != null) {
-                val btnOk = Button(this).apply {
-                    text = positiveText
-                    setTextColor(ThemePalette.fgInverted)
-                    backgroundTintList = ColorStateList.valueOf(btnAqua)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 13f
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    if (showCancel) lp.setMargins(dp(16), 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener {
-                        if (positiveValidator?.invoke() == false) return@setOnClickListener
-                        onPositive?.invoke()
-                        dialog.dismiss()
-                    }
-                }
-                btnBar.addView(btnOk)
-            }
-        }
-
-        root.addView(btnBar)
-
-        dialog.setContentView(root)
-        dialog.show()
-        if (contentView is ScrollView) {
-            root.layoutParams.height = ViewGroup.LayoutParams.MATCH_PARENT
-            val screen = resources.displayMetrics
-            dialog.window?.setLayout(screen.widthPixels - dp(32), (screen.heightPixels * 0.8f).toInt())
-        }
-        return dialog
-    }
-
     private fun showScriptOutputDialog(title: String, logText: String) {
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
@@ -1740,7 +1627,7 @@ class MainActivity : AppCompatActivity() {
             addView(tvOut)
         }
 
-        showGruvboxCustomDialog(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
+        dialogs.show(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
     }
 
     private fun showRunFormulaDialog(formula: NativeFormula) {
@@ -1887,7 +1774,7 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        formulaDialog = showGruvboxCustomDialog(
+        formulaDialog = dialogs.show(
             formulaLine,
             layout,
             customButtons = listOf(btnClose, btnExport)
@@ -1943,7 +1830,7 @@ class MainActivity : AppCompatActivity() {
             et.post { applySyntaxHighlighting(et.editableText) }
         }
 
-        val dialog = showGruvboxCustomDialog(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
+        val dialog = dialogs.show(title, et, positiveText = getString(R.string.action_save), positiveValidator = {
             val valStr = et.text.toString().trim()
             if (valStr.isEmpty()) { et.error = this@MainActivity.getString(R.string.ui_text_017); false }
             else {
