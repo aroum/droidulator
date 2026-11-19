@@ -130,6 +130,7 @@ class MainActivity : AppCompatActivity() {
     private val userScripts get() = session.userScripts
 
     // Theme Mode: 0 = Auto (System), 1 = Dark, 2 = Light
+    private val themeSettings by lazy { CalculatorThemeSettings(applicationContext) }
     private var themeMode = 0
     private var isLightThemeActive = false
     private lateinit var btnDeleteAll: Button
@@ -383,7 +384,7 @@ class MainActivity : AppCompatActivity() {
         hideWelcomeMessage = prefs.getBoolean("hide_welcome", false)
         isAutoPairEnabled = prefs.getBoolean("auto_pair", true)
         showEVars = prefs.getBoolean("show_evars", false)
-        themeMode = prefs.getInt("theme_mode", 0)
+        themeMode = themeSettings.mode
         isEnterSendMode = prefs.getBoolean("enter_send_mode", true)
         val savedDegMode = prefs.getBoolean("degrees_mode", true)
 
@@ -404,10 +405,7 @@ class MainActivity : AppCompatActivity() {
         listOf(rbThemeAuto, rbThemeDark, rbThemeLight).getOrNull(themeMode)?.isChecked = true
         if (themeMode !in 0..2) rbThemeAuto.isChecked = true
 
-        val savedThemeJson = prefs.getString("custom_theme_json", null)
-        if (!savedThemeJson.isNullOrEmpty()) {
-            ThemePalette.loadCustomThemeJson(savedThemeJson)
-        }
+        themeSettings.restoreCustomPalette()
 
         session.engine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
 
@@ -987,7 +985,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.rb_theme_light -> 2
                 else -> 0
             }
-            getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit().putInt("theme_mode", themeMode).apply()
+            themeSettings.mode = themeMode
             applyTheme()
         }
 
@@ -1020,9 +1018,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnResetCustomTheme.setOnClickListener {
-            ThemePalette.resetToBuiltIn()
-            val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
-            prefs.edit().remove("custom_theme_json").apply()
+            themeSettings.resetCustomPalette()
             applyTheme()
             Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_003), Toast.LENGTH_SHORT).show()
         }
@@ -2133,27 +2129,14 @@ class MainActivity : AppCompatActivity() {
     private val customThemeLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
-                contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val buffer = ByteArray(8192)
-                    val output = java.io.ByteArrayOutputStream()
-                    while (true) {
-                        val count = inputStream.read(buffer)
-                        if (count < 0) break
-                        require(output.size() + count <= 1024 * 1024) { "Theme file exceeds 1 MiB" }
-                        output.write(buffer, 0, count)
-                    }
-                    val jsonStr = output.toString("UTF-8")
-                    if (ThemePalette.loadCustomThemeJson(jsonStr)) {
-                        val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
-                        prefs.edit().putString("custom_theme_json", jsonStr).apply()
-                        applyTheme()
-                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_020), Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_021), Toast.LENGTH_LONG).show()
-                    }
+                if (themeSettings.importCustomPalette(uri)) {
+                    applyTheme()
+                    Toast.makeText(this, R.string.ui_text_020, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, R.string.ui_text_021, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, getString(R.string.theme_load_failed, e.message ?: ""), Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.theme_load_failed, e.message.orEmpty()), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -2164,14 +2147,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- Theme Management (Dark / Light / System Auto) ---
     private fun applyTheme() {
-        val currentNightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val isSystemDark = currentNightMode == Configuration.UI_MODE_NIGHT_YES
-
-        isLightThemeActive = when (themeMode) {
-            1 -> false // Dark
-            2 -> true  // Light
-            else -> !isSystemDark // Auto: Follow system
-        }
+        isLightThemeActive = themeSettings.isLight(resources.configuration, themeMode)
 
         ThemePalette.isDark = !isLightThemeActive
 
