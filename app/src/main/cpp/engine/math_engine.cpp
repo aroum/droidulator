@@ -1472,11 +1472,51 @@ size_t findAssignmentOperator(const std::string& text) {
     return expression::assignmentOffset(text);
 }
 
+double assignArrayElement(const std::string& name, const std::string& index,
+                          const std::string& value, std::string& error) {
+    auto& arrays = engineState().user_arrays;
+    const auto failure = std::numeric_limits<double>::quiet_NaN();
+    if (arrays.find(name) == arrays.end()) {
+        error = "Array " + name + " not defined";
+        return failure;
+    }
+
+    const auto position = evaluate(index, error);
+    if (!error.empty()) return failure;
+    auto validate = [&]() {
+        const auto target = arrays.find(name);
+        if (target == arrays.end()) {
+            error = "Array " + name + " not defined";
+        } else if (!std::isfinite(position) || std::trunc(position) != position || position < 1 ||
+                   position > static_cast<double>(target->second.size())) {
+            error = "Invalid or out of bounds index for array " + name +
+                " (size " + std::to_string(target->second.size()) + ")";
+        }
+        return target;
+    };
+    validate();
+    if (!error.empty()) return failure;
+    const auto result = evaluate(value, error);
+    if (!error.empty()) return failure;
+
+    // Evaluation may call a script that replaces the target array.
+    const auto target = validate();
+    if (!error.empty()) return failure;
+    target->second[static_cast<size_t>(position) - 1] = result;
+    return result;
+}
+
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
     err = "";
     isDefinition = false;
     engineState().g_last_result_angle = AngleUnit::NONE;
     
+    if (std::string name, index, value; parseArrayElementAssignment(expr_str, name, index, value)) {
+        const auto result = assignArrayElement(name, index, value, err);
+        isDefinition = err.empty();
+        return result;
+    }
+
     size_t eq_pos = findAssignmentOperator(expr_str);
     if (eq_pos != std::string::npos) {
         

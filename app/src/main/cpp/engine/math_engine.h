@@ -15,6 +15,8 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err);
 std::string preprocessLen(const std::string& s);
 std::string preprocessVectorStats(const std::string& s);
 std::string formatPrintString(const std::string& str, std::string& err);
+double assignArrayElement(const std::string& name, const std::string& index,
+                          const std::string& value, std::string& error);
 bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr);
 bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2);
 void handleTabCompletion(std::string& expression, int& cursor_pos);

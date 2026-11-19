@@ -681,30 +681,11 @@ void runScript(const std::string& code) {
         }
         // Array element assignment: A[idx] = expr
         else if (std::string name, idx_expr, val_expr; parseArrayElementAssignment(line, name, idx_expr, val_expr)) {
-            if (engineState().user_arrays.find(name) == engineState().user_arrays.end()) {
-                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Array " + name + " not defined");
-                ip++;
-            } else {
-                std::string err;
-                double idx_val = evaluate(preprocessArrayLookups(idx_expr, err), err);
-                if (!err.empty()) {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                } else {
-                    err.clear();
-                    double val_val = evaluate(preprocessArrayLookups(val_expr, err), err);
-                    if (!err.empty()) {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                    } else {
-                        auto& arr = engineState().user_arrays[name];
-                        if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
-                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid or out of bounds index");
-                        } else {
-                            arr[static_cast<size_t>(idx_val) - 1] = val_val;
-                        }
-                    }
-                }
-                ip++;
-            }
+            std::string err;
+            assignArrayElement(name, idx_expr, val_expr, err);
+            if (!err.empty())
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+            ++ip;
         }
         // standard assignment: name = expr or name op= expr
         else if (size_t eq = line.find('='); eq != std::string::npos && (eq == 0 || line[eq-1] != '=') && (eq + 1 >= line.size() || line[eq+1] != '=') && (eq == 0 || (line[eq-1] != '<' && line[eq-1] != '>' && line[eq-1] != '!'))) {

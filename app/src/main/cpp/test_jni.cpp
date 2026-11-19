@@ -86,6 +86,20 @@ int main() {
     assert(arrayName == "a" && indexExpression == "b[1] + 1" && expression::trim(assignedValue) == "7");
     assert(!parseArrayElementAssignment("a[1] == 7", arrayName, indexExpression, assignedValue));
     assert(!parseArrayElementAssignment("a[1) = 7", arrayName, indexExpression, assignedValue));
+    {
+        EngineContext arrays;
+        EngineContextScope scope(arrays);
+        arrays.user_arrays["a"] = {10, 20};
+        arrays.user_arrays["b"] = {1};
+        bool defined = false;
+        assert(evaluateInput("a[b[1]+1] = 7", err, defined) == 7 && defined && err.empty());
+        assert(arrays.user_arrays.at("a")[1] == 7);
+        evaluateInput("a[1.4] = 9", err, defined);
+        assert(!defined && !err.empty() && arrays.user_arrays.at("a")[0] == 10);
+        runScript("a[b[1]+1] = 8");
+        assert(arrays.user_arrays.at("a")[1] == 8);
+        err.clear();
+    }
     const auto arguments = expression::splitArguments(R"(max(1, 2), 'm, x', [1,2])");
     assert((arguments == std::vector<std::string>{"max(1, 2)", "'m, x'", "[1,2]"}));
     assert(expression::splitArguments("x, [1, 2)").empty());
