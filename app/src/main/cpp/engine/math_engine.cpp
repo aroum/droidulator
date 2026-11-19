@@ -894,21 +894,12 @@ std::string preprocessVectorStats(const std::string& s) {
     for (const auto& fname : funcs) {
         std::string target = fname + "(";
         size_t fpos = 0;
-        while ((fpos = res.find(target, fpos)) != std::string::npos) {
+        while ((fpos = expression::callOffset(res, fname, fpos)) != std::string::npos) {
             bool prev_ok = (fpos == 0 || (!std::isalnum((unsigned char)res[fpos - 1]) && res[fpos - 1] != '_'));
             if (!prev_ok) { fpos += target.size(); continue; }
 
-            int depth = 1;
-            int bracket_depth = 0;
-            size_t close = fpos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') bracket_depth++;
-                else if (res[close] == ']') bracket_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
+            const size_t close = expression::matchingGroupEnd(res, fpos + target.size() - 1);
+            if (close == std::string::npos) break;
 
             std::string arg = res.substr(fpos + target.size(), close - fpos - target.size());
             arg.erase(0, arg.find_first_not_of(" \t"));
