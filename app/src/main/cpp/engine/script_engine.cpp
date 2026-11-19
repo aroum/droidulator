@@ -178,6 +178,65 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
     }
 }
 
+static void executeForStep(const std::string& step) {
+    if (step.empty()) return;
+    std::string err;
+    bool isDef = false;
+    std::vector<std::string> step_stmts = splitIntoStatements(step);
+    for (auto st : step_stmts) {
+        st.erase(0, st.find_first_not_of(" \t"));
+        st.erase(st.find_last_not_of(" \t") + 1);
+        if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
+            std::string var_name = st.substr(0, st.size() - 2);
+            var_name.erase(0, var_name.find_first_not_of(" \t"));
+            var_name.erase(var_name.find_last_not_of(" \t") + 1);
+            char op = st[st.size() - 1];
+            bool found = false;
+            for (auto& arg : engineState().user_args) {
+                if (arg.name == var_name) {
+                    if (op == '+') arg.val += 1.0;
+                    else arg.val -= 1.0;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
+            }
+        } else if (st.find('=') != std::string::npos) {
+            size_t eq = st.find('=');
+            std::string lhs = st.substr(0, eq);
+            std::string rhs = st.substr(eq + 1);
+            if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
+                char op = lhs.back();
+                lhs = lhs.substr(0, lhs.size() - 1);
+                rhs = lhs + " " + std::string(1, op) + " (" + rhs + ")";
+            }
+            auto trim = [](std::string& s) {
+                s.erase(0, s.find_first_not_of(" \t"));
+                s.erase(s.find_last_not_of(" \t") + 1);
+            };
+            trim(lhs); trim(rhs);
+            double val = evaluate(preprocessLen(preprocessArrayLookups(rhs, err)), err);
+            if (err.empty()) {
+                bool found = false;
+                for (auto& a : engineState().user_args) {
+                    if (a.name == lhs) {
+                        a.val = val;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    engineState().user_args.push_back({lhs, val});
+                }
+            }
+        } else {
+            evaluateInput(preprocessLen(preprocessArrayLookups(st, err)), err, isDef);
+        }
+    }
+}
+
 void runScript(const std::string& code) {
     engineState().script_console_output.clear();
     if (writesHistoryVariable(code)) {
@@ -546,86 +605,17 @@ void runScript(const std::string& code) {
             }
         }
         else if (isBlockEnd(line)) {
-            if (!blocks.empty()) {
-                size_t match_idx = std::string::npos;
-                for (int b = (int)blocks.size() - 1; b >= 0; --b) {
-                    if (blocks[b].end_ip == ip) {
-                        match_idx = (size_t)b;
-                        break;
-                    }
-                }
-                if (match_idx != std::string::npos) {
-                    auto curr = blocks[match_idx];
-                    if (curr.type == "for" || curr.type == "while") {
-                        if (curr.type == "for" && !curr.step_str.empty()) {
-                            std::string err;
-                            bool isDef = false;
-                            std::vector<std::string> step_stmts = splitIntoStatements(curr.step_str);
-                            for (auto st : step_stmts) {
-                                st.erase(0, st.find_first_not_of(" \t"));
-                                st.erase(st.find_last_not_of(" \t") + 1);
-                                if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
-                                    std::string var_name = st.substr(0, st.size() - 2);
-                                    var_name.erase(0, var_name.find_first_not_of(" \t"));
-                                    var_name.erase(var_name.find_last_not_of(" \t") + 1);
-                                    char op = st[st.size() - 1];
-                                    bool found = false;
-                                    for (auto& arg : engineState().user_args) {
-                                        if (arg.name == var_name) {
-                                            if (op == '+') arg.val += 1.0;
-                                            else arg.val -= 1.0;
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
-                                    }
-                                } else if (st.find('=') != std::string::npos) {
-                                    size_t eq = st.find('=');
-                                    std::string lhs = st.substr(0, eq);
-                                    std::string rhs = st.substr(eq + 1);
-                                    if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
-                                        char op = lhs.back();
-                                        lhs = lhs.substr(0, lhs.size() - 1);
-                                        rhs = lhs + " " + std::string(1, op) + " (" + rhs + ")";
-                                    }
-                                    auto trim = [](std::string& s) {
-                                        s.erase(0, s.find_first_not_of(" \t"));
-                                        s.erase(s.find_last_not_of(" \t") + 1);
-                                    };
-                                    trim(lhs); trim(rhs);
-                                    double val = evaluate(preprocessLen(preprocessArrayLookups(rhs, err)), err);
-                                    if (err.empty()) {
-                                        bool found = false;
-                                        for (auto& a : engineState().user_args) {
-                                            if (a.name == lhs) {
-                                                a.val = val;
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!found) {
-                                            engineState().user_args.push_back({lhs, val});
-                                        }
-                                    }
-                                } else {
-                                    evaluateInput(preprocessLen(preprocessArrayLookups(st, err)), err, isDef);
-                                }
-                            }
-                        }
-                        ip = curr.start_ip;
-                    } else { // "if"
-                        blocks.erase(blocks.begin() + match_idx);
-                        if (isBlockEnd(line)) {
-                            ip++;
-                        }
-                    }
-                } else {
-                    ip++;
-                }
+            const auto block = std::find_if(blocks.rbegin(), blocks.rend(), [ip](const BlockState& candidate) {
+                return candidate.end_ip == ip;
+            });
+            if (block == blocks.rend()) {
+                ++ip;
+            } else if (block->type == "if") {
+                blocks.erase(std::prev(block.base()));
+                ++ip;
             } else {
-                ip++;
+                if (block->type == "for") executeForStep(block->step_str);
+                ip = block->start_ip;
             }
         }
         // Increment / Decrement: i++ or i--
