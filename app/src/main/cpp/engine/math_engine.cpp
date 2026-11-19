@@ -2715,92 +2715,49 @@ bool parseArrayElementAssignment(const std::string& line, std::string& name, std
 }
 
 bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2) {
-    std::string clean_rhs = rhs;
-    clean_rhs.erase(0, clean_rhs.find_first_not_of(" \t"));
-    clean_rhs.erase(clean_rhs.find_last_not_of(" \t") + 1);
-
-    while (clean_rhs.size() >= 2 && clean_rhs.front() == '(' && clean_rhs.back() == ')') {
-        int nesting = 0;
-        bool valid = true;
-        for (size_t i = 0; i < clean_rhs.size() - 1; ++i) {
-            if (clean_rhs[i] == '(') nesting++;
-            else if (clean_rhs[i] == ')') nesting--;
-            if (nesting == 0) { valid = false; break; }
+    auto source = expression::trim(rhs);
+    auto tokens = expression::tokenize(source);
+    while (tokens.size() >= 2 && tokens.front().text == "(" && tokens.back().text == ")") {
+        std::vector<char> groups;
+        size_t close = 0;
+        for (; close < tokens.size(); ++close) {
+            const auto token = tokens[close];
+            if (token.kind == expression::Kind::Open) groups.push_back(token.text.front());
+            else if (token.kind == expression::Kind::Close &&
+                     !expression::closeGroup(groups, token.text.front())) return false;
+            if (groups.empty()) break;
         }
-        if (valid) {
-            clean_rhs = clean_rhs.substr(1, clean_rhs.size() - 2);
-            clean_rhs.erase(0, clean_rhs.find_first_not_of(" \t"));
-            clean_rhs.erase(clean_rhs.find_last_not_of(" \t") + 1);
-        } else {
-            break;
-        }
+        if (close + 1 != tokens.size()) break;
+        source = source.substr(1, tokens.back().start - 1);
+        tokens = expression::tokenize(source);
     }
 
-    int bracket_nesting = 0;
-    int paren_nesting = 0;
-    
-    // Pass 1: Look for lowest-precedence binary operators (+ and -) outside brackets/parens
-    for (int i = (int)clean_rhs.size() - 1; i >= 0; --i) {
-        char c = clean_rhs[i];
-        if (c == ']') bracket_nesting++;
-        else if (c == '[') bracket_nesting--;
-        else if (c == ')') paren_nesting++;
-        else if (c == '(') paren_nesting--;
-        else if (bracket_nesting == 0 && paren_nesting == 0) {
-            if (c == '+' || c == '-') {
-                if (i > 0 && clean_rhs[i-1] == '.') continue;
-                int previous = i - 1;
-                while (previous >= 0 && std::isspace(static_cast<unsigned char>(clean_rhs[previous]))) --previous;
-                if (previous < 0 || std::string("+-*/^,(<>=!").find(clean_rhs[previous]) != std::string::npos) continue;
-                if ((clean_rhs[previous] == 'e' || clean_rhs[previous] == 'E') && previous > 0 &&
-                    (std::isdigit(static_cast<unsigned char>(clean_rhs[previous - 1])) || clean_rhs[previous - 1] == '.')) continue;
-                std::string left = clean_rhs.substr(0, i);
-                left.erase(0, left.find_first_not_of(" \t"));
-                if (left.empty()) continue; // Unary
-                
-                op1 = clean_rhs.substr(0, i);
-                op = std::string(1, c);
-                op2 = clean_rhs.substr(i + 1);
-                return true;
+    std::optional<expression::Token> selected;
+    std::vector<char> groups;
+    int selectedPriority = 3;
+    bool leftOperand = false;
+    for (size_t i = 0; i < tokens.size(); ++i) {
+        const auto token = tokens[i];
+        using expression::Kind;
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close && !expression::closeGroup(groups, token.text.front()))
+            return false;
+        else if (groups.empty() && token.kind == Kind::Operator && leftOperand && i + 1 < tokens.size()) {
+            const auto text = token.text;
+            const int priority = text == "+" || text == "-" ? 1 :
+                text == "*" || text == "/" || text == ".*" || text == "./" ? 2 : 3;
+            if (priority < 3 && priority <= selectedPriority) {
+                selected = token;
+                selectedPriority = priority;
             }
         }
+        leftOperand = token.kind == Kind::Close || token.kind == Kind::Word ||
+            token.kind == Kind::Number || token.kind == Kind::ScaledNumber ||
+            token.kind == Kind::String || token.text == "!";
     }
-    
-    // Pass 2: Look for higher-precedence binary operators (*, /, .*, ./)
-    bracket_nesting = 0;
-    paren_nesting = 0;
-    for (int i = (int)clean_rhs.size() - 1; i >= 0; --i) {
-        char c = clean_rhs[i];
-        if (c == ']') bracket_nesting++;
-        else if (c == '[') bracket_nesting--;
-        else if (c == ')') paren_nesting++;
-        else if (c == '(') paren_nesting--;
-        else if (bracket_nesting == 0 && paren_nesting == 0) {
-            if (i + 1 < (int)clean_rhs.size()) {
-                std::string op2c = clean_rhs.substr(i, 2);
-                if (op2c == ".*" || op2c == "./") {
-                    op1 = clean_rhs.substr(0, i);
-                    op = op2c;
-                    op2 = clean_rhs.substr(i + 2);
-                    std::string t = op1;
-                    t.erase(0, t.find_first_not_of(" \t"));
-                    if (t.empty()) continue;
-                    return true;
-                }
-            }
-            if (c == '*' || c == '/') {
-                if (i > 0 && clean_rhs[i-1] == '.') continue;
-                std::string left = clean_rhs.substr(0, i);
-                left.erase(0, left.find_first_not_of(" \t"));
-                if (left.empty()) continue;
-                
-                op1 = clean_rhs.substr(0, i);
-                op = std::string(1, c);
-                op2 = clean_rhs.substr(i + 1);
-                return true;
-            }
-        }
-    }
-    
-    return false;
+    if (!selected || !groups.empty()) return false;
+    op1 = source.substr(0, selected->start);
+    op = selected->text;
+    op2 = source.substr(selected->start + selected->text.size());
+    return true;
 }

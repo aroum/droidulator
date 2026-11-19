@@ -53,7 +53,8 @@ inline std::vector<Token> tokenize(std::string_view source) {
         if (digit(start) || (c == '.' && digit(i))) {
             kind = Kind::Number;
             while (digit(i)) ++i;
-            if (c != '.' && i < source.size() && source[i] == '.') {
+            if (c != '.' && i < source.size() && source[i] == '.' &&
+                !(i + 1 < source.size() && (source[i + 1] == '*' || source[i + 1] == '/'))) {
                 ++i;
                 while (digit(i)) ++i;
             }
@@ -97,6 +98,9 @@ inline std::vector<Token> tokenize(std::string_view source) {
             kind = Kind::Close;
         } else if (c == ',') {
             kind = Kind::Comma;
+        } else if (c == '.' && i < source.size() && (source[i] == '*' || source[i] == '/')) {
+            kind = Kind::Operator;
+            ++i;
         } else if (std::string_view("=<>!+-*/%^&|").find(c) != std::string_view::npos) {
             kind = Kind::Operator;
             if (i < source.size() &&
