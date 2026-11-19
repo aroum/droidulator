@@ -132,6 +132,52 @@ static bool handleScriptFunctionDeclaration(
     return true;
 }
 
+static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) {
+    auto& state = engineState();
+    expressionText.erase(0, expressionText.find_first_not_of(" \t"));
+    expressionText.erase(expressionText.find_last_not_of(" \t") + 1);
+    if (expressionText.empty()) expressionText = "0";
+
+    const auto parts = expression::splitArguments(expressionText);
+    std::string error;
+    bool isArray = false;
+    std::vector<double> values;
+    if (parts.size() > 1) {
+        isArray = true;
+        values.reserve(parts.size());
+        for (auto part : parts) {
+            part.erase(0, part.find_first_not_of(" \t"));
+            part.erase(part.find_last_not_of(" \t") + 1);
+            std::string partError;
+            values.push_back(evaluate(preprocessArrayLookups(part, partError), partError));
+        }
+    } else {
+        values = parseArrayExpr(expressionText, isArray, error);
+        if (!isArray || !error.empty()) {
+            isArray = false;
+            error.clear();
+            values = {evaluate(preprocessArrayLookups(expressionText, error), error)};
+        }
+    }
+
+    state.script_return_val = values.empty() ? 0.0 : values.front();
+    state.script_return_vec = std::move(values);
+    state.script_return_is_vec = isArray;
+    state.script_has_returned = true;
+    if (!error.empty()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: " + error);
+    } else if (isArray) {
+        std::string formatted = "Return: [";
+        for (size_t i = 0; i < state.script_return_vec.size(); ++i) {
+            if (i != 0) formatted += ", ";
+            formatted += fmtNum(state.script_return_vec[i]);
+        }
+        state.script_console_output.push_back(formatted + "]");
+    } else {
+        state.script_console_output.push_back("Return: " + fmtNum(state.script_return_val));
+    }
+}
+
 void runScript(const std::string& code) {
     engineState().script_console_output.clear();
     if (writesHistoryVariable(code)) {
@@ -198,57 +244,8 @@ void runScript(const std::string& code) {
             continue;
         }
         
-        // return statement
         if (line.rfind("return", 0) == 0 && (line.size() == 6 || line[6] == ' ' || line[6] == '\t')) {
-            std::string ret_expr = (line.size() > 6) ? line.substr(6) : "0";
-            ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-            ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-            if (ret_expr.empty()) ret_expr = "0";
-            
-            // Check if return has multiple expressions separated by commas (outside brackets/quotes)
-            std::vector<std::string> ret_parts = expression::splitArguments(ret_expr);
-            
-            if (ret_parts.size() > 1) {
-                engineState().script_return_is_vec = true;
-                engineState().script_return_vec.clear();
-                std::string out_str = "Return: [";
-                for (size_t r_i = 0; r_i < ret_parts.size(); ++r_i) {
-                    std::string part = ret_parts[r_i];
-                    part.erase(0, part.find_first_not_of(" \t"));
-                    part.erase(part.find_last_not_of(" \t") + 1);
-                    std::string eval_err;
-                    double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                    engineState().script_return_vec.push_back(v);
-                    out_str += fmtNum(v) + (r_i + 1 < ret_parts.size() ? ", " : "]");
-                }
-                engineState().script_return_val = engineState().script_return_vec[0];
-                engineState().script_console_output.push_back(out_str);
-            } else {
-                bool is_arr = false;
-                std::string parse_err;
-                std::vector<double> arr = parseArrayExpr(ret_expr, is_arr, parse_err);
-                if (is_arr && parse_err.empty()) {
-                    engineState().script_return_is_vec = true;
-                    engineState().script_return_vec = arr;
-                    engineState().script_return_val = arr.empty() ? 0.0 : arr[0];
-                    std::string out_str = "Return: [";
-                    for (size_t r_i = 0; r_i < arr.size(); ++r_i) {
-                        out_str += fmtNum(arr[r_i]) + (r_i + 1 < arr.size() ? ", " : "]");
-                    }
-                    engineState().script_console_output.push_back(out_str);
-                } else {
-                    std::string eval_err;
-                    engineState().script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
-                    engineState().script_return_is_vec = false;
-                    engineState().script_return_vec = {engineState().script_return_val};
-                    if (!eval_err.empty()) {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
-                    } else {
-                        engineState().script_console_output.push_back("Return: " + fmtNum(engineState().script_return_val));
-                    }
-                }
-            }
-            engineState().script_has_returned = true;
+            evaluateScriptReturn(line.substr(6), sourceLines[ip]);
             break;
         }
 
