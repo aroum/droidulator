@@ -281,6 +281,10 @@ int main() {
         runScript("prefix_test=5; ++prefix_test; --prefix_test; ++prefix_test");
         std::string prefixError;
         assert(evaluate("prefix_test", prefixError) == 6 && prefixError.empty());
+        runScript("fn empty_argument_test(x) { return x }");
+        std::string emptyArgumentError;
+        evaluate("empty_argument_test(,1)", emptyArgumentError);
+        assert(!emptyArgumentError.empty());
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

@@ -277,7 +277,10 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 for (auto& a_str : args) {
                     a_str.erase(0, a_str.find_first_not_of(" \t"));
                     a_str.erase(a_str.find_last_not_of(" \t") + 1);
-                    if (a_str.empty()) continue;
+                    if (a_str.empty()) {
+                        err = "Empty function argument";
+                        return expr;
+                    }
                     std::string eval_err;
                     double val = evaluate(a_str, eval_err);
                     if (!eval_err.empty() || std::isnan(val)) {
