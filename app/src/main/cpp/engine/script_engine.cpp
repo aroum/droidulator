@@ -998,7 +998,7 @@ void runScript(const std::string& code) {
     state.user_funcs = std::move(original_funcs);
     state.autocomplete_words = std::move(original_autocomplete);
     std::unordered_set<std::string_view> knownWords;
-    const auto maxWords = state.autocomplete_words.size() + state.user_args.size() + state.user_arrays.size();
+    const auto maxWords = state.autocomplete_words.size() + state.user_args.size() + state.user_arrays.size() + state.user_script_funcs.size();
     knownWords.reserve(maxWords);
     // Keep the keys valid while appending completion words.
     state.autocomplete_words.reserve(maxWords);
@@ -1008,6 +1008,13 @@ void runScript(const std::string& code) {
     }
     for (const auto& array : state.user_arrays) {
         if (knownWords.insert(array.first).second) state.autocomplete_words.push_back(array.first);
+    }
+    for (const auto& function : state.user_script_funcs) {
+        const auto completion = function.name + "(";
+        if (knownWords.find(completion) == knownWords.end()) {
+            state.autocomplete_words.push_back(completion);
+            knownWords.insert(state.autocomplete_words.back());
+        }
     }
     // Note: user_arrays intentionally not restored — scripts may define arrays
     // that affect subsequent plot rendering (e.g., x, y1) or global state.

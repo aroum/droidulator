@@ -231,6 +231,9 @@ int main() {
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("fn completion_check(x) { return x }");
+        assert(std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(),
+            "completion_check(") != engineState().autocomplete_words.end());
         runScript("fn duplicate_params(x,x) { return x }");
         assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
             [](const CustomScriptFunc& function) { return function.name == "duplicate_params"; }));
@@ -631,6 +634,9 @@ int main() {
     handleTabCompletion(expr4_cap, cursor4_cap);
     std::cout << "Test 4.7 [C -> C()]: " << expr4_cap << " cursor=" << cursor4_cap << std::endl;
     assert(expr4_cap == "C()" && cursor4_cap == 2);
+
+    engineState().user_script_funcs.clear();
+    engineState().autocomplete_words.erase(std::remove(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), "pair_test("), engineState().autocomplete_words.end());
 
     // Test Case 5: User variable & constant priority (cycling "para" -> "power")
     reset_tab();
