@@ -44,7 +44,22 @@ public:
             if (!node.op) continue;
             const double left = parser.nodes[node.left].value;
             const double right = parser.nodes[node.right].value;
+            if (node.op >= 'A' && node.op <= 'I') {
+                if (!std::isfinite(left) || !std::isfinite(right)) {
+                    error = std::isnan(left) || std::isnan(right) ? "Math Error" : "Overflow Error";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+            }
             switch (node.op) {
+                case 'A': node.value = left != 0 || right != 0; break;
+                case 'B': node.value = (left != 0) != (right != 0); break;
+                case 'C': node.value = left != 0 && right != 0; break;
+                case 'D': node.value = left == right; break;
+                case 'E': node.value = left != right; break;
+                case 'F': node.value = left <= right; break;
+                case 'G': node.value = left >= right; break;
+                case 'H': node.value = left < right; break;
+                case 'I': node.value = left > right; break;
                 case '[':
                     if (!node.array) {
                         error = "Array " + std::string(node.symbol) + " not defined";
@@ -101,11 +116,27 @@ private:
         return nodes.size() - 1;
     }
 
-    static int precedence(std::string_view op) {
-        if (op == "+" || op == "-") return 1;
-        if (op == "*" || op == "/") return 2;
-        if (op == "^") return 3;
-        return -1;
+    struct Operator {
+        char opcode;
+        int precedence;
+        bool rightAssociative = false;
+    };
+
+    static Operator binaryOperator(std::string_view op) {
+        // Preserve the legacy relational evaluator's order and grouping.
+        if (op == "||" || op == "or") return {'A', 1, true};
+        if (op == "^^" || op == "xor") return {'B', 2, true};
+        if (op == "&&" || op == "and") return {'C', 3, true};
+        if (op == "==") return {'D', 4, true};
+        if (op == "!=") return {'E', 5, true};
+        if (op == "<=") return {'F', 6, true};
+        if (op == ">=") return {'G', 7, true};
+        if (op == "<") return {'H', 8, true};
+        if (op == ">") return {'I', 9, true};
+        if (op == "+" || op == "-") return {op.front(), 10};
+        if (op == "*" || op == "/") return {op.front(), 11};
+        if (op == "^") return {'^', 12};
+        return {0, -1};
     }
 
     size_t parse(int minimum, unsigned depth) {
@@ -161,14 +192,12 @@ private:
             left = add({0, '*', minusOne, left});
         }
         while (next < tokens.size()) {
-            const auto op = tokens[next].text;
-            const int priority = precedence(op);
-            if (priority < minimum) break;
+            const auto op = binaryOperator(tokens[next].text);
+            if (op.precedence < minimum) break;
             ++next;
-            // Preserve the existing engine's left-associative exponentiation.
-            const auto right = parse(priority + 1, depth + 1);
+            const auto right = parse(op.precedence + (op.rightAssociative ? 0 : 1), depth + 1);
             if (right == invalid) return invalid;
-            left = add({0, op.front(), left, right});
+            left = add({0, op.opcode, left, right});
         }
         return left;
     }

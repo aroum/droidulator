@@ -86,7 +86,9 @@ int main() {
     assert(expression::splitArguments("x, [1, 2)").empty());
     const std::pair<const char*, double> arithmeticCases[] = {
         {"2+3*4", 14}, {"(2+3)*4", 20}, {"2^3^2", 64}, {"-2^2", 4},
-        {"2^-3", 0.125}, {"-(1+.5e+1)", -6}
+        {"2^-3", 0.125}, {"-(1+.5e+1)", -6},
+        {"2+3 >= 5 and 2 != 3", 1}, {"0 or 2 xor 3", 0}, {"1 || 0 && 0", 1},
+        {"0 < 1 < 2", 1}, {"1 == 2 < 3", 1}
     };
     for (const auto& [text, expected] : arithmeticCases) {
         assert(expression::ArithmeticExpression::evaluate(text, err) == expected);

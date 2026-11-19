@@ -97,10 +97,11 @@ inline std::vector<Token> tokenize(std::string_view source) {
             kind = Kind::Close;
         } else if (c == ',') {
             kind = Kind::Comma;
-        } else if (std::string_view("=<>!+-*/%^").find(c) != std::string_view::npos) {
+        } else if (std::string_view("=<>!+-*/%^&|").find(c) != std::string_view::npos) {
             kind = Kind::Operator;
-            if (i < source.size() && source[i] == '=' &&
-                std::string_view("=<>!+-*/%").find(c) != std::string_view::npos) ++i;
+            if (i < source.size() &&
+                ((source[i] == '=' && std::string_view("=<>!+-*/%").find(c) != std::string_view::npos) ||
+                 (source[i] == c && (c == '&' || c == '|' || c == '^')))) ++i;
         }
         result.push_back({kind, source.substr(start, i - start), start});
     }
