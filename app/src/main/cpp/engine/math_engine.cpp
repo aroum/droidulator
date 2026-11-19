@@ -668,14 +668,8 @@ inline std::string preprocessLen(const std::string& s) {
     while ((pos = res.find("len(", pos)) != std::string::npos) {
         bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
         if (!prev_ok) { pos += 4; continue; }
-        int depth = 1;
-        size_t close = pos + 4;
-        while (close < res.size() && depth > 0) {
-            if (res[close] == '(') depth++;
-            else if (res[close] == ')') depth--;
-            if (depth > 0) close++;
-        }
-        if (depth > 0) break;
+        const size_t close = expression::matchingGroupEnd(res, pos + 3);
+        if (close == std::string::npos) break;
         std::string arg = res.substr(pos + 4, close - pos - 4);
         arg.erase(0, arg.find_first_not_of(" \t"));
         arg.erase(arg.find_last_not_of(" \t") + 1);
