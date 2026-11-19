@@ -19,6 +19,21 @@ internal class CalculatorDialogs(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
+    fun confirmDelete(itemName: String, onConfirmDelete: () -> Unit) {
+        val fgColor = ThemePalette.fgText
+        val tvMsg = TextView(activity).apply {
+            text = activity.getString(R.string.delete_confirm, itemName)
+            setTextColor(fgColor)
+            textSize = 14f
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+
+        show(activity.getString(R.string.delete_confirm_title), tvMsg, positiveText = activity.getString(R.string.action_delete)) {
+            onConfirmDelete()
+            android.widget.Toast.makeText(activity, activity.getString(R.string.deleted_item, itemName), android.widget.Toast.LENGTH_SHORT).show()
+        }
+    }
+
     fun showHelpDetail(topic: String, detail: String) {
         val body = TextView(activity).apply {
             text = detail

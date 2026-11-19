@@ -1285,21 +1285,6 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showConfirmDeleteDialog(itemName: String, onConfirmDelete: () -> Unit) {
-        val fgColor = ThemePalette.fgText
-        val tvMsg = TextView(this).apply {
-            text = getString(R.string.delete_confirm, itemName)
-            setTextColor(fgColor)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        dialogs.show(getString(R.string.delete_confirm_title), tvMsg, positiveText = getString(R.string.action_delete)) {
-            onConfirmDelete()
-            Toast.makeText(this, getString(R.string.deleted_item, itemName), Toast.LENGTH_SHORT).show()
-        }
-    }
-
     private fun renderDedicatedMenuList(tabName: String) {
         if (tabName == "Units") {
             renderUnits()
@@ -1356,7 +1341,7 @@ class MainActivity : AppCompatActivity() {
                                 showDefinitionEditorDialog(getString(R.string.edit_variable, name), "$name = $value", "$name = $value", tabName)
                             },
                             onDelete = if (isHistory) null else fun() {
-                                showConfirmDeleteDialog(name) {
+                                dialogs.confirmDelete(name) {
                                     session.engine.nativeDeleteVariable(name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
@@ -1386,7 +1371,7 @@ class MainActivity : AppCompatActivity() {
                         } else null,
                         onDelete = if (!isBuiltIn) {
                             {
-                                showConfirmDeleteDialog(name) {
+                                dialogs.confirmDelete(name) {
                                     session.engine.nativeDeleteConstant(name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
@@ -1427,7 +1412,7 @@ class MainActivity : AppCompatActivity() {
                                 showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line, tabName)
                             },
                             onDelete = {
-                                showConfirmDeleteDialog(name) {
+                                dialogs.confirmDelete(name) {
                                     session.engine.nativeDeleteFormula(formula.name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
@@ -1467,7 +1452,7 @@ class MainActivity : AppCompatActivity() {
                                 openScriptEditor(scriptName)
                             },
                             onDelete = {
-                                showConfirmDeleteDialog(scriptName) {
+                                dialogs.confirmDelete(scriptName) {
                                     session.engine.nativeUnregisterScript(scriptName)
                                     userScripts.removeAt(i)
                                     saveUserDataToStorage()
