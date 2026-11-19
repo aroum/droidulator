@@ -1,0 +1,85 @@
+#pragma once
+
+#include <cctype>
+#include <optional>
+#include <string_view>
+#include <vector>
+
+namespace expression {
+enum class Kind { Word, String, Open, Close, Comma, Operator, Other };
+
+struct Token {
+    Kind kind;
+    std::string_view text;
+    size_t start;
+};
+
+inline std::vector<Token> tokenize(std::string_view source) {
+    std::vector<Token> result;
+    for (size_t i = 0; i < source.size();) {
+        const size_t start = i;
+        const unsigned char c = source[i++];
+        if (std::isspace(c)) continue;
+        Kind kind = Kind::Other;
+        if (std::isalnum(c) || c == '_') {
+            kind = Kind::Word;
+            while (i < source.size() &&
+                   (std::isalnum(static_cast<unsigned char>(source[i])) || source[i] == '_')) ++i;
+        } else if (c == '"' || c == '\'') {
+            kind = Kind::String;
+            while (i < source.size()) {
+                if (source[i++] == c) break;
+                if (source[i - 1] == '\\' && i < source.size()) ++i;
+            }
+        } else if (c == '(' || c == '[' || c == '{') {
+            kind = Kind::Open;
+        } else if (c == ')' || c == ']' || c == '}') {
+            kind = Kind::Close;
+        } else if (c == ',') {
+            kind = Kind::Comma;
+        } else if (std::string_view("=<>!+-*/%^").find(c) != std::string_view::npos) {
+            kind = Kind::Operator;
+            if (i < source.size() && source[i] == '=' &&
+                std::string_view("=<>!+-*/%").find(c) != std::string_view::npos) ++i;
+        }
+        result.push_back({kind, source.substr(start, i - start), start});
+    }
+    return result;
+}
+
+inline bool closeGroup(std::vector<char>& groups, char closing) {
+    const char opening = closing == ')' ? '(' : closing == ']' ? '[' : '{';
+    if (groups.empty() || groups.back() != opening) return false;
+    groups.pop_back();
+    return true;
+}
+
+inline size_t assignmentOffset(std::string_view source) {
+    std::vector<char> groups;
+    for (const auto& token : tokenize(source)) {
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close && !closeGroup(groups, token.text.front())) break;
+        else if (groups.empty() && token.kind == Kind::Operator && token.text == "=") return token.start;
+    }
+    return std::string_view::npos;
+}
+
+inline std::optional<std::string_view> callBody(std::string_view source, std::string_view name) {
+    const auto tokens = tokenize(source);
+    if (tokens.size() < 3 || tokens[0].kind != Kind::Word || tokens[0].text != name ||
+        tokens[1].text != "(") return std::nullopt;
+    std::vector<char> groups;
+    for (size_t i = 1; i < tokens.size(); ++i) {
+        const auto& token = tokens[i];
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        if (token.kind != Kind::Close) continue;
+        if (!closeGroup(groups, token.text.front())) return std::nullopt;
+        if (groups.empty()) {
+            if (i + 1 != tokens.size()) return std::nullopt;
+            const size_t start = tokens[1].start + 1;
+            return source.substr(start, token.start - start);
+        }
+    }
+    return std::nullopt;
+}
+}

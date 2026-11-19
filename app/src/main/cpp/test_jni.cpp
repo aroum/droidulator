@@ -67,6 +67,13 @@ int main() {
         EngineContextScope second(secondSession);
         assert(evaluate("isolated_var", err) == 3);
     }
+    assert(findAssignmentOperator("x >= 2") == std::string::npos);
+    assert(findAssignmentOperator("x += 2") == std::string::npos);
+    assert(findAssignmentOperator("x = f(1, 2)") == 2);
+    assert(findAssignmentOperator(R"(print("a = b"))") == std::string::npos);
+    assert(expression::callBody(R"(conv (max(1, 2), "m", "cm"))", "conv").has_value());
+    assert(!expression::callBody("conv(1, m) + f(2)", "conv"));
+    assert(!expression::callBody("conv([1), m)", "conv"));
     const std::pair<const char*, double> rkmCases[] = {
         {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
         {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}

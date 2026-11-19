@@ -1,3 +1,4 @@
+#include "engine/expression_tokens.h"
 #include <jni.h>
 #include <string>
 #include <vector>
@@ -241,7 +242,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         rhs.erase(0, rhs.find_first_not_of(" \t"));
         rhs.erase(rhs.find_last_not_of(" \t") + 1);
 
-        if (rhs.rfind("conv(", 0) == 0 && rhs.back() == ')') {
+        if (expression::callBody(rhs, "conv")) {
             is_assign = true;
             conv_expr = rhs;
 
@@ -260,9 +261,8 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
         }
     }
 
-    if (conv_expr.rfind("conv(", 0) == 0 && conv_expr.back() == ')') {
-        std::string body = conv_expr.substr(5, conv_expr.size() - 6);
-        std::vector<std::string> conv_args = splitPlotArgs(body);
+    if (const auto body = expression::callBody(conv_expr, "conv")) {
+        std::vector<std::string> conv_args = splitPlotArgs(std::string(*body));
         if (conv_args.size() < 2 || conv_args.size() > 3) {
             return toJavaError(env, "ERROR: conv requires 2 or 3 arguments: conv(val, \"unit_a\", [\"unit_b\"])");
         }

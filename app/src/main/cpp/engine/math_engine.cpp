@@ -1,3 +1,4 @@
+#include "expression_tokens.h"
 #include "math_engine.h"
 #include "script_engine.h"
 #include "tinyexpr.h"
@@ -1543,16 +1544,7 @@ double evaluateWithoutHistory(const std::string& expr_str, std::string& err) {
 }
 
 size_t findAssignmentOperator(const std::string& text) {
-    int depth = 0; char quote = 0;
-    for (size_t i = 0; i < text.size(); ++i) {
-        const char c = text[i];
-        if (quote) { if (c == '\\' && i + 1 < text.size()) ++i; else if (c == quote) quote = 0; continue; }
-        if (c == '\'' || c == '"') { quote = c; continue; }
-        if (c == '(' || c == '[' || c == '{') ++depth;
-        else if (c == ')' || c == ']' || c == '}') --depth;
-        else if (c == '=' && depth == 0 && (i == 0 || (text[i-1] != '=' && text[i-1] != '!' && text[i-1] != '<' && text[i-1] != '>')) && (i + 1 == text.size() || text[i+1] != '=')) return i;
-    }
-    return std::string::npos;
+    return expression::assignmentOffset(text);
 }
 
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
