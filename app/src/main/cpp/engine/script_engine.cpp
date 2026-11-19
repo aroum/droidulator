@@ -234,7 +234,9 @@ static bool executeForStep(const std::string& step, std::string& err) {
                 s.erase(s.find_last_not_of(" \t") + 1);
             };
             trim(lhs); trim(rhs);
-            double val = evaluate(preprocessLen(preprocessArrayLookups(rhs, err)), err);
+            const auto expanded = preprocessArrayLookups(rhs, err);
+            if (!err.empty()) return false;
+            double val = evaluate(preprocessLen(expanded), err);
             if (err.empty()) {
                 bool found = false;
                 for (auto& a : engineState().user_args) {
@@ -249,7 +251,9 @@ static bool executeForStep(const std::string& step, std::string& err) {
                 }
             }
         } else {
-            evaluateInput(preprocessLen(preprocessArrayLookups(st, err)), err, isDef);
+            const auto expanded = preprocessArrayLookups(st, err);
+            if (!err.empty()) return false;
+            evaluateInput(preprocessLen(expanded), err, isDef);
         }
         if (!err.empty()) return false;
     }
