@@ -117,8 +117,20 @@ private:
         if (next == tokens.size()) return invalid;
         const auto token = tokens[next++];
         size_t left;
-        if (token.kind == Kind::Number) {
-            const std::string literal(token.text);
+        if (token.kind == Kind::Number || token.kind == Kind::ScaledNumber) {
+            std::string literal(token.text);
+            if (token.kind == Kind::ScaledNumber) {
+                const auto split = token.text.find_first_not_of("0123456789.");
+                const auto suffix = token.text.substr(split, token.text.substr(split, 2) == "da" ? 2 : 1);
+                const auto fraction = token.text.substr(split + suffix.size());
+                literal.resize(split);
+                if (!fraction.empty()) {
+                    literal += '.';
+                    literal += fraction;
+                }
+                literal += 'e';
+                literal += siExponent(suffix);
+            }
             char* end = nullptr;
             const double value = std::strtod(literal.c_str(), &end);
             if (end != literal.c_str() + literal.size() || !std::isfinite(value)) return invalid;

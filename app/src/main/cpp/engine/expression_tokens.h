@@ -7,13 +7,40 @@
 #include <vector>
 
 namespace expression {
-enum class Kind { Number, Word, String, Open, Close, Comma, Operator, Other };
+enum class Kind { Number, ScaledNumber, Word, String, Open, Close, Comma, Operator, Other };
 
 struct Token {
     Kind kind;
     std::string_view text;
     size_t start;
 };
+
+inline std::string_view siExponent(std::string_view suffix) {
+    if (suffix == "da") return "1";
+    if (suffix.size() != 1) return {};
+    switch (suffix.front()) {
+        case 'h': return "2";
+        case 'k': return "3";
+        case 'M': return "6";
+        case 'G': return "9";
+        case 'T': return "12";
+        case 'P': return "15";
+        case 'E': return "18";
+        case 'Z': return "21";
+        case 'Y': return "24";
+        case 'd': return "-1";
+        case 'c': return "-2";
+        case 'm': return "-3";
+        case 'u': return "-6";
+        case 'n': return "-9";
+        case 'p': return "-12";
+        case 'f': return "-15";
+        case 'a': return "-18";
+        case 'z': return "-21";
+        case 'y': return "-24";
+        default: return {};
+    }
+}
 
 inline std::vector<Token> tokenize(std::string_view source) {
     std::vector<Token> result;
@@ -30,12 +57,28 @@ inline std::vector<Token> tokenize(std::string_view source) {
                 ++i;
                 while (digit(i)) ++i;
             }
+            const size_t mantissaEnd = i;
             if (i < source.size() && (source[i] == 'e' || source[i] == 'E')) {
                 size_t exponent = i + 1;
                 if (exponent < source.size() && (source[exponent] == '+' || source[exponent] == '-')) ++exponent;
                 if (digit(exponent)) {
                     i = exponent + 1;
                     while (digit(i)) ++i;
+                }
+            }
+            if (i == mantissaEnd && i < source.size()) {
+                const size_t suffixLength = source.substr(i, 2) == "da" ? 2 : 1;
+                const auto suffix = source.substr(i, suffixLength);
+                if (!siExponent(suffix).empty()) {
+                    size_t end = i + suffixLength;
+                    // A suffix embedded between digits acts as the decimal point.
+                    if (suffix != "da" && source.substr(start, i - start).find('.') == std::string_view::npos)
+                        while (digit(end)) ++end;
+                    if (end == source.size() ||
+                        (!std::isalnum(static_cast<unsigned char>(source[end])) && source[end] != '_')) {
+                        i = end;
+                        kind = Kind::ScaledNumber;
+                    }
                 }
             }
         } else if (std::isalpha(c) || c == '_') {

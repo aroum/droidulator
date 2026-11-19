@@ -445,30 +445,9 @@ inline std::string preprocessExpression(const std::string& s) {
                     }
                 }
                 
-                std::string mult = "";
-                switch (c) {
-                    case 'h': mult = "1e2"; break;
-                    case 'k': mult = "1e3"; break;
-                    case 'M': mult = "1e6"; break;
-                    case 'G': mult = "1e9"; break;
-                    case 'T': mult = "1e12"; break;
-                    case 'P': mult = "1e15"; break;
-                    case 'E': mult = "1e18"; break;
-                    case 'Z': mult = "1e21"; break;
-                    case 'Y': mult = "1e24"; break;
-                    
-                    case 'd': mult = "1e-1"; break;
-                    case 'c': mult = "1e-2"; break;
-                    case 'm': mult = "1e-3"; break;
-                    case 'u': mult = "1e-6"; break;
-                    case 'n': mult = "1e-9"; break;
-                    case 'p': mult = "1e-12"; break;
-                    case 'f': mult = "1e-15"; break;
-                    case 'a': mult = "1e-18"; break;
-                    case 'z': mult = "1e-21"; break;
-                    case 'y': mult = "1e-24"; break;
-                }
-                if (!mult.empty()) {
+                const auto exponent = expression::siExponent(std::string_view(&c, 1));
+                if (!exponent.empty()) {
+                    const std::string mult = "1e" + std::string(exponent);
                     int prev_pos = (int)res.size() - (int)num.size();
                     bool prev_is_ident = (prev_pos > 0 && (std::isalpha((unsigned char)res[prev_pos - 1]) || res[prev_pos - 1] == '_'));
                     bool is_ident = prev_is_ident || (i + 1 < n && (std::isalpha((unsigned char)s_clean[i+1]) || s_clean[i+1] == '_'));

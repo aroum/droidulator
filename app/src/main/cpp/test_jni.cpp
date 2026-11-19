@@ -111,6 +111,8 @@ int main() {
         {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}
     };
     for (const auto& [expression, expected] : rkmCases) {
+        const auto decimal = expression::ArithmeticExpression::evaluate(expression, err);
+        assert(decimal && std::abs(*decimal - expected) < 1e-9);
         assert(std::abs(evaluate(expression, err) - expected) < 1e-9);
         assert(err.empty());
     }
