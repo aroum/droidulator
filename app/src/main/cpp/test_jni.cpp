@@ -62,6 +62,8 @@ int main() {
         }
         assert(evaluate("isolated_var", err) == 42);
         assert(engineState().history.size() == 1 && engineState().history[0] == 7);
+        assert(evaluate("isolated_var * 2 + e1", err) == 91 && err.empty());
+        assert(evaluate("-(isolated_var + e1)", err) == -49 && err.empty());
     }
     {
         EngineContextScope second(secondSession);

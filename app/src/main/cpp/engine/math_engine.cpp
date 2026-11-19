@@ -1,4 +1,5 @@
 #include "arithmetic_expression.h"
+#include <charconv>
 #include "math_engine.h"
 #include "script_engine.h"
 #include "tinyexpr.h"
@@ -1318,6 +1319,29 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
 }
 
 
+static std::optional<double> lookupScalar(std::string_view name) {
+    const auto& state = engineState();
+    if (name.size() > 1 && name.front() == 'e') {
+        size_t number = 0;
+        const auto end = name.data() + name.size();
+        const auto parsed = std::from_chars(name.data() + 1, end, number);
+        if (parsed.ec == std::errc{} && parsed.ptr == end &&
+            number >= state.history_first_number &&
+            number - state.history_first_number < state.history.size() &&
+            state.history.size() - (number - state.history_first_number) <= MAX_HISTORY_VALUES &&
+            name[1] != '0') {
+            return state.history[number - state.history_first_number];
+        }
+    }
+    for (auto it = state.user_consts.rbegin(); it != state.user_consts.rend(); ++it)
+        if (it->name == name) return it->val;
+    for (auto it = state.user_args.rbegin(); it != state.user_args.rend(); ++it)
+        if (it->name == name) return it->val;
+    if (name == "pi") return std::acos(-1.0);
+    if (name == "e") return std::exp(1.0);
+    return std::nullopt;
+}
+
 double evaluate(const std::string& expr_str, std::string& err) {
     struct LoopBudgetScope {
         LoopBudgetScope() { if (loopEvaluationDepth++ == 0) loopIterationsRemaining = 100000; }
@@ -1337,7 +1361,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err))
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar))
         return *arithmetic;
 
     std::string subbed = substituteUserFuncs(expr_str, err);

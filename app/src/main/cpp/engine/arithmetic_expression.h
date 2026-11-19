@@ -11,10 +11,22 @@ namespace expression {
 // so evaluating an arbitrarily long operator chain does not recurse.
 class ArithmeticExpression {
 public:
-    static std::optional<double> evaluate(std::string_view source, std::string& error) {
+    using ScalarLookup = std::optional<double> (*)(std::string_view);
+
+    static std::optional<double> evaluate(std::string_view source, std::string& error,
+                                          ScalarLookup lookup = nullptr) {
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
+        // Resolve all names before evaluating any operations. Unsupported
+        // expressions must fall back without changing the caller's error state.
+        for (auto& node : parser.nodes) {
+            if (node.symbol.empty()) continue;
+            if (!lookup) return std::nullopt;
+            const auto value = lookup(node.symbol);
+            if (!value) return std::nullopt;
+            node.value = *value;
+        }
         for (auto& node : parser.nodes) {
             if (!node.op) continue;
             const double left = parser.nodes[node.left].value;
@@ -45,6 +57,7 @@ private:
         char op = 0;
         size_t left = 0;
         size_t right = 0;
+        std::string_view symbol{};
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -81,15 +94,19 @@ private:
             const double value = std::strtod(literal.c_str(), &end);
             if (end != literal.c_str() + literal.size() || !std::isfinite(value)) return invalid;
             left = add({negative ? -value : value});
-        } else if (token.text == "(") {
-            left = parse(0, depth + 1);
-            if (left == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
+        } else {
+            if (token.kind == Kind::Word) {
+                left = add({0, 0, 0, 0, token.text});
+            } else if (token.text == "(") {
+                left = parse(0, depth + 1);
+                if (left == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
+            } else {
+                return invalid;
+            }
             if (negative) {
                 const auto minusOne = add({-1});
                 left = add({0, '*', minusOne, left});
             }
-        } else {
-            return invalid;
         }
         while (next < tokens.size()) {
             const auto op = tokens[next].text;
