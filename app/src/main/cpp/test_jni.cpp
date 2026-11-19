@@ -246,6 +246,9 @@ int main() {
         runScript("return step_array[99]");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("preserved_assignment=42; preserved_assignment=step_array[99]");
+        std::string assignmentError;
+        assert(evaluate("preserved_assignment", assignmentError) == 42 && assignmentError.empty());
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

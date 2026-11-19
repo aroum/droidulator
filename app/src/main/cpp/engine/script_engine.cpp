@@ -718,7 +718,8 @@ void runScript(const std::string& code) {
                     vals = parseArrayExpr(rhs, is_arr, parse_err);
                     if (!is_arr || !parse_err.empty()) {
                         std::string eval_err;
-                        double single_v = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
+                        const auto expanded = preprocessArrayLookups(preprocessLen(rhs), eval_err);
+                        double single_v = eval_err.empty() ? evaluate(expanded, eval_err) : 0.0;
                         if (!eval_err.empty()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err); ip++; continue; }
                         vals = {single_v};
                     }
@@ -907,7 +908,8 @@ void runScript(const std::string& code) {
                             }
                         } else {
                             std::string eval_err;
-                            double val = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
+                            const auto expanded = preprocessArrayLookups(preprocessLen(rhs), eval_err);
+                            double val = eval_err.empty() ? evaluate(expanded, eval_err) : 0.0;
                             if (!eval_err.empty()) {
                                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
                             } else {
