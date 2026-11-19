@@ -5,6 +5,8 @@ public class CardulatorEngine {
   native String[] nativeEvaluateDetailed(String s);
   native void nativeRegisterScript(String name, String code); native void nativeUnregisterScript(String name);
   native double nativeGetLastNumericVal();
+  native NativeValue[] nativeValues(boolean constants);
+  native String[] nativeFormulas();
   native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
   native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
@@ -37,6 +39,14 @@ public class CardulatorEngine {
     }
     e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false); if (!e.nativeGetVariables().contains("x = inf")) throw new AssertionError("infinity");
     e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN}); if (!e.nativeGetVariables().contains("arr = [1, nan]")) throw new AssertionError("array");
+    NativeValue[] snapshot = e.nativeValues(false);
+    if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("x") && v.scalar == Double.POSITIVE_INFINITY && v.elements == null))
+      throw new AssertionError("typed scalar");
+    if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("arr") && v.elements.length == 2 && Double.isNaN(v.elements[1])))
+      throw new AssertionError("typed array");
+    e.nativeEvaluate("jni_formula(x)=x^2");
+    if (java.util.Arrays.stream(e.nativeFormulas()).noneMatch(f -> f.startsWith("jni_formula(")))
+      throw new AssertionError("formula snapshot");
     e.nativeRestoreScriptFunction(new String[]{"abc","1","x","return x*2"}); if(e.nativeGetScriptFunctions().length != 1) throw new AssertionError("function");
     String zero=e.nativeEvaluate("conv(0, \"rad\")");
     if (zero.startsWith("ERROR") || !zero.contains("0")) throw new AssertionError(zero);
@@ -63,5 +73,18 @@ public class CardulatorEngine {
     e.nativeRestorePlot(lines, plotLimits);
     if (e.nativeGetPlotLines().length != 1 || e.nativeGetPlotLines()[0].y[0] != 1234567.89) throw new AssertionError("restore plot");
     System.out.println("JNI tests passed");
+  }
+}
+
+
+final class NativeValue {
+  final String name;
+  final double scalar;
+  final double[] elements;
+
+  NativeValue(String name, double scalar, double[] elements) {
+    this.name = name;
+    this.scalar = scalar;
+    this.elements = elements;
   }
 }

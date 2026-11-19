@@ -2,6 +2,10 @@ package com.cardputer.cardulator
 
 data class NativePlotLine(val x: DoubleArray, val y: DoubleArray, val color: Int, val linestyle: String)
 
+data class NativeValue(val name: String, val scalar: Double, val elements: DoubleArray?) {
+    fun expressionValue(): String = elements?.joinToString(", ", "[", "]") ?: scalar.toString()
+}
+
 object CardulatorEngine {
     init {
         System.loadLibrary("cardulator_jni")
@@ -32,9 +36,8 @@ object CardulatorEngine {
     external fun nativeRestoreScalar(name: String, value: Double, isConstant: Boolean)
     external fun nativeRestoreArray(name: String, values: DoubleArray)
     external fun nativeClearHistory()
-    external fun nativeGetVariables(): String
-    external fun nativeGetFormulas(): String
-    external fun nativeGetConstants(): String
+    external fun nativeValues(constants: Boolean): Array<NativeValue>
+    external fun nativeFormulas(): Array<String>
     external fun nativeGetHelp(topic: String): String
     external fun nativeSetDegRad(isDeg: Boolean)
     external fun nativeGetDegRad(): Boolean

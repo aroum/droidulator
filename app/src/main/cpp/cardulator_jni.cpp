@@ -609,6 +609,73 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeClearHistory(JNIEnv *env, j
     throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeValues(JNIEnv* env, jobject, jboolean constants) try {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
+    auto cls = env->FindClass("com/cardputer/cardulator/NativeValue");
+    if (!cls) return nullptr;
+    auto ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;D[D)V");
+    if (!ctor) return nullptr;
+    auto out = env->NewObjectArray(static_cast<jsize>(constants ? user_consts.size() + 2 :
+        history.size() + user_args.size() + user_arrays.size()), cls, nullptr);
+    if (!out) return nullptr;
+    jsize index = 0;
+    auto add = [&](const std::string& name, double value, const std::vector<double>* values = nullptr) {
+        if (env->ExceptionCheck()) return;
+        auto label = toJavaString(env, name);
+        if (!label) return;
+        jdoubleArray elements = nullptr;
+        if (values) {
+            const auto count = static_cast<jsize>(values->size());
+            elements = env->NewDoubleArray(count);
+            if (elements && count) env->SetDoubleArrayRegion(elements, 0, count, values->data());
+        }
+        if (!env->ExceptionCheck()) {
+            auto item = env->NewObject(cls, ctor, label, value, elements);
+            if (item) {
+                env->SetObjectArrayElement(out, index++, item);
+                env->DeleteLocalRef(item);
+            }
+        }
+        env->DeleteLocalRef(elements);
+        env->DeleteLocalRef(label);
+    };
+    if (constants) {
+        add("pi", std::acos(-1.0));
+        add("e", std::exp(1.0));
+        for (const auto& constant : user_consts) add(constant.name, constant.val);
+    } else {
+        for (size_t n = 0; n < history.size(); ++n)
+            add("e" + std::to_string(history_first_number + n), history[n]);
+        for (const auto& variable : user_args) add(variable.name, variable.val);
+        for (const auto& [name, values] : user_arrays) add(name, 0, &values);
+    }
+    return out;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unable to read values");
+    return nullptr;
+}
+
+JNIEXPORT jobjectArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeFormulas(JNIEnv* env, jobject) try {
+    std::lock_guard<std::recursive_mutex> lock(g_engine_mutex);
+    auto cls = env->FindClass("java/lang/String");
+    if (!cls) return nullptr;
+    auto out = env->NewObjectArray(static_cast<jsize>(user_funcs.size()), cls, nullptr);
+    if (!out) return nullptr;
+    for (jsize i = 0; i < static_cast<jsize>(user_funcs.size()); ++i) {
+        auto expression = toJavaString(env, user_funcs[i]);
+        if (!expression) return nullptr;
+        env->SetObjectArrayElement(out, i, expression);
+        env->DeleteLocalRef(expression);
+        if (env->ExceptionCheck()) return nullptr;
+    }
+    return out;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unable to read formulas");
+    return nullptr;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeGetVariables(JNIEnv *env, jobject thiz) try {
     std::lock_guard<std::recursive_mutex> engineLock(g_engine_mutex);

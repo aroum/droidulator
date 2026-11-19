@@ -856,32 +856,15 @@ class MainActivity : AppCompatActivity() {
             }
             showGruvboxCustomDialog(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
                 when (activeTab) {
-                    "Variables" -> {
-                        val varsRaw = CardulatorEngine.nativeGetVariables()
-                        val lines = varsRaw.split("\n").filter { it.contains("=") }
-                        for (line in lines) {
-                            val varName = line.split("=", limit = 2)[0].trim()
-                            if (!varName.matches(Regex("e[0-9]+"))) CardulatorEngine.nativeDeleteVariable(varName)
-                        }
+                    "Variables" -> CardulatorEngine.nativeValues(false)
+                        .filterNot { it.name.matches(Regex("e[0-9]+")) }
+                        .forEach { CardulatorEngine.nativeDeleteVariable(it.name) }
+                    "Formulas" -> CardulatorEngine.nativeFormulas().forEach {
+                        CardulatorEngine.nativeDeleteFormula(it.substringBefore('(').trim())
                     }
-                    "Formulas" -> {
-                        val formulasRaw = CardulatorEngine.nativeGetFormulas()
-                        val lines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
-                        for (line in lines) {
-                            val fnName = line.split("=", limit = 2)[0].split("(")[0].trim()
-                            CardulatorEngine.nativeDeleteFormula(fnName)
-                        }
-                    }
-                    "Constants" -> {
-                        val constsRaw = CardulatorEngine.nativeGetConstants()
-                        val lines = constsRaw.split("\n").filter { it.contains("=") }
-                        for (line in lines) {
-                            val name = line.split("=", limit = 2)[0].trim()
-                            if (name != "pi" && name != "e") {
-                                CardulatorEngine.nativeDeleteConstant(name)
-                            }
-                        }
-                    }
+                    "Constants" -> CardulatorEngine.nativeValues(true)
+                        .filterNot { it.name == "pi" || it.name == "e" }
+                        .forEach { CardulatorEngine.nativeDeleteConstant(it.name) }
                     "Scripts" -> {
                         userScripts.forEach { CardulatorEngine.nativeUnregisterScript(it.first) }
                         userScripts.clear()
@@ -1404,13 +1387,8 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Variables" -> {
-                val varsRaw = CardulatorEngine.nativeGetVariables()
-                var lines = varsRaw.split("\n").filter { it.contains("=") }
-                if (!showEVars) {
-                    lines = lines.filter { line ->
-                        val varName = line.split("=", limit = 2)[0].trim()
-                        !(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })
-                    }
+                val lines = CardulatorEngine.nativeValues(false).filter {
+                    showEVars || !it.name.matches(Regex("e[0-9]+"))
                 }
 
                 if (lines.isEmpty()) {
@@ -1423,9 +1401,8 @@ class MainActivity : AppCompatActivity() {
                     itemsContainer.addView(emptyTv)
                 } else {
                     for (line in lines) {
-                        val parts = line.split("=", limit = 2)
-                        val name = parts[0].trim()
-                        val value = if (parts.size > 1) parts[1].trim() else ""
+                        val name = line.name
+                        val value = line.expressionValue()
 
                         val isHistory = name.matches(Regex("e[0-9]+"))
                         val cardView = createMenuItemCard(
@@ -1450,13 +1427,9 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Constants" -> {
-                val constsRaw = CardulatorEngine.nativeGetConstants()
-                val lines = constsRaw.split("\n").filter { it.contains("=") }
-
-                for (line in lines) {
-                    val parts = line.split("=", limit = 2)
-                    val name = parts[0].trim()
-                    val value = if (parts.size > 1) parts[1].trim() else ""
+                for (entry in CardulatorEngine.nativeValues(true)) {
+                    val name = entry.name
+                    val value = entry.expressionValue()
                     val isBuiltIn = (name == "pi" || name == "e")
 
                     val cardView = createMenuItemCard(
@@ -1484,8 +1457,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Formulas" -> {
-                val formulasRaw = CardulatorEngine.nativeGetFormulas()
-                val lines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
+                val lines = CardulatorEngine.nativeFormulas()
 
                 if (lines.isEmpty()) {
                     val emptyTv = TextView(this).apply {
@@ -2266,153 +2238,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveUserDataToStorage() {
-        try {
-            if (session.storageLoadFailed) return
-            val json = org.json.JSONObject()
+    private val calculatorRepository by lazy { CalculatorRepository(applicationContext, session) }
 
-            // Save variables
-            val varsRaw = CardulatorEngine.nativeGetVariables()
-            val varLines = varsRaw.split("\n").filter { it.contains("=") }
-            val varsArray = org.json.JSONArray()
-            for (l in varLines) {
-                val varName = l.split("=", limit = 2)[0].trim()
-                if (!(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })) {
-                    varsArray.put(l)
-                }
-            }
-            json.put("variables", varsArray)
-
-            // Save formulas
-            val formulasRaw = CardulatorEngine.nativeGetFormulas()
-            val formulaLines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
-            val formulasArray = org.json.JSONArray()
-            for (l in formulaLines) {
-                formulasArray.put(l)
-            }
-            json.put("formulas", formulasArray)
-
-            // Save constants
-            val constsRaw = CardulatorEngine.nativeGetConstants()
-            val constLines = constsRaw.split("\n").filter { it.contains("=") }
-            val constsArray = org.json.JSONArray()
-            for (l in constLines) {
-                val name = l.split("=", limit = 2)[0].trim()
-                if (name != "pi" && name != "e") {
-                    constsArray.put(l)
-                }
-            }
-            json.put("constants", constsArray)
-
-            val functionsArray = org.json.JSONArray()
-            for (function in CardulatorEngine.nativeGetScriptFunctions()) {
-                val fields = org.json.JSONArray()
-                function.forEach { fields.put(it) }
-                functionsArray.put(fields)
-            }
-            json.put("scriptFunctions", functionsArray)
-
-            // Save scripts
-            val scriptsArray = org.json.JSONArray()
-            for (s in userScripts) {
-                val scriptObj = org.json.JSONObject()
-                scriptObj.put("name", s.first)
-                scriptObj.put("code", s.second)
-                scriptsArray.put(scriptObj)
-            }
-            json.put("scripts", scriptsArray)
-
-            UserDataStorage(this).write(json.toString())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun parseStoredNumber(text: String): Double = when (text.trim().lowercase()) {
-        "nan", "+nan", "-nan" -> Double.NaN
-        "inf", "+inf", "infinity", "+infinity" -> Double.POSITIVE_INFINITY
-        "-inf", "-infinity" -> Double.NEGATIVE_INFINITY
-        else -> text.trim().toDouble()
-    }
-
-    private fun restoreStoredVariable(line: String, isConstant: Boolean) {
-        val parts = line.split("=", limit = 2)
-        require(parts.size == 2) { "Invalid saved variable" }
-        val name = parts[0].trim()
-        val value = parts[1].trim()
-        if (!isConstant && value.startsWith("[") && value.endsWith("]")) {
-            val body = value.substring(1, value.length - 1).trim()
-            val values = if (body.isEmpty()) doubleArrayOf() else body.split(",").map(::parseStoredNumber).toDoubleArray()
-            CardulatorEngine.nativeRestoreArray(name, values)
-        } else {
-            CardulatorEngine.nativeRestoreScalar(name, parseStoredNumber(value), isConstant)
-        }
-    }
+    private fun saveUserDataToStorage() = calculatorRepository.save()
 
     private fun loadUserDataFromStorage(restoreEngine: Boolean) {
-        try {
-            val contents = UserDataStorage(this).read() ?: return
-            val json = org.json.JSONObject(contents)
-
-            val functions = json.optJSONArray("scriptFunctions")
-            if (restoreEngine && functions != null) {
-                for (i in 0 until functions.length()) {
-                    val fields = functions.getJSONArray(i)
-                    CardulatorEngine.nativeRestoreScriptFunction(Array(fields.length()) { fields.getString(it) })
-                }
-            }
-
-            // Restore variables
-            if (restoreEngine && json.has("variables")) {
-                val varsArray = json.getJSONArray("variables")
-                for (i in 0 until varsArray.length()) {
-                    val line = varsArray.getString(i)
-                    restoreStoredVariable(line, false)
-                }
-            }
-
-            // Restore formulas
-            if (restoreEngine && json.has("formulas")) {
-                val formulasArray = json.getJSONArray("formulas")
-                for (i in 0 until formulasArray.length()) {
-                    val line = formulasArray.getString(i)
-                    CardulatorEngine.nativeEvaluate(line)
-                }
-            }
-
-            // Restore constants
-            if (restoreEngine && json.has("constants")) {
-                val constsArray = json.getJSONArray("constants")
-                for (i in 0 until constsArray.length()) {
-                    val line = constsArray.getString(i)
-                    restoreStoredVariable(line, true)
-                }
-            }
-
-            // Restore scripts
-            if (json.has("scripts")) {
-                val scriptsArray = json.getJSONArray("scripts")
-                userScripts.clear()
-                for (i in 0 until scriptsArray.length()) {
-                    val obj = scriptsArray.getJSONObject(i)
-                    val originalName = obj.getString("name")
-                    var name = originalName
-                    var suffix = 2
-                    while (userScripts.any { it.first == name }) name = "${originalName}_${suffix++}"
-                    val code = obj.getString("code")
-                    userScripts.add(Pair(name, code))
-                    // Register each script so run(name) can find it
-                    CardulatorEngine.nativeRegisterScript(name, code)
-                }
-            }
-        } catch (e: Exception) {
-            session.storageLoadFailed = true
-            android.util.Log.e("Droidulator", "Unable to load saved data", e)
-            Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_019), Toast.LENGTH_LONG).show()
+        calculatorRepository.load(restoreEngine) {
+            Toast.makeText(this, R.string.ui_text_019, Toast.LENGTH_LONG).show()
         }
     }
-
-
 
     private val customThemeLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
