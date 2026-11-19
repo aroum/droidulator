@@ -124,6 +124,18 @@ inline bool closeGroup(std::vector<char>& groups, char closing) {
     return true;
 }
 
+inline size_t matchingGroupEnd(std::string_view source, size_t opening) {
+    std::vector<char> groups;
+    for (const auto& token : tokenize(source.substr(opening))) {
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close) {
+            if (!closeGroup(groups, token.text.front())) return std::string_view::npos;
+            if (groups.empty()) return opening + token.start;
+        }
+    }
+    return std::string_view::npos;
+}
+
 inline std::string_view trim(std::string_view source) {
     const auto first = source.find_first_not_of(" \t\r\n");
     if (first == std::string_view::npos) return {};

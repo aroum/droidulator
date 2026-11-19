@@ -257,15 +257,9 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 if (!prev_ok) { pos += search.size(); continue; }
                 
                 size_t start = pos + search.size();
-                int depth = 1;
-                size_t end = start;
-                while (end < expr.size() && depth > 0) {
-                    if (expr[end] == '(') depth++;
-                    else if (expr[end] == ')') depth--;
-                    if (depth > 0) end++;
-                }
-                if (depth > 0) { err = "Mismatched Brackets"; return expr; }
-                
+                const size_t end = expression::matchingGroupEnd(expr, start - 1);
+                if (end == std::string::npos) { err = "Mismatched Brackets"; return expr; }
+
                 std::string args_str = expr.substr(start, end - start);
                 auto args = expression::splitArguments(args_str);
                 if (!expression::trim(args_str).empty() && args.empty()) {
@@ -316,18 +310,9 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 if (pos > 0 && (std::isalnum(static_cast<unsigned char>(expr[pos - 1])) || expr[pos - 1] == '_')) { pos += search.size(); continue; }
                 if (++substitutions > 10000) { err = "Formula expansion limit exceeded"; return expr; }
                 size_t start = pos + search.size();
-                int depth = 1;
-                size_t end = start;
-                while (end < expr.size() && depth > 0) {
-                    if (expr[end] == '(') depth++;
-                    else if (expr[end] == ')') depth--;
-                    if (depth > 0) end++;
-                }
-                if (depth > 0) {
-                    err = "Mismatched Brackets";
-                    return expr;
-                }
-                
+                const size_t end = expression::matchingGroupEnd(expr, start - 1);
+                if (end == std::string::npos) { err = "Mismatched Brackets"; return expr; }
+
                 std::string args_str = expr.substr(start, end - start);
                 const auto args = expression::splitArguments(args_str);
 
