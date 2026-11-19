@@ -733,20 +733,11 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
     for (const auto& fname : cond_funcs) {
         std::string target = fname + "(";
         size_t pos = 0;
-        while ((pos = res.find(target, pos)) != std::string::npos) {
+        while ((pos = expression::callOffset(res, fname, pos)) != std::string::npos) {
             bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
             if (!prev_ok) { pos += target.size(); continue; }
-            int depth = 1;
-            int b_depth = 0;
-            size_t close = pos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') b_depth++;
-                else if (res[close] == ']') b_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
+            const size_t close = expression::matchingGroupEnd(res, pos + target.size() - 1);
+            if (close == std::string::npos) break;
 
             std::string inside = res.substr(pos + target.size(), close - pos - target.size());
             auto args = expression::splitArguments(inside);
@@ -796,20 +787,11 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
     for (const auto& fname : loop_funcs) {
         std::string target = fname + "(";
         size_t pos = 0;
-        while ((pos = res.find(target, pos)) != std::string::npos) {
+        while ((pos = expression::callOffset(res, fname, pos)) != std::string::npos) {
             bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
             if (!prev_ok) { pos += target.size(); continue; }
-            int depth = 1;
-            int b_depth = 0;
-            size_t close = pos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') b_depth++;
-                else if (res[close] == ']') b_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
+            const size_t close = expression::matchingGroupEnd(res, pos + target.size() - 1);
+            if (close == std::string::npos) break;
 
             std::string inside = res.substr(pos + target.size(), close - pos - target.size());
             auto args = expression::splitArguments(inside);
