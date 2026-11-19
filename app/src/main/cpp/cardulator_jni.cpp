@@ -170,10 +170,17 @@ static void prependScriptOutput(std::string& result) {
 // Preview evaluation — evaluates formula without adding to history (used for live formula dialog preview)
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluatePreview(JNIEnv *env, jobject thiz, jstring input_jstr) try {
-    JniSessionScope session(*jniSession(env, thiz));
     std::string expression = toCppString(env, input_jstr);
     if (expression.empty()) return toJavaString(env, "");
 
+    auto* session = jniSession(env, thiz);
+    // Preview can run user functions. Keep its state changes separate and
+    // release the live session lock before evaluating the expression.
+    auto snapshot = [&] {
+        std::lock_guard lock(session->mutex);
+        return session->context;
+    }();
+    EngineContextScope preview(snapshot);
     std::string err;
     double val = evaluateWithoutHistory(expression, err);
     if (!err.empty()) return toJavaString(env, ("ERROR: " + err));

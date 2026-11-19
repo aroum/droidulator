@@ -1,6 +1,10 @@
 package com.cardputer.cardulator
 
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.ViewModel
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 data class ScriptDraft(val originalName: String?, var name: String, var code: String)
 
@@ -12,8 +16,18 @@ data class DefinitionDraft(
 class CalculatorSession : ViewModel() {
     private val engineDelegate = lazy { CardulatorEngine() }
     val engine by engineDelegate
+    private val engineQueue = Executors.newSingleThreadExecutor()
+    private val main = Handler(Looper.getMainLooper())
+
+    fun <T> compute(operation: CardulatorEngine.() -> T, completed: (Result<T>) -> Unit): Future<*> =
+        engineQueue.submit {
+            val result = runCatching { engine.operation() }
+            if (!Thread.currentThread().isInterrupted) main.post { completed(result) }
+        }
+
     override fun onCleared() {
-        if (engineDelegate.isInitialized()) engine.close()
+        engineQueue.execute { if (engineDelegate.isInitialized()) engine.close() }
+        engineQueue.shutdown()
     }
 
     var definitionDraft: DefinitionDraft? = null

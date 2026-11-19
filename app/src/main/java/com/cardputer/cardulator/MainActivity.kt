@@ -1813,8 +1813,20 @@ class MainActivity : AppCompatActivity() {
 
         var currentEvalExpr = ""
         var currentRes = ""
+        var previewVersion = 0
+        var scheduledPreview: Runnable? = null
+        var runningPreview: java.util.concurrent.Future<*>? = null
+
+        fun cancelPreview() {
+            previewVersion++
+            scheduledPreview?.let { tvResultValue.removeCallbacks(it) }
+            scheduledPreview = null
+            runningPreview?.cancel(false)
+            runningPreview = null
+        }
 
         fun updateLiveResult() {
+            cancelPreview()
             val argValues = inputFields.map { it.second.text.toString().trim() }
             val hasEmptyInput = argValues.any { it.isEmpty() }
             if (hasEmptyInput && params.isNotEmpty()) {
@@ -1825,11 +1837,20 @@ class MainActivity : AppCompatActivity() {
             }
 
             currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
-            // Preview: evaluate without modifying REPL history
-            val rawRes = session.engine.nativeEvaluatePreview(currentEvalExpr)
-
-            currentRes = rawRes
-            tvResultValue.text = "$currentEvalExpr = $currentRes"
+            val expression = currentEvalExpr
+            val version = previewVersion
+            currentRes = ""
+            tvResultValue.text = expression
+            val task = Runnable {
+                runningPreview = session.compute({ nativeEvaluatePreview(expression) }) { result ->
+                    if (version == previewVersion && !isDestroyed && tvResultValue.isAttachedToWindow) {
+                        currentRes = result.getOrElse { it.localizedMessage.orEmpty() }
+                        tvResultValue.text = "$expression = $currentRes"
+                    }
+                }
+            }
+            scheduledPreview = task
+            tvResultValue.postDelayed(task, 150)
         }
 
         for (pair in inputFields) {
@@ -1871,7 +1892,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnExport.setOnClickListener {
-            if (currentEvalExpr.isNotEmpty() && currentRes != getString(R.string.enter_arguments)) {
+            if (currentEvalExpr.isNotEmpty() && currentRes.isNotEmpty() && currentRes != getString(R.string.enter_arguments)) {
                 val evaluation = session.engine.nativeEvaluateDetailed(currentEvalExpr)
                 val res = evaluation[1]
                 val isErr = evaluation[0] == "error"
@@ -1891,6 +1912,10 @@ class MainActivity : AppCompatActivity() {
             layout,
             customButtons = listOf(btnClose, btnExport)
         )
+        formulaDialog.setOnDismissListener { dismissed ->
+            cancelPreview()
+            activeDialogs.remove(dismissed)
+        }
     }
 
     private fun saveDefinition(expression: String, tab: String): Boolean {
