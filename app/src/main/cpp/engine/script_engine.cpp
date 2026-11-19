@@ -214,15 +214,7 @@ static bool executeForStep(const std::string& step, std::string& err) {
             if (!found) {
                 engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
             }
-        } else if (const size_t eq = [&] {
-            const auto assignment = expression::assignmentOffset(st);
-            if (assignment != std::string::npos) return assignment;
-            for (const auto& token : expression::tokenize(st)) {
-                if (token.text == "+=" || token.text == "-=" || token.text == "*=" || token.text == "/=")
-                    return token.start + 1;
-            }
-            return std::string::npos;
-        }(); eq != std::string::npos) {
+        } else if (const size_t eq = expression::assignmentOffset(st, true); eq != std::string::npos) {
             std::string lhs = st.substr(0, eq);
             std::string rhs = st.substr(eq + 1);
             if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
@@ -664,7 +656,7 @@ void runScript(const std::string& code) {
             ++ip;
         }
         // standard assignment: name = expr or name op= expr
-        else if (size_t eq = line.find('='); eq != std::string::npos && (eq == 0 || line[eq-1] != '=') && (eq + 1 >= line.size() || line[eq+1] != '=') && (eq == 0 || (line[eq-1] != '<' && line[eq-1] != '>' && line[eq-1] != '!'))) {
+        else if (const size_t eq = expression::assignmentOffset(line, true); eq != std::string::npos) {
             std::string lhs = line.substr(0, eq);
             std::string rhs = line.substr(eq + 1);
             if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {

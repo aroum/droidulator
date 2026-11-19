@@ -148,12 +148,16 @@ inline std::vector<std::string> splitArguments(std::string_view source) {
     return arguments;
 }
 
-inline size_t assignmentOffset(std::string_view source) {
+inline size_t assignmentOffset(std::string_view source, bool compound = false) {
     std::vector<char> groups;
     for (const auto& token : tokenize(source)) {
         if (token.kind == Kind::Open) groups.push_back(token.text.front());
         else if (token.kind == Kind::Close && !closeGroup(groups, token.text.front())) break;
-        else if (groups.empty() && token.kind == Kind::Operator && token.text == "=") return token.start;
+        else if (groups.empty() && token.kind == Kind::Operator) {
+            if (token.text == "=") return token.start;
+            if (compound && (token.text == "+=" || token.text == "-=" || token.text == "*=" || token.text == "/="))
+                return token.start + 1;
+        }
     }
     return std::string_view::npos;
 }
