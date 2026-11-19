@@ -189,6 +189,12 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
 static bool executeForStep(const std::string& step, std::string& err) {
     if (step.empty()) return true;
     bool isDef = false;
+    const auto isConstant = [](const std::string& name) {
+        const auto& constants = engineState().user_consts;
+        return std::any_of(constants.begin(), constants.end(), [&](const UserConst& value) {
+            return value.name == name;
+        });
+    };
     std::vector<std::string> step_stmts = splitIntoStatements(step);
     for (auto st : step_stmts) {
         st.erase(0, st.find_first_not_of(" \t"));
@@ -199,6 +205,10 @@ static bool executeForStep(const std::string& step, std::string& err) {
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
             if (!expression::isIdentifier(var_name)) {
                 err = "Invalid assignment name";
+                return false;
+            }
+            if (isConstant(var_name)) {
+                err = "Const Error";
                 return false;
             }
             char op = st[st.size() - 1];
@@ -229,6 +239,10 @@ static bool executeForStep(const std::string& step, std::string& err) {
             trim(lhs); trim(rhs);
             if (!expression::isIdentifier(lhs)) {
                 err = "Invalid assignment name";
+                return false;
+            }
+            if (isConstant(lhs)) {
+                err = "Const Error";
                 return false;
             }
             const auto expanded = preprocessArrayLookups(rhs, err);
