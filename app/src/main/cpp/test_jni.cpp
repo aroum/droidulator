@@ -251,6 +251,9 @@ int main() {
         assert(evaluate("preserved_assignment", assignmentError) == 42 && assignmentError.empty());
         std::string signatureError;
         bool signatureDefinition = false;
+        evaluateInput("invalid-name(x) = x", signatureError, signatureDefinition);
+        assert(!signatureError.empty());
+        signatureError.clear();
         evaluateInput("invalid_signature(x) extra = x", signatureError, signatureDefinition);
         assert(!signatureError.empty());
         runScript("return 1, unknown_return_value");
