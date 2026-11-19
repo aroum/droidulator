@@ -2691,27 +2691,25 @@ std::string formatPrintString(const std::string& str, std::string& err) {
 }
 
 bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr) {
-    size_t open = line.find('[');
-    if (open == std::string::npos || open == 0) return false;
-    
-    for (size_t i = 0; i < open; ++i) {
-        if (!std::isalnum(static_cast<unsigned char>(line[i])) && line[i] != '_') return false;
+    const auto tokens = expression::tokenize(line);
+    using expression::Kind;
+    if (tokens.size() < 6 || tokens[0].kind != Kind::Word || tokens[1].text != "[")
+        return false;
+    std::vector<char> groups{'['};
+    for (size_t i = 2; i + 2 < tokens.size(); ++i) {
+        const auto token = tokens[i];
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close && !expression::closeGroup(groups, token.text.front()))
+            return false;
+        if (!groups.empty()) continue;
+        if (i == 2 || tokens[i + 1].text != "=") return false;
+        name = tokens[0].text;
+        const auto start = tokens[1].start + 1;
+        idx_expr = line.substr(start, token.start - start);
+        val_expr = line.substr(tokens[i + 1].start + 1);
+        return true;
     }
-    
-    size_t close = line.find(']', open);
-    if (close == std::string::npos) return false;
-    
-    size_t eq = line.find('=', close);
-    if (eq == std::string::npos) return false;
-    
-    for (size_t i = close + 1; i < eq; ++i) {
-        if (line[i] != ' ' && line[i] != '\t') return false;
-    }
-    
-    name = line.substr(0, open);
-    idx_expr = line.substr(open + 1, close - open - 1);
-    val_expr = line.substr(eq + 1);
-    return true;
+    return false;
 }
 
 bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2) {

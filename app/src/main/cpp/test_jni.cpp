@@ -81,6 +81,11 @@ int main() {
     assert(expression::callBody(R"(conv (max(1, 2), "m", "cm"))", "conv").has_value());
     assert(!expression::callBody("conv(1, m) + f(2)", "conv"));
     assert(!expression::callBody("conv([1), m)", "conv"));
+    std::string arrayName, indexExpression, assignedValue;
+    assert(parseArrayElementAssignment("a[b[1] + 1] = 7", arrayName, indexExpression, assignedValue));
+    assert(arrayName == "a" && indexExpression == "b[1] + 1" && expression::trim(assignedValue) == "7");
+    assert(!parseArrayElementAssignment("a[1] == 7", arrayName, indexExpression, assignedValue));
+    assert(!parseArrayElementAssignment("a[1) = 7", arrayName, indexExpression, assignedValue));
     const auto arguments = expression::splitArguments(R"(max(1, 2), 'm, x', [1,2])");
     assert((arguments == std::vector<std::string>{"max(1, 2)", "'m, x'", "[1,2]"}));
     assert(expression::splitArguments("x, [1, 2)").empty());
