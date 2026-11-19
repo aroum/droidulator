@@ -167,7 +167,8 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
         if (!isArray || !error.empty()) {
             isArray = false;
             error.clear();
-            values = {evaluate(preprocessArrayLookups(expressionText, error), error)};
+            const auto expanded = preprocessArrayLookups(expressionText, error);
+            if (error.empty()) values = {evaluate(expanded, error)};
         }
     }
 

@@ -243,6 +243,9 @@ int main() {
         runScript("step_array=[1]; for(i=0; i<2; i=step_array[99]) {}");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("return step_array[99]");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
