@@ -11,6 +11,8 @@ import android.view.MotionEvent
 import android.view.View
 import kotlin.math.abs
 import java.util.Locale
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
 
 class PlotView @JvmOverloads constructor(
     context: Context,
@@ -98,10 +100,15 @@ class PlotView @JvmOverloads constructor(
     private var currentProbe: Probe? = null
     private data class ProbeSegment(val x0: Double, val y0: Double, val x1: Double, val y1: Double,
                                     val px0: Float, val py0: Float, val px1: Float, val py1: Float, val color: Int)
-    private val probeSegments = ArrayList<ProbeSegment>()
-    private val probeBins = List(64) { ArrayList<Int>() }
-    private val wideProbeSegments = ArrayList<Int>()
-    private var probeVisits = IntArray(0)
+    private data class ProbeIndex(
+        val segments: List<ProbeSegment> = emptyList(),
+        val bins: List<List<Int>> = List(64) { emptyList() },
+        val wideSegments: List<Int> = emptyList(),
+        val visits: IntArray = IntArray(segments.size)
+    )
+    private var probeIndex = ProbeIndex()
+    private var pendingProbeIndex: Future<*>? = null
+    private var indexRequest = 0L
     private var probeGeneration = 0
 
     init {
@@ -169,6 +176,8 @@ class PlotView @JvmOverloads constructor(
     internal data class PlotData(val lines: List<LineData>, val bounds: Bounds)
 
     companion object {
+        private val probeExecutor = Executors.newSingleThreadExecutor()
+
         internal fun preparePlotData(lines: Array<NativePlotLine>, limits: DoubleArray): PlotData {
             val plotLines = lines.map { LineData(it.x, it.y, rgb565ToColor(it.color), it.linestyle) }
             var minX = Double.POSITIVE_INFINITY
@@ -216,16 +225,39 @@ class PlotView @JvmOverloads constructor(
     }
 
     private fun rebuildProbeIndex() {
-        probeSegments.clear(); probeBins.forEach { it.clear() }; wideProbeSegments.clear()
-        val w = width.toFloat(); val h = height.toFloat()
-        if (w <= 0f || h <= 0f) return
-        val rangeX = cachedMaxX - cachedMinX; val rangeY = cachedMaxY - cachedMinY
-        if (!rangeX.isFinite() || !rangeY.isFinite() || rangeX <= 0 || rangeY <= 0) return
+        pendingProbeIndex?.cancel(true)
+        val request = ++indexRequest
+        probeIndex = ProbeIndex()
+        probeGeneration = 0
+        val w = width.toFloat()
+        val h = height.toFloat()
+        if (!isAttachedToWindow || w <= 0f || h <= 0f || plotLines.isEmpty()) return
+        val lines = plotLines
+        val plotBounds = bounds
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        pendingProbeIndex = probeExecutor.submit {
+            val index = buildProbeIndex(lines, plotBounds, w, h)
+            if (!Thread.currentThread().isInterrupted) main.post {
+                if (request != indexRequest) return@post
+                probeIndex = index
+                if (isTouching) updateProbe()
+                invalidate()
+            }
+        }
+    }
+
+    private fun buildProbeIndex(plotLines: List<LineData>, bounds: Bounds, w: Float, h: Float): ProbeIndex {
+        val rangeX = bounds.maxX - bounds.minX
+        val rangeY = bounds.maxY - bounds.minY
+        if (!rangeX.isFinite() || !rangeY.isFinite() || rangeX <= 0 || rangeY <= 0) return ProbeIndex()
+        val probeSegments = ArrayList<ProbeSegment>()
+        val probeBins = List(64) { ArrayList<Int>() }
+        val wideProbeSegments = ArrayList<Int>()
         fun add(x0: Double, y0: Double, x1: Double, y1: Double, color: Int) {
-            val px0 = ((x0 - cachedMinX) / rangeX * w).toFloat()
-            val py0 = (h - (y0 - cachedMinY) / rangeY * h).toFloat()
-            val px1 = ((x1 - cachedMinX) / rangeX * w).toFloat()
-            val py1 = (h - (y1 - cachedMinY) / rangeY * h).toFloat()
+            val px0 = ((x0 - bounds.minX) / rangeX * w).toFloat()
+            val py0 = (h - (y0 - bounds.minY) / rangeY * h).toFloat()
+            val px1 = ((x1 - bounds.minX) / rangeX * w).toFloat()
+            val py1 = (h - (y1 - bounds.minY) / rangeY * h).toFloat()
             if (!px0.isFinite() || !py0.isFinite() || !px1.isFinite() || !py1.isFinite()) return
             val index = probeSegments.size
             probeSegments.add(ProbeSegment(x0, y0, x1, y1, px0, py0, px1, py1, color))
@@ -237,17 +269,29 @@ class PlotView @JvmOverloads constructor(
         for (line in plotLines) {
             var prevX = Double.NaN; var prevY = Double.NaN
             for (i in 0 until minOf(line.x.size, line.y.size)) {
+                if (Thread.currentThread().isInterrupted) return ProbeIndex()
                 val x = line.x[i]; val y = line.y[i]
                 if (!x.isFinite() || !y.isFinite()) { prevX = Double.NaN; prevY = Double.NaN; continue }
-                val discontinuity = (prevY < cachedMinY && y > cachedMaxY) || (prevY > cachedMaxY && y < cachedMinY) ||
+                val discontinuity = (prevY < bounds.minY && y > bounds.maxY) || (prevY > bounds.maxY && y < bounds.minY) ||
                     (prevY * y < 0 && abs(y - prevY) > rangeY * 0.8)
                 if (prevX.isFinite() && !discontinuity) add(prevX, prevY, x, y, line.color)
                 else add(x, y, x, y, line.color)
                 prevX = x; prevY = y
             }
         }
-        probeVisits = IntArray(probeSegments.size)
-        probeGeneration = 0
+        return ProbeIndex(probeSegments, probeBins, wideProbeSegments)
+    }
+
+    override fun onAttachedToWindow() {
+        super.onAttachedToWindow()
+        rebuildProbeIndex()
+    }
+
+    override fun onDetachedFromWindow() {
+        ++indexRequest
+        pendingProbeIndex?.cancel(true)
+        pendingProbeIndex = null
+        super.onDetachedFromWindow()
     }
 
     private fun updateProbe() {
@@ -259,12 +303,12 @@ class PlotView @JvmOverloads constructor(
         var closestPx = clampedX; var closestPy = touchY.coerceIn(0f, h)
         var pointColor = cursorPointPaint.color
         var best = Double.POSITIVE_INFINITY
-        if (probeGeneration == Int.MAX_VALUE) { probeVisits.fill(0); probeGeneration = 0 }
+        if (probeGeneration == Int.MAX_VALUE) { probeIndex.visits.fill(0); probeGeneration = 0 }
         val generation = ++probeGeneration
         fun inspect(index: Int) {
-            if (probeVisits[index] == generation) return
-            probeVisits[index] = generation
-            val segment = probeSegments[index]
+            if (probeIndex.visits[index] == generation) return
+            probeIndex.visits[index] = generation
+            val segment = probeIndex.segments[index]
             val dx = segment.px1 - segment.px0; val dy = segment.py1 - segment.py0
             val length = dx * dx + dy * dy
             val t = if (length.isFinite() && length > 0f)
@@ -278,12 +322,12 @@ class PlotView @JvmOverloads constructor(
                 pointColor = segment.color
             }
         }
-        wideProbeSegments.forEach(::inspect)
+        probeIndex.wideSegments.forEach(::inspect)
         val center = (clampedX / w * 64).toInt().coerceIn(0, 63)
         for (radius in 0..63) {
             val left = center - radius; val right = center + radius
-            if (left >= 0) probeBins[left].forEach(::inspect)
-            if (radius > 0 && right < 64) probeBins[right].forEach(::inspect)
+            if (left >= 0) probeIndex.bins[left].forEach(::inspect)
+            if (radius > 0 && right < 64) probeIndex.bins[right].forEach(::inspect)
             val lower = if (left > 0) (clampedX - left * w / 64).coerceAtLeast(0f).toDouble() else Double.POSITIVE_INFINITY
             val upper = if (right < 63) ((right + 1) * w / 64 - clampedX).coerceAtLeast(0f).toDouble() else Double.POSITIVE_INFINITY
             val nearestUnsearched = minOf(lower, upper)
