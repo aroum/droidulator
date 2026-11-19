@@ -19,6 +19,19 @@ internal class CalculatorDialogs(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
+    fun showHelpDetail(topic: String, detail: String) {
+        val body = TextView(activity).apply {
+            text = detail
+            typeface = android.graphics.Typeface.MONOSPACE
+            setTextColor(ThemePalette.fgText)
+            textSize = 14f
+            setPadding(dp(12), dp(8), dp(12), dp(8))
+            setTextIsSelectable(true)
+        }
+        val scroll = ScrollView(activity).apply { addView(body) }
+        show(topic, scroll, positiveText = activity.getString(android.R.string.ok), showCancel = false)
+    }
+
     fun showScriptOutput(title: String, logText: String) {
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText

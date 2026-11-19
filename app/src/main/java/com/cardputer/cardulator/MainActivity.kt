@@ -420,22 +420,9 @@ class MainActivity : AppCompatActivity() {
             val detail = getString(R.string.unit_reference_detail, entry.name, entry.aliases, entry.definition, entry.name)
             val card = createMenuItemCard(entry.name, entry.aliases.ifEmpty { entry.definition },
                 ThemePalette.bgCard, ThemePalette.fgText, ThemePalette.fgDim, onEdit = null, onDelete = null)
-            card.setOnClickListener { showHelpDetail(entry.name, detail) }
+            card.setOnClickListener { dialogs.showHelpDetail(entry.name, detail) }
             itemsContainer.addView(card)
         }
-    }
-
-    private fun showHelpDetail(topic: String, detail: String) {
-        val body = TextView(this).apply {
-            text = detail
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTextColor(ThemePalette.fgText)
-            textSize = 14f
-            setPadding(dp(12), dp(8), dp(12), dp(8))
-            setTextIsSelectable(true)
-        }
-        val scroll = ScrollView(this).apply { addView(body) }
-        dialogs.show(topic, scroll, positiveText = getString(android.R.string.ok), showCancel = false)
     }
 
     private fun filterCards() {
@@ -1335,7 +1322,7 @@ class MainActivity : AppCompatActivity() {
                         cardBgColor, textColor, dimColor, onEdit = null, onDelete = null)
                     card.tag = "$topic $detail"
                     card.setOnClickListener {
-                        showHelpDetail(topic, detail)
+                        dialogs.showHelpDetail(topic, detail)
                     }
                     itemsContainer.addView(card)
                 }
