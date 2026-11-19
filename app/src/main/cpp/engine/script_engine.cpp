@@ -207,8 +207,15 @@ static bool executeForStep(const std::string& step, std::string& err) {
             if (!found) {
                 engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
             }
-        } else if (st.find('=') != std::string::npos) {
-            size_t eq = st.find('=');
+        } else if (const size_t eq = [&] {
+            const auto assignment = expression::assignmentOffset(st);
+            if (assignment != std::string::npos) return assignment;
+            for (const auto& token : expression::tokenize(st)) {
+                if (token.text == "+=" || token.text == "-=" || token.text == "*=" || token.text == "/=")
+                    return token.start + 1;
+            }
+            return std::string::npos;
+        }(); eq != std::string::npos) {
             std::string lhs = st.substr(0, eq);
             std::string rhs = st.substr(eq + 1);
             if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
