@@ -1196,6 +1196,20 @@ class MainActivity : AppCompatActivity() {
             if (result == null) return@observe
             session.commandResult.value = null
             val entry = result.entry
+            val definition = result.definition
+            if (definition != null) {
+                val editor = definitionEditor?.takeIf { it.draft === definition }
+                editor?.dialog?.setCancelable(true)
+                editor?.input?.isEnabled = true
+                if (entry.isError) {
+                    if (editor != null) editor.input.error = entry.rawOutput.removePrefix("ERROR: ")
+                    else Toast.makeText(this, entry.rawOutput, Toast.LENGTH_LONG).show()
+                } else {
+                    editor?.dialog?.dismiss()
+                    if (tabs[currentTabPosition] == definition.tab) refreshTabContent(definition.tab)
+                }
+                return@observe
+            }
             val script = result.scriptName
             if (script != null && !entry.isError) {
                 val log = entry.rawOutput
@@ -1715,17 +1729,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun saveDefinition(expression: String, tab: String): Boolean {
-        val evaluation = session.engine.nativeEvaluateDetailed(expression)
-        val result = evaluation[1]
-        if (evaluation[0] == "error") {
-            Toast.makeText(this, result, Toast.LENGTH_LONG).show()
-            return false
-        }
-        saveUserDataToStorage()
-        refreshTabContent(tab)
-        return true
-    }
+    private data class DefinitionEditor(val draft: DefinitionDraft, val dialog: Dialog, val input: EditText)
+    private var definitionEditor: DefinitionEditor? = null
 
     private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, tab: String) {
         val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
@@ -1765,13 +1770,20 @@ class MainActivity : AppCompatActivity() {
             if (valStr.isEmpty()) { et.error = this@MainActivity.getString(R.string.ui_text_017); false }
             else {
                 val expression = if (tab == "Constants" && !valStr.startsWith("const ")) "const $valStr" else valStr
-                saveDefinition(expression, tab)
+                val repository = calculatorRepository
+                if (session.runCommand(expression, definition = draft) { repository.save() }) {
+                    definitionEditor?.dialog?.setCancelable(false)
+                    et.isEnabled = false
+                }
+                false
             }
         })
+        definitionEditor = DefinitionEditor(draft, dialog, et)
         dialog.setOnDismissListener {
             activeDialogs.remove(dialog)
+            if (definitionEditor?.dialog === dialog) definitionEditor = null
             if (isChangingConfigurations) draft.cursor = et.selectionStart
-            else session.definitionDraft = null
+            else if (session.definitionDraft === draft) session.definitionDraft = null
         }
     }
 

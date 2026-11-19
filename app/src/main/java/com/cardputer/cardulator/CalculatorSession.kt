@@ -29,12 +29,18 @@ class CalculatorSession : ViewModel() {
             if (!Thread.currentThread().isInterrupted) main.post { completed(result) }
         }
 
-    data class CommandResult(val entry: ReplDisplayItem, val showPlot: Boolean, val scriptName: String?)
+    data class CommandResult(
+        val entry: ReplDisplayItem, val showPlot: Boolean, val scriptName: String?,
+        val definition: DefinitionDraft? = null
+    )
     internal val commandResult = MutableLiveData<CommandResult?>(null)
     internal var commandRunning = false
         private set
 
-    fun runCommand(input: String, scriptName: String? = null, persist: CardulatorEngine.() -> Unit): Boolean {
+    fun runCommand(
+        input: String, scriptName: String? = null, definition: DefinitionDraft? = null,
+        persist: CardulatorEngine.() -> Unit
+    ): Boolean {
         if (commandRunning) return false
         commandRunning = true
         compute({
@@ -47,13 +53,14 @@ class CalculatorSession : ViewModel() {
             val entry = result.getOrElse {
                 ReplDisplayItem(input, it.localizedMessage.orEmpty(), true)
             }
-            if (scriptName == null && replHistory.lastOrNull() != input) {
+            if (scriptName == null && definition == null && replHistory.lastOrNull() != input) {
                 replHistory.add(input)
                 if (replHistory.size > 500) replHistory.removeAt(0)
             }
-            val showPlot = !entry.isError && scriptName == null &&
+            val showPlot = !entry.isError && scriptName == null && definition == null &&
                 (input.startsWith("plot(") || input.startsWith("plot."))
-            commandResult.value = CommandResult(entry, showPlot, scriptName)
+            if (!entry.isError && definition != null && definitionDraft === definition) definitionDraft = null
+            commandResult.value = CommandResult(entry, showPlot, scriptName, definition)
         }
         return true
     }
