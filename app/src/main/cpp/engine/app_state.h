@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <random>
 
 struct UserArg {
     std::string name;
@@ -53,6 +54,13 @@ void removeUserAutocompleteWord(const std::string& word);
 // the duration of an operation, including callbacks into the evaluator.
 struct EngineContext {
     EngineContext();
+    std::mt19937 randomGenerator{std::random_device{}()};
+    bool g_last_eval_error = false;
+    bool lastOutputWasArray = false;
+    bool g_last_has_num = false;
+    double g_last_num_val = 0.0;
+    std::string g_last_prefix;
+    std::string g_last_suffix;
     std::vector<PlotLine> plot_lines{};
     bool plot_hold = false;
     bool plot_manual_limits = false;

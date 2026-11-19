@@ -157,7 +157,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectAutocompleteEditor(editor: EditText) {
         if (autocompleteEditor !== editor) {
-            CardulatorEngine.nativeResetAutocomplete()
+            session.engine.nativeResetAutocomplete()
             autocompleteEditor = editor
         }
     }
@@ -307,10 +307,10 @@ class MainActivity : AppCompatActivity() {
 
     private fun finishStartup() {
         if (!session.initialized) {
-            val isNewEngine = CardulatorEngine.initializeOnce()
+            val isNewEngine = session.engine.initializeOnce()
             loadUserDataFromStorage(isNewEngine)
-            if (isNewEngine) PlotStateStorage(this).restore()
-            userScripts.forEach { (name, code) -> CardulatorEngine.nativeRegisterScript(name, code) }
+            if (isNewEngine) PlotStateStorage(this).restore(session.engine)
+            userScripts.forEach { (name, code) -> session.engine.nativeRegisterScript(name, code) }
             session.initialized = true
         }
 
@@ -379,7 +379,7 @@ class MainActivity : AppCompatActivity() {
         cbDigitGrouping.isChecked = isDigitGroupingActive
         cbHideWelcome.isChecked = hideWelcomeMessage
         cbAutoPair.isChecked = isAutoPairEnabled
-        CardulatorEngine.nativeSetDegRad(savedDegMode)
+        session.engine.nativeSetDegRad(savedDegMode)
         tvMode.text = if (savedDegMode) "DEG" else "RAD"
         tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         updateEnterActionButtonText()
@@ -398,7 +398,7 @@ class MainActivity : AppCompatActivity() {
             ThemePalette.loadCustomThemeJson(savedThemeJson)
         }
 
-        CardulatorEngine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
+        session.engine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
 
         setupTabSpinner()
         setupFormatSpinners()
@@ -734,7 +734,7 @@ class MainActivity : AppCompatActivity() {
                 convTabSplitPos = splitPos
                 convTabMatchIdx = 0
 
-                val matches = CardulatorEngine.nativeGetConvUnits(fromUnit ?: "", lastPart)
+                val matches = session.engine.nativeGetConvUnits(fromUnit ?: "", lastPart)
                     .split("\n").filter { it.isNotEmpty() }
 
                 if (matches.isNotEmpty()) {
@@ -805,7 +805,7 @@ class MainActivity : AppCompatActivity() {
 
             // General autocomplete at caret position (preserves any text after caret e.g. closing bracket ')')
             val outCursor = intArrayOf(caret)
-            val completedFull = CardulatorEngine.nativeAutocomplete(fullText, caret, outCursor)
+            val completedFull = session.engine.nativeAutocomplete(fullText, caret, outCursor)
             if (completedFull.isNotEmpty() && completedFull != fullText) {
                 etInput.setText(completedFull)
                 val newCursorPos = outCursor[0].coerceIn(0, completedFull.length)
@@ -856,17 +856,17 @@ class MainActivity : AppCompatActivity() {
             }
             showGruvboxCustomDialog(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
                 when (activeTab) {
-                    "Variables" -> CardulatorEngine.nativeValues(false)
+                    "Variables" -> session.engine.nativeValues(false)
                         .filterNot { it.name.matches(Regex("e[0-9]+")) }
-                        .forEach { CardulatorEngine.nativeDeleteVariable(it.name) }
-                    "Formulas" -> CardulatorEngine.nativeFormulas().forEach {
-                        CardulatorEngine.nativeDeleteFormula(it.substringBefore('(').trim())
+                        .forEach { session.engine.nativeDeleteVariable(it.name) }
+                    "Formulas" -> session.engine.nativeFormulas().forEach {
+                        session.engine.nativeDeleteFormula(it.substringBefore('(').trim())
                     }
-                    "Constants" -> CardulatorEngine.nativeValues(true)
+                    "Constants" -> session.engine.nativeValues(true)
                         .filterNot { it.name == "pi" || it.name == "e" }
-                        .forEach { CardulatorEngine.nativeDeleteConstant(it.name) }
+                        .forEach { session.engine.nativeDeleteConstant(it.name) }
                     "Scripts" -> {
-                        userScripts.forEach { CardulatorEngine.nativeUnregisterScript(it.first) }
+                        userScripts.forEach { session.engine.nativeUnregisterScript(it.first) }
                         userScripts.clear()
                     }
                 }
@@ -1017,7 +1017,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFormatSettings() {
-        CardulatorEngine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
+        session.engine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
 
         val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
         prefs.edit()
@@ -1095,10 +1095,10 @@ class MainActivity : AppCompatActivity() {
             } else {
                 val res = if (item.arrayValues != null) {
                     item.rawOutput.substringBeforeLast("[") + item.arrayValues.joinToString(", ", "[", "]") {
-                        CardulatorEngine.nativeFormatNumber(it)
+                        session.engine.nativeFormatNumber(it)
                     }
                 } else if (item.hasNum) {
-                    item.prefix + CardulatorEngine.nativeFormatNumber(item.numVal) + item.suffix
+                    item.prefix + session.engine.nativeFormatNumber(item.numVal) + item.suffix
                 } else {
                     item.rawOutput
                 }
@@ -1113,17 +1113,17 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun appendOutputEntry(input: String, res: String, isError: Boolean) {
-        val hasNum = !isError && CardulatorEngine.nativeHasLastNumeric()
+        val hasNum = !isError && session.engine.nativeHasLastNumeric()
         replDisplayItems.add(
             ReplDisplayItem(
                 input = input,
                 rawOutput = res,
                 isError = isError,
                 hasNum = hasNum,
-                arrayValues = if (!isError && !hasNum) CardulatorEngine.nativeLastArray() else null,
-                numVal = if (hasNum) CardulatorEngine.nativeGetLastNumericVal() else 0.0,
-                prefix = if (hasNum) CardulatorEngine.nativeGetLastNumericPrefix() else "",
-                suffix = if (hasNum) CardulatorEngine.nativeGetLastNumericSuffix() else ""
+                arrayValues = if (!isError && !hasNum) session.engine.nativeLastArray() else null,
+                numVal = if (hasNum) session.engine.nativeGetLastNumericVal() else 0.0,
+                prefix = if (hasNum) session.engine.nativeGetLastNumericPrefix() else "",
+                suffix = if (hasNum) session.engine.nativeGetLastNumericSuffix() else ""
             )
         )
         val entrySsb = formatHighlightedReplEntry(input, res, isError)
@@ -1188,9 +1188,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleDegRad() {
-        val isDeg = CardulatorEngine.nativeGetDegRad()
+        val isDeg = session.engine.nativeGetDegRad()
         val nextDeg = !isDeg
-        CardulatorEngine.nativeSetDegRad(nextDeg)
+        session.engine.nativeSetDegRad(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
         tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
@@ -1200,7 +1200,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearSessionAndHistory() {
-        CardulatorEngine.nativeClearHistory()
+        session.engine.nativeClearHistory()
         replHistory.clear()
         replDisplayItems.clear()
         replHistoryIndex = -1
@@ -1236,7 +1236,7 @@ class MainActivity : AppCompatActivity() {
         try {
             etInput.setText("")
 
-            val evaluation = CardulatorEngine.nativeEvaluateDetailed(input)
+            val evaluation = session.engine.nativeEvaluateDetailed(input)
             val res = evaluation[1]
             val isError = evaluation[0] == "error"
             if (isError) {
@@ -1309,7 +1309,7 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
 
-                plotView.updatePlotData(CardulatorEngine.nativeGetPlotLines(), CardulatorEngine.nativeGetPlotLimits())
+                plotView.updatePlotData(session.engine.nativeGetPlotLines(), session.engine.nativeGetPlotLimits())
             }
             "Settings" -> {
                 scrollView.visibility = View.GONE
@@ -1372,9 +1372,9 @@ class MainActivity : AppCompatActivity() {
 
         when (tabName) {
             "Help" -> {
-                val topics = CardulatorEngine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }.toList()
+                val topics = session.engine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }.toList()
                 for (topic in topics) {
-                    val raw = CardulatorEngine.nativeGetHelp("help($topic)")
+                    val raw = session.engine.nativeGetHelp("help($topic)")
                     val detail = raw.lineSequence().filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
 
                     val card = createMenuItemCard(topic, detail.lineSequence().firstOrNull().orEmpty(),
@@ -1387,7 +1387,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Variables" -> {
-                val lines = CardulatorEngine.nativeValues(false).filter {
+                val lines = session.engine.nativeValues(false).filter {
                     showEVars || !it.name.matches(Regex("e[0-9]+"))
                 }
 
@@ -1416,7 +1416,7 @@ class MainActivity : AppCompatActivity() {
                             },
                             onDelete = if (isHistory) null else fun() {
                                 showConfirmDeleteDialog(name) {
-                                    CardulatorEngine.nativeDeleteVariable(name)
+                                    session.engine.nativeDeleteVariable(name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
                                 }
@@ -1427,7 +1427,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Constants" -> {
-                for (entry in CardulatorEngine.nativeValues(true)) {
+                for (entry in session.engine.nativeValues(true)) {
                     val name = entry.name
                     val value = entry.expressionValue()
                     val isBuiltIn = (name == "pi" || name == "e")
@@ -1446,7 +1446,7 @@ class MainActivity : AppCompatActivity() {
                         onDelete = if (!isBuiltIn) {
                             {
                                 showConfirmDeleteDialog(name) {
-                                    CardulatorEngine.nativeDeleteConstant(name)
+                                    session.engine.nativeDeleteConstant(name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
                                 }
@@ -1457,7 +1457,7 @@ class MainActivity : AppCompatActivity() {
                 }
             }
             "Formulas" -> {
-                val lines = CardulatorEngine.nativeFormulas()
+                val lines = session.engine.nativeFormulas()
 
                 if (lines.isEmpty()) {
                     val emptyTv = TextView(this).apply {
@@ -1488,7 +1488,7 @@ class MainActivity : AppCompatActivity() {
                             onDelete = {
                                 showConfirmDeleteDialog(name) {
                                     val cleanName = name.split("(")[0].trim()
-                                    CardulatorEngine.nativeDeleteFormula(cleanName)
+                                    session.engine.nativeDeleteFormula(cleanName)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
                                 }
@@ -1521,7 +1521,7 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onRun = {
-                                val log = CardulatorEngine.nativeRunScript(scriptCode)
+                                val log = session.engine.nativeRunScript(scriptCode)
                                 savePlotState()
                                 saveUserDataToStorage()
                                 appendRawOutput(getString(R.string.script_output_entry, scriptName, log))
@@ -1532,7 +1532,7 @@ class MainActivity : AppCompatActivity() {
                             },
                             onDelete = {
                                 showConfirmDeleteDialog(scriptName) {
-                                    CardulatorEngine.nativeUnregisterScript(scriptName)
+                                    session.engine.nativeUnregisterScript(scriptName)
                                     userScripts.removeAt(i)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
@@ -1826,7 +1826,7 @@ class MainActivity : AppCompatActivity() {
 
             currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
             // Preview: evaluate without modifying REPL history
-            val rawRes = CardulatorEngine.nativeEvaluatePreview(currentEvalExpr)
+            val rawRes = session.engine.nativeEvaluatePreview(currentEvalExpr)
 
             currentRes = rawRes
             tvResultValue.text = "$currentEvalExpr = $currentRes"
@@ -1872,7 +1872,7 @@ class MainActivity : AppCompatActivity() {
 
         btnExport.setOnClickListener {
             if (currentEvalExpr.isNotEmpty() && currentRes != getString(R.string.enter_arguments)) {
-                val evaluation = CardulatorEngine.nativeEvaluateDetailed(currentEvalExpr)
+                val evaluation = session.engine.nativeEvaluateDetailed(currentEvalExpr)
                 val res = evaluation[1]
                 val isErr = evaluation[0] == "error"
                 appendOutputEntry(currentEvalExpr, res, isErr)
@@ -1894,7 +1894,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun saveDefinition(expression: String, tab: String): Boolean {
-        val evaluation = CardulatorEngine.nativeEvaluateDetailed(expression)
+        val evaluation = session.engine.nativeEvaluateDetailed(expression)
         val result = evaluation[1]
         if (evaluation[0] == "error") {
             Toast.makeText(this, result, Toast.LENGTH_LONG).show()
@@ -1965,10 +1965,10 @@ class MainActivity : AppCompatActivity() {
                 return@showFullScriptEditorDialog false
             }
             if (index >= 0) {
-                if (draft.originalName != name) CardulatorEngine.nativeUnregisterScript(userScripts[index].first)
+                if (draft.originalName != name) session.engine.nativeUnregisterScript(userScripts[index].first)
                 userScripts[index] = name to code
             } else userScripts.add(name to code)
-            CardulatorEngine.nativeRegisterScript(name, code)
+            session.engine.nativeRegisterScript(name, code)
             saveUserDataToStorage()
             if (tabs[currentTabPosition] == "Scripts") refreshTabContent("Scripts")
             true
@@ -2150,7 +2150,7 @@ class MainActivity : AppCompatActivity() {
                         return@setOnClickListener
                     } else {
                         val outCursor = intArrayOf(prefix.length)
-                        val completed = CardulatorEngine.nativeAutocomplete(prefix, prefix.length, outCursor)
+                        val completed = session.engine.nativeAutocomplete(prefix, prefix.length, outCursor)
                         if (completed != prefix) {
                             etCode.text.replace(wordStart, cursor, completed)
                             etCode.setSelection((wordStart + completed.length).coerceAtMost(etCode.text.length))
@@ -2175,7 +2175,7 @@ class MainActivity : AppCompatActivity() {
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    val log = CardulatorEngine.nativeRunScript(newCode)
+                    val log = session.engine.nativeRunScript(newCode)
                     savePlotState()
                     saveUserDataToStorage()
                     appendRawOutput(getString(R.string.script_output_entry, newName, log))
@@ -2232,7 +2232,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun savePlotState() {
         try {
-            PlotStateStorage(this).save(CardulatorEngine.nativeGetPlotLines(), CardulatorEngine.nativeGetPlotLimits())
+            PlotStateStorage(this).save(session.engine.nativeGetPlotLines(), session.engine.nativeGetPlotLimits())
         } catch (error: Exception) {
             android.util.Log.e("Droidulator", "Unable to snapshot plot", error)
         }

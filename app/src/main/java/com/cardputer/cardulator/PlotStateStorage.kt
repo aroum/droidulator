@@ -46,7 +46,7 @@ class PlotStateStorage(context: Context) {
         }
     }
 
-    fun restore() {
+    fun restore(engine: CardulatorEngine) {
         try {
             val (lines, limits) = DataInputStream(BufferedInputStream(file.openRead())).use { input ->
                 require(input.readInt() == MAGIC && input.readInt() == VERSION)
@@ -60,7 +60,7 @@ class PlotStateStorage(context: Context) {
                 }
                 lines to DoubleArray(7) { input.readDouble() }
             }
-            CardulatorEngine.nativeRestorePlot(lines, limits)
+            engine.nativeRestorePlot(lines, limits)
         } catch (_: FileNotFoundException) {
             // No saved plot yet.
         } catch (error: Exception) {

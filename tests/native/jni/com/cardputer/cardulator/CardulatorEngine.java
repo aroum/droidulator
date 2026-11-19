@@ -1,7 +1,10 @@
 package com.cardputer.cardulator;
 public class CardulatorEngine {
 
-  native void nativeInit(); native void nativeInitUnits(String path); native String nativeEvaluate(String s);
+  private final long nativeHandle = nativeCreate();
+  native long nativeCreate();
+  native void nativeDestroy(long handle);
+  native void nativeInit(); static native void nativeInitUnits(String path); native String nativeEvaluate(String s);
   native String[] nativeEvaluateDetailed(String s);
   native void nativeRegisterScript(String name, String code); native void nativeUnregisterScript(String name);
   native double nativeGetLastNumericVal();
@@ -14,6 +17,16 @@ public class CardulatorEngine {
   public static void main(String[] args) {
     System.load(args[0]);
     CardulatorEngine e = new CardulatorEngine(); e.nativeInit(); e.nativeInitUnits(args[1]);
+    CardulatorEngine second = new CardulatorEngine();
+    second.nativeInit();
+    e.nativeEvaluate("session_value=42");
+    second.nativeEvaluate("session_value=17");
+    e.nativeEvaluate("session_value");
+    second.nativeEvaluate("session_value");
+    if (e.nativeGetLastNumericVal() != 42 || second.nativeGetLastNumericVal() != 17)
+      throw new AssertionError("JNI sessions share state");
+    second.nativeDestroy(second.nativeHandle);
+    e.nativeInit();
     if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
     String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);
     String withNul = e.nativeEvaluate("print(\"a\u0000b\")");

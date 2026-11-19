@@ -11,18 +11,18 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
             if (session.storageLoadFailed) return
             val json = org.json.JSONObject()
 
-            val variables = CardulatorEngine.nativeValues(false)
+            val variables = session.engine.nativeValues(false)
                 .filterNot { it.name.matches(Regex("e[0-9]+")) }
                 .map { "${it.name} = ${it.expressionValue()}" }
             json.put("variables", org.json.JSONArray(variables))
-            json.put("formulas", org.json.JSONArray(CardulatorEngine.nativeFormulas().toList()))
-            val constants = CardulatorEngine.nativeValues(true)
+            json.put("formulas", org.json.JSONArray(session.engine.nativeFormulas().toList()))
+            val constants = session.engine.nativeValues(true)
                 .filterNot { it.name == "pi" || it.name == "e" }
                 .map { "${it.name} = ${it.expressionValue()}" }
             json.put("constants", org.json.JSONArray(constants))
 
             val functionsArray = org.json.JSONArray()
-            for (function in CardulatorEngine.nativeGetScriptFunctions()) {
+            for (function in session.engine.nativeGetScriptFunctions()) {
                 val fields = org.json.JSONArray()
                 function.forEach { fields.put(it) }
                 functionsArray.put(fields)
@@ -60,9 +60,9 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
         if (!isConstant && value.startsWith("[") && value.endsWith("]")) {
             val body = value.substring(1, value.length - 1).trim()
             val values = if (body.isEmpty()) doubleArrayOf() else body.split(",").map(::parseStoredNumber).toDoubleArray()
-            CardulatorEngine.nativeRestoreArray(name, values)
+            session.engine.nativeRestoreArray(name, values)
         } else {
-            CardulatorEngine.nativeRestoreScalar(name, parseStoredNumber(value), isConstant)
+            session.engine.nativeRestoreScalar(name, parseStoredNumber(value), isConstant)
         }
     }
 
@@ -75,7 +75,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
             if (restoreEngine && functions != null) {
                 for (i in 0 until functions.length()) {
                     val fields = functions.getJSONArray(i)
-                    CardulatorEngine.nativeRestoreScriptFunction(Array(fields.length()) { fields.getString(it) })
+                    session.engine.nativeRestoreScriptFunction(Array(fields.length()) { fields.getString(it) })
                 }
             }
 
@@ -93,7 +93,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
                 val formulasArray = json.getJSONArray("formulas")
                 for (i in 0 until formulasArray.length()) {
                     val line = formulasArray.getString(i)
-                    CardulatorEngine.nativeEvaluate(line)
+                    session.engine.nativeEvaluate(line)
                 }
             }
 
@@ -119,7 +119,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
                     val code = obj.getString("code")
                     userScripts.add(Pair(name, code))
                     // Register each script so run(name) can find it
-                    CardulatorEngine.nativeRegisterScript(name, code)
+                    session.engine.nativeRegisterScript(name, code)
                 }
             }
         } catch (e: Exception) {

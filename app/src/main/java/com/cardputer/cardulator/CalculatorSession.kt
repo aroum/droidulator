@@ -10,6 +10,12 @@ data class DefinitionDraft(
 )
 
 class CalculatorSession : ViewModel() {
+    private val engineDelegate = lazy { CardulatorEngine() }
+    val engine by engineDelegate
+    override fun onCleared() {
+        if (engineDelegate.isInitialized()) engine.close()
+    }
+
     var definitionDraft: DefinitionDraft? = null
     var scriptDraft: ScriptDraft? = null
     var initialized = false

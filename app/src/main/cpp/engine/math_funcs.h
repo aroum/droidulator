@@ -377,18 +377,14 @@ inline double custom_fib(double n) {
 
 inline double custom_rUni(double min_v, double max_v) {
     engineState().g_last_result_angle = AngleUnit::NONE;
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
     std::uniform_real_distribution<> dis(min_v, max_v);
-    return dis(gen);
+    return dis(engineState().randomGenerator);
 }
 inline double custom_rNor(double mean, double stddev) {
     engineState().g_last_result_angle = AngleUnit::NONE;
     if (!std::isfinite(stddev) || stddev <= 0.0) { engineState().g_math_domain_err = "Domain Error: rNor requires a positive standard deviation"; return std::numeric_limits<double>::quiet_NaN(); }
-    static std::random_device rd;
-    static std::mt19937 gen(rd());
     std::normal_distribution<> dis(mean, stddev);
-    return dis(gen);
+    return dis(engineState().randomGenerator);
 }
 
 // Variadic statistics functions

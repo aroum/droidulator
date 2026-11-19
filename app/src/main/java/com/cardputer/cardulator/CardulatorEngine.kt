@@ -6,9 +6,21 @@ data class NativeValue(val name: String, val scalar: Double, val elements: Doubl
     fun expressionValue(): String = elements?.joinToString(", ", "[", "]") ?: scalar.toString()
 }
 
-object CardulatorEngine {
-    init {
-        System.loadLibrary("cardulator_jni")
+class CardulatorEngine : AutoCloseable {
+    companion object {
+        init { System.loadLibrary("cardulator_jni") }
+
+        @JvmStatic external fun nativeInitUnits(unitsDataPath: String)
+    }
+
+    private var nativeHandle = nativeCreate()
+    private external fun nativeCreate(): Long
+    private external fun nativeDestroy(handle: Long)
+
+    override fun close() {
+        val handle = nativeHandle
+        nativeHandle = 0
+        if (handle != 0L) nativeDestroy(handle)
     }
 
     private var initialized = false
@@ -22,7 +34,6 @@ object CardulatorEngine {
     }
 
     private external fun nativeInit()
-    external fun nativeInitUnits(unitsDataPath: String)
     external fun nativeEvaluate(input: String): String
     external fun nativeEvaluateDetailed(input: String): Array<String>
     external fun nativeEvaluatePreview(input: String): String
