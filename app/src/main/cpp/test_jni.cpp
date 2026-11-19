@@ -92,6 +92,12 @@ int main() {
     assert(evaluate("sin(30)+cos(60)", err) > 0.999999 && err.empty());
     assert(std::isnan(evaluate("sqrt(-1)", err)) && err.find("Domain Error") != std::string::npos);
     err.clear();
+    assert(expression::ArithmeticExpression::evaluate("-3! + (2+1)! * 2!", err,
+        lookupScalar, lookupUnary) == 6 && err.empty());
+    assert(evaluate("3!!", err) == 720 && err.empty());
+    assert(evaluate("2^3!", err) == 64 && err.empty());
+    assert(std::isnan(evaluate("(-3)!", err)) && err.find("Domain Error") != std::string::npos);
+    err.clear();
     assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
     assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
     err.clear();

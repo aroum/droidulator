@@ -101,7 +101,7 @@ private:
             char* end = nullptr;
             const double value = std::strtod(literal.c_str(), &end);
             if (end != literal.c_str() + literal.size() || !std::isfinite(value)) return invalid;
-            left = add({negative ? -value : value});
+            left = add({value});
         } else {
             if (token.kind == Kind::Word) {
                 if (next < tokens.size() && tokens[next].text == "(") {
@@ -118,10 +118,14 @@ private:
             } else {
                 return invalid;
             }
-            if (negative) {
-                const auto minusOne = add({-1});
-                left = add({0, '*', minusOne, left});
-            }
+        }
+        while (next < tokens.size() && tokens[next].text == "!") {
+            ++next;
+            left = add({0, 'f', left, 0, "fact"});
+        }
+        if (negative) {
+            const auto minusOne = add({-1});
+            left = add({0, '*', minusOne, left});
         }
         while (next < tokens.size()) {
             const auto op = tokens[next].text;
