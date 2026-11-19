@@ -225,6 +225,9 @@ int main() {
         runScript("fn branch_test(x) { if(x<0) { return -1 } else if(x==0) { return 0 } else { return 1 } }; a,b=branch_test(0)");
         auto branch = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [](const UserArg& x) { return x.name == "a"; });
         assert(branch != engineState().user_args.end() && branch->val == 0);
+        runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

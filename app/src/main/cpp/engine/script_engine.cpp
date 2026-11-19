@@ -183,9 +183,8 @@ static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) 
     }
 }
 
-static void executeForStep(const std::string& step) {
-    if (step.empty()) return;
-    std::string err;
+static bool executeForStep(const std::string& step, std::string& err) {
+    if (step.empty()) return true;
     bool isDef = false;
     std::vector<std::string> step_stmts = splitIntoStatements(step);
     for (auto st : step_stmts) {
@@ -239,7 +238,9 @@ static void executeForStep(const std::string& step) {
         } else {
             evaluateInput(preprocessLen(preprocessArrayLookups(st, err)), err, isDef);
         }
+        if (!err.empty()) return false;
     }
+    return true;
 }
 
 void runScript(const std::string& code) {
@@ -619,7 +620,11 @@ void runScript(const std::string& code) {
                 blocks.erase(std::prev(block.base()));
                 ++ip;
             } else {
-                if (block->type == "for") executeForStep(block->step_str);
+                std::string stepError;
+                if (block->type == "for" && !executeForStep(block->step_str, stepError)) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[block->start_ip]) + " Err: " + stepError);
+                    break;
+                }
                 ip = block->start_ip;
             }
         }
