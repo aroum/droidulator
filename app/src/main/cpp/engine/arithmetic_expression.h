@@ -34,6 +34,14 @@ public:
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
             if (node.symbol.empty()) continue;
+            if (node.op == 'l') {
+                if (!arrays || (lookup && lookup(node.symbol))) return std::nullopt;
+                const auto array = arrays(node.symbol);
+                if (!array) return std::nullopt;
+                node.value = static_cast<double>(array->size());
+                node.op = 0;
+                continue;
+            }
             if (node.op == '[') {
                 if (!arrays) return std::nullopt;
                 node.array = arrays(node.symbol);
@@ -206,7 +214,11 @@ private:
             left = add({value});
         } else {
             if (token.kind == Kind::Word) {
-                if (next < tokens.size() && (tokens[next].text == "(" || tokens[next].text == "[")) {
+                if (token.text == "len" && next + 2 < tokens.size() && tokens[next].text == "(" &&
+                    tokens[next + 1].kind == Kind::Word && tokens[next + 2].text == ")") {
+                    left = add({0, 'l', 0, 0, tokens[next + 1].text});
+                    next += 3;
+                } else if (next < tokens.size() && (tokens[next].text == "(" || tokens[next].text == "[")) {
                     const bool index = tokens[next++].text == "[";
                     const auto argument = parse(0, depth + 1);
                     if (argument == invalid) return invalid;
