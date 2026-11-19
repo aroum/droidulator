@@ -428,22 +428,12 @@ inline std::string preprocessExpression(const std::string& s) {
 
 inline bool checkParentheses(const std::string& expr, std::string& err) {
     std::vector<char> stack;
-    for (char c : expr) {
-        if (c == '(' || c == '{' || c == '[') {
-            stack.push_back(c);
-        } else if (c == ')' || c == '}' || c == ']') {
-            if (stack.empty()) {
-                err = "Brackets Error";
-                return false;
-            }
-            char open = stack.back();
-            if ((c == ')' && open != '(') ||
-                (c == '}' && open != '{') ||
-                (c == ']' && open != '[')) {
-                err = "Brackets Error";
-                return false;
-            }
-            stack.pop_back();
+    for (const auto& token : expression::tokenize(expr)) {
+        if (token.kind == expression::Kind::Open) stack.push_back(token.text.front());
+        else if (token.kind == expression::Kind::Close &&
+                 !expression::closeGroup(stack, token.text.front())) {
+            err = "Brackets Error";
+            return false;
         }
     }
     if (!stack.empty()) {
