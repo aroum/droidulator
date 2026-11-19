@@ -19,6 +19,36 @@ internal class CalculatorDialogs(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
+    fun definitionInput(
+        draft: DefinitionDraft,
+        hintText: String,
+        changed: (android.widget.EditText, android.text.Editable) -> Unit
+    ): android.widget.EditText = android.widget.EditText(activity).apply {
+        inputType = android.text.InputType.TYPE_CLASS_TEXT or
+            android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or
+            android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+        setText(draft.expression)
+        setSelection(draft.cursor.coerceIn(0, length()))
+        hint = hintText
+        typeface = android.graphics.Typeface.MONOSPACE
+        background = GradientDrawable().apply {
+            setColor(ThemePalette.bgSoft)
+            cornerRadius = dp(8).toFloat()
+        }
+        setTextColor(ThemePalette.fgText)
+        setHintTextColor(ThemePalette.fgDim)
+        setPadding(dp(20), dp(16), dp(20), dp(16))
+        addTextChangedListener(object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
+            override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {}
+            override fun afterTextChanged(text: android.text.Editable?) {
+                if (text == null) return
+                draft.expression = text.toString()
+                changed(this@apply, text)
+            }
+        })
+    }
+
     fun confirmDelete(itemName: String, onConfirmDelete: () -> Unit) {
         val fgColor = ThemePalette.fgText
         val tvMsg = TextView(activity).apply {

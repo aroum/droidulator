@@ -1607,30 +1607,8 @@ class MainActivity : AppCompatActivity() {
     private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, tab: String) {
         val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
             .also { session.definitionDraft = it }
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val fgDim = ThemePalette.fgDim
-
-        val et = EditText(this).apply {
-            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_MULTI_LINE or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-            setText(draft.expression)
-            setSelection(draft.cursor.coerceIn(0, length()))
-            doAfterTextChanged { draft.expression = it.toString() }
-            hint = hintText
-            typeface = android.graphics.Typeface.MONOSPACE
-            background = rounded(bgSoft)
-            setTextColor(fgColor)
-            setHintTextColor(fgDim)
-            setPadding(dp(20), dp(16), dp(20), dp(16))
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!isHighlighting && s != null && !(s is Editable && highlighter.isApplying(s))) {
-                        highlighter.schedule(this@apply)
-                    }
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
+        val et = dialogs.definitionInput(draft, hintText) { input, text ->
+            if (!isHighlighting && !highlighter.isApplying(text)) highlighter.schedule(input)
         }
 
         if (initialExpr.isNotEmpty()) {
