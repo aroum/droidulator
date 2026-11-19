@@ -112,6 +112,11 @@ inline std::vector<Token> tokenize(std::string_view source) {
     return result;
 }
 
+inline bool isIdentifier(std::string_view source) {
+    const auto tokens = tokenize(source);
+    return tokens.size() == 1 && tokens.front().kind == Kind::Word && tokens.front().text == source;
+}
+
 inline bool closeGroup(std::vector<char>& groups, char closing) {
     const char opening = closing == ')' ? '(' : closing == ']' ? '[' : '{';
     if (groups.empty() || groups.back() != opening) return false;

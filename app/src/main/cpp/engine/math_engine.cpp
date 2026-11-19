@@ -1599,9 +1599,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 err = "Func Def Error: unexpected text after parameters";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            const auto nameTokens = expression::tokenize(target_fname);
-            if (nameTokens.size() != 1 || nameTokens.front().kind != expression::Kind::Word ||
-                nameTokens.front().text != target_fname) {
+            if (!expression::isIdentifier(target_fname)) {
                 err = "Func Def Error: invalid function name";
                 return std::numeric_limits<double>::quiet_NaN();
             }
@@ -1613,9 +1611,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             }
             std::set<std::string> parameterNames;
             for (const auto& parameter : parameters) {
-                const auto tokens = expression::tokenize(parameter);
-                if (tokens.size() != 1 || tokens.front().kind != expression::Kind::Word ||
-                    tokens.front().text != parameter || !parameterNames.insert(parameter).second) {
+                if (!expression::isIdentifier(parameter) || !parameterNames.insert(parameter).second) {
                     err = "Func Def Error: invalid or duplicate parameter";
                     return std::numeric_limits<double>::quiet_NaN();
                 }

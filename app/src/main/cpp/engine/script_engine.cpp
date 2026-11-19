@@ -99,18 +99,14 @@ static bool handleScriptFunctionDeclaration(
     const auto name = trim(line.substr(keywordLength, open - keywordLength));
     const auto parameterText = line.substr(open + 1, close - open - 1);
     const auto params = expression::splitArguments(parameterText);
-    const auto validName = [](const std::string& identifier) {
-        const auto tokens = expression::tokenize(identifier);
-        return tokens.size() == 1 && tokens.front().kind == expression::Kind::Word &&
-            tokens.front().text == identifier;
-    };
+
 
     auto& state = engineState();
     size_t end = findMatchingBlockEnd(lines, ip);
     std::string error;
     if (!expression::trim(parameterText).empty() && params.empty()) error = "Invalid parameter list";
-    else if (!validName(name)) error = "Invalid function name";
-    else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !validName(param); }))
+    else if (!expression::isIdentifier(name)) error = "Invalid function name";
+    else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !expression::isIdentifier(param); }))
         error = "Invalid parameter name";
     else if (std::unordered_set<std::string>(params.begin(), params.end()).size() != params.size())
         error = "Duplicate parameter";
