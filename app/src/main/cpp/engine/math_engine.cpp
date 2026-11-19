@@ -2529,11 +2529,15 @@ static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_st
     double op1_scalar = 0;
     double op2_scalar = 0;
     if (!is_op1_arr) {
-        op1_scalar = evaluate(preprocessArrayLookups(op1_str, err), err);
+        const auto expanded = preprocessArrayLookups(op1_str, err);
+        if (!err.empty()) return {};
+        op1_scalar = evaluate(expanded, err);
         if (!err.empty()) return {};
     }
     if (!is_op2_arr) {
-        op2_scalar = evaluate(preprocessArrayLookups(op2_str, err), err);
+        const auto expanded = preprocessArrayLookups(op2_str, err);
+        if (!err.empty()) return {};
+        op2_scalar = evaluate(expanded, err);
         if (!err.empty()) return {};
     }
     
