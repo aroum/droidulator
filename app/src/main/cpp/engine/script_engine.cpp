@@ -621,7 +621,8 @@ void runScript(const std::string& code) {
             }
         }
         // Increment / Decrement: i++ or i--
-        else if (line.size() > 2 && (line.substr(line.size() - 2) == "++" || line.substr(line.size() - 2) == "--")) {
+        else if (line.size() > 2 && (line.substr(line.size() - 2) == "++" || line.substr(line.size() - 2) == "--" ||
+                 line.substr(0, 2) == "++" || line.substr(0, 2) == "--")) {
             std::string error;
             if (!executeScriptAssignments(line, error)) {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
