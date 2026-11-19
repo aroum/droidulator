@@ -252,7 +252,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
         for (const auto& sf : scriptFunctions) {
             std::string search = sf.name + "(";
             size_t pos = 0;
-            while ((pos = expr.find(search, pos)) != std::string::npos) {
+            while ((pos = expression::callOffset(expr, sf.name, pos)) != std::string::npos) {
                 bool prev_ok = (pos == 0 || (!std::isalnum(static_cast<unsigned char>(expr[pos - 1])) && expr[pos - 1] != '_'));
                 if (!prev_ok) { pos += search.size(); continue; }
                 
@@ -306,7 +306,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
         for (const auto& f : funcs) {
             std::string search = f.name + "(";
             size_t pos = 0;
-            while ((pos = expr.find(search, pos)) != std::string::npos) {
+            while ((pos = expression::callOffset(expr, f.name, pos)) != std::string::npos) {
                 if (pos > 0 && (std::isalnum(static_cast<unsigned char>(expr[pos - 1])) || expr[pos - 1] == '_')) { pos += search.size(); continue; }
                 if (++substitutions > 10000) { err = "Formula expansion limit exceeded"; return expr; }
                 size_t start = pos + search.size();

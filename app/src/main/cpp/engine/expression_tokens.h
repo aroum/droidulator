@@ -112,6 +112,15 @@ inline std::vector<Token> tokenize(std::string_view source) {
     return result;
 }
 
+inline size_t callOffset(std::string_view source, std::string_view name, size_t start = 0) {
+    for (const auto& token : tokenize(source)) {
+        if (token.start >= start && token.kind == Kind::Word && token.text == name &&
+            token.start + name.size() < source.size() && source[token.start + name.size()] == '(')
+            return token.start;
+    }
+    return std::string_view::npos;
+}
+
 inline bool isIdentifier(std::string_view source) {
     const auto tokens = tokenize(source);
     return tokens.size() == 1 && tokens.front().kind == Kind::Word && tokens.front().text == source;
