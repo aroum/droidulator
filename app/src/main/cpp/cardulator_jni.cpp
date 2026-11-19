@@ -262,7 +262,7 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeEvaluate(JNIEnv *env, jobje
     }
 
     if (const auto body = expression::callBody(conv_expr, "conv")) {
-        std::vector<std::string> conv_args = splitPlotArgs(std::string(*body));
+        std::vector<std::string> conv_args = expression::splitArguments(*body);
         if (conv_args.size() < 2 || conv_args.size() > 3) {
             return toJavaError(env, "ERROR: conv requires 2 or 3 arguments: conv(val, \"unit_a\", [\"unit_b\"])");
         }

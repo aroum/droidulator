@@ -119,7 +119,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
             ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
             if (ret_expr.empty()) ret_expr = "0";
-            const auto parts = splitPlotArgs(ret_expr);
+            const auto parts = expression::splitArguments(ret_expr);
             std::vector<double> values;
             if (parts.size() == 1) {
                 bool array = false;
@@ -904,34 +904,6 @@ inline std::string preprocessLen(const std::string& s) {
     return res;
 }
 
-static std::vector<std::string> splitTopLevelArgs(const std::string& inside) {
-    std::vector<std::string> args;
-    int p_depth = 0, b_depth = 0;
-    bool in_q = false;
-    std::string cur;
-    for (char c : inside) {
-        if (c == '"') in_q = !in_q;
-        else if (!in_q) {
-            if (c == '(') p_depth++;
-            else if (c == ')') p_depth--;
-            else if (c == '[') b_depth++;
-            else if (c == ']') b_depth--;
-            else if (c == ',' && p_depth == 0 && b_depth == 0) {
-                size_t f = cur.find_first_not_of(" \t");
-                size_t l = cur.find_last_not_of(" \t");
-                args.push_back(f == std::string::npos ? "" : cur.substr(f, l - f + 1));
-                cur.clear();
-                continue;
-            }
-        }
-        cur += c;
-    }
-    size_t f = cur.find_first_not_of(" \t");
-    size_t l = cur.find_last_not_of(" \t");
-    args.push_back(f == std::string::npos ? "" : cur.substr(f, l - f + 1));
-    return args;
-}
-
 static bool isValidLoopIdent(const std::string& s) {
     if (s.empty() || s == "pi" || s == "e" || s == "phi") return false;
     if (!std::isalpha((unsigned char)s[0]) && s[0] != '_') return false;
@@ -982,7 +954,7 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
             if (depth > 0) break;
 
             std::string inside = res.substr(pos + target.size(), close - pos - target.size());
-            auto args = splitTopLevelArgs(inside);
+            auto args = expression::splitArguments(inside);
             if (fname == "if") {
                 if (args.size() != 3) {
                     err = "if() requires 3 arguments";
@@ -1045,7 +1017,7 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
             if (depth > 0) break;
 
             std::string inside = res.substr(pos + target.size(), close - pos - target.size());
-            auto args = splitTopLevelArgs(inside);
+            auto args = expression::splitArguments(inside);
             if (args.size() == 4 && isValidLoopIdent(args[0]) && (!isDefinedScalarName(args[0]) || exprReferencesIdent(args[3], args[0]))) {
                 double start_d = evaluate(args[1], err);
                 if (!err.empty()) return res;

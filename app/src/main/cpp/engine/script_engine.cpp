@@ -142,7 +142,7 @@ void runScript(const std::string& code) {
             if (ret_expr.empty()) ret_expr = "0";
             
             // Check if return has multiple expressions separated by commas (outside brackets/quotes)
-            std::vector<std::string> ret_parts = splitPlotArgs(ret_expr);
+            std::vector<std::string> ret_parts = expression::splitArguments(ret_expr);
             
             if (ret_parts.size() > 1) {
                 engineState().script_return_is_vec = true;
@@ -755,7 +755,7 @@ void runScript(const std::string& code) {
                     if (found != engineState().user_script_funcs.end()) {
                         executed_fn = true;
                         const auto argText = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
-                        auto argExprs = argText.find_first_not_of(" \t") == std::string::npos ? std::vector<std::string>{} : splitPlotArgs(argText);
+                        auto argExprs = argText.find_first_not_of(" \t") == std::string::npos ? std::vector<std::string>{} : expression::splitArguments(argText);
                         std::vector<double> evaluated;
                         for (const auto& arg : argExprs) {
                             evaluated.push_back(evaluate(arg, parse_err));

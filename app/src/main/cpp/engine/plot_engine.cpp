@@ -96,7 +96,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
     
     if (trimmed.rfind("plot(", 0) == 0 && trimmed.back() == ')') {
         std::string inner = trimmed.substr(5, trimmed.size() - 6);
-        std::vector<std::string> args = splitPlotArgs(inner);
+        std::vector<std::string> args = expression::splitArguments(inner);
         std::string x_str = "x";
         std::string y_str = "";
         std::string color_str = "green";

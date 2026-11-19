@@ -74,6 +74,9 @@ int main() {
     assert(expression::callBody(R"(conv (max(1, 2), "m", "cm"))", "conv").has_value());
     assert(!expression::callBody("conv(1, m) + f(2)", "conv"));
     assert(!expression::callBody("conv([1), m)", "conv"));
+    const auto arguments = expression::splitArguments(R"(max(1, 2), 'm, x', [1,2])");
+    assert((arguments == std::vector<std::string>{"max(1, 2)", "'m, x'", "[1,2]"}));
+    assert(expression::splitArguments("x, [1, 2)").empty());
     const std::pair<const char*, double> rkmCases[] = {
         {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
         {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}
@@ -1163,10 +1166,10 @@ int main() {
     evaluate("e2", err);
     assert(!err.empty());
 
-    const auto split_args = splitPlotArgs("max(1,2), [3,4], \"x,y\"");
+    const auto split_args = expression::splitArguments("max(1,2), [3,4], \"x,y\"");
     assert(split_args.size() == 3 && split_args[0] == "max(1,2)" &&
            split_args[1] == "[3,4]" && split_args[2] == "\"x,y\"");
-    const auto escaped_args = splitPlotArgs("\"a\\\",b\",c");
+    const auto escaped_args = expression::splitArguments("\"a\\\",b\",c");
     assert(escaped_args.size() == 2 && escaped_args[1] == "c");
     clearHistory();
     for (int i = 1; i <= 130; ++i) assert(appendHistory(i) == static_cast<size_t>(i));

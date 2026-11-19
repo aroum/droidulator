@@ -2,6 +2,7 @@
 
 #include <cctype>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -52,6 +53,30 @@ inline bool closeGroup(std::vector<char>& groups, char closing) {
     if (groups.empty() || groups.back() != opening) return false;
     groups.pop_back();
     return true;
+}
+
+inline std::string_view trim(std::string_view source) {
+    const auto first = source.find_first_not_of(" \t\r\n");
+    if (first == std::string_view::npos) return {};
+    return source.substr(first, source.find_last_not_of(" \t\r\n") - first + 1);
+}
+
+inline std::vector<std::string> splitArguments(std::string_view source) {
+    std::vector<std::string> arguments;
+    std::vector<char> groups;
+    size_t start = 0;
+    for (const auto& token : tokenize(source)) {
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close && !closeGroup(groups, token.text.front())) return {};
+        else if (token.kind == Kind::Comma && groups.empty()) {
+            arguments.emplace_back(trim(source.substr(start, token.start - start)));
+            start = token.start + 1;
+        }
+    }
+    if (!groups.empty()) return {};
+    if (start != source.size() || !arguments.empty())
+        arguments.emplace_back(trim(source.substr(start)));
+    return arguments;
 }
 
 inline size_t assignmentOffset(std::string_view source) {
