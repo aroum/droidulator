@@ -19,6 +19,26 @@ internal class CalculatorDialogs(
     private fun dp(value: Int): Int =
         (value * activity.resources.displayMetrics.density + 0.5f).toInt()
 
+    fun formulaArgument(parameter: String, value: String): android.widget.EditText =
+        android.widget.EditText(activity).apply {
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or
+                android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            hint = activity.getString(R.string.value_for_param, parameter)
+            setText(value)
+            setSelection(text.length)
+            typeface = android.graphics.Typeface.MONOSPACE
+            background = GradientDrawable().apply {
+                setColor(ThemePalette.bgSoft)
+                cornerRadius = dp(8).toFloat()
+            }
+            setTextColor(ThemePalette.fgText)
+            setHintTextColor(ThemePalette.fgDim)
+            setPadding(dp(16), dp(12), dp(16), dp(12))
+            layoutParams = LinearLayout.LayoutParams(
+                ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT
+            ).apply { bottomMargin = dp(12) }
+        }
+
     fun definitionInput(
         draft: DefinitionDraft,
         hintText: String,

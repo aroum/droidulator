@@ -1458,20 +1458,7 @@ class MainActivity : AppCompatActivity() {
         val inputFields = mutableListOf<Pair<String, EditText>>()
 
         for ((index, param) in params.withIndex()) {
-            val et = EditText(this).apply {
-                inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
-                hint = getString(R.string.value_for_param, param)
-                setText(arguments.getOrNull(index).orEmpty())
-                setSelection(text.length)
-                typeface = android.graphics.Typeface.MONOSPACE
-                background = rounded(bgSoft)
-                setTextColor(fgColor)
-                setHintTextColor(fgDim)
-                setPadding(dp(16), dp(12), dp(16), dp(12))
-                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.setMargins(0, 0, 0, dp(12))
-                layoutParams = lp
-            }
+            val et = dialogs.formulaArgument(param, arguments.getOrNull(index).orEmpty())
             layout.addView(et)
             inputFields.add(Pair(param, et))
         }
