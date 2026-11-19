@@ -15,7 +15,7 @@ internal class CalculatorRepository(context: Context, private val session: Calcu
                 .filterNot { it.name.matches(Regex("e[0-9]+")) }
                 .map { "${it.name} = ${it.expressionValue()}" }
             json.put("variables", org.json.JSONArray(variables))
-            json.put("formulas", org.json.JSONArray(session.engine.nativeFormulas().toList()))
+            json.put("formulas", org.json.JSONArray(session.engine.nativeFormulas().map { it.expression }))
             val constants = session.engine.nativeValues(true)
                 .filterNot { it.name == "pi" || it.name == "e" }
                 .map { "${it.name} = ${it.expressionValue()}" }

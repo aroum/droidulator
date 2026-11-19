@@ -871,7 +871,7 @@ class MainActivity : AppCompatActivity() {
                         .filterNot { it.name.matches(Regex("e[0-9]+")) }
                         .forEach { session.engine.nativeDeleteVariable(it.name) }
                     "Formulas" -> session.engine.nativeFormulas().forEach {
-                        session.engine.nativeDeleteFormula(it.substringBefore('(').trim())
+                        session.engine.nativeDeleteFormula(it.name)
                     }
                     "Constants" -> session.engine.nativeValues(true)
                         .filterNot { it.name == "pi" || it.name == "e" }
@@ -1468,10 +1468,10 @@ class MainActivity : AppCompatActivity() {
                     }
                     itemsContainer.addView(emptyTv)
                 } else {
-                    for (line in lines) {
-                        val parts = line.split("=", limit = 2)
-                        val name = parts[0].trim()
-                        val bodySubtitle = if (parts.size > 1) "= " + parts[1].trim() else line
+                    for (formula in lines) {
+                        val name = formula.signature
+                        val line = formula.expression
+                        val bodySubtitle = "= ${formula.body}"
 
                         val cardView = createMenuItemCard(
                             title = name,
@@ -1480,15 +1480,14 @@ class MainActivity : AppCompatActivity() {
                             textColor = textColor,
                             dimColor = dimColor,
                             onRun = {
-                                showRunFormulaDialog(line)
+                                showRunFormulaDialog(formula)
                             },
                             onEdit = {
                                 showDefinitionEditorDialog(getString(R.string.edit_formula, name), line, line, tabName)
                             },
                             onDelete = {
                                 showConfirmDeleteDialog(name) {
-                                    val cleanName = name.split("(")[0].trim()
-                                    session.engine.nativeDeleteFormula(cleanName)
+                                    session.engine.nativeDeleteFormula(formula.name)
                                     saveUserDataToStorage()
                                     refreshTabContent(tabName)
                                 }
@@ -1744,17 +1743,10 @@ class MainActivity : AppCompatActivity() {
         showGruvboxCustomDialog(title, scrollContainer, positiveText = getString(R.string.ui_text_015), showCancel = false) {}
     }
 
-    private fun showRunFormulaDialog(formulaLine: String) {
-        val formulaHeader = formulaLine.split("=", limit = 2)[0].trim()
-        val cleanName = if (formulaHeader.contains("(")) formulaHeader.substring(0, formulaHeader.indexOf("(")).trim() else formulaHeader
-
-        var params = emptyList<String>()
-        if (formulaHeader.contains("(") && formulaHeader.contains(")")) {
-            val paramStr = formulaHeader.substring(formulaHeader.indexOf("(") + 1, formulaHeader.indexOf(")")).trim()
-            if (paramStr.isNotEmpty()) {
-                params = paramStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            }
-        }
+    private fun showRunFormulaDialog(formula: NativeFormula) {
+        val formulaLine = formula.expression
+        val cleanName = formula.name
+        val params = formula.parameters
 
         val bgSoft = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText

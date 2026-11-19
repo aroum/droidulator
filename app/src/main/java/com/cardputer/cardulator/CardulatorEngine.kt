@@ -6,6 +6,11 @@ data class NativeValue(val name: String, val scalar: Double, val elements: Doubl
     fun expressionValue(): String = elements?.joinToString(", ", "[", "]") ?: scalar.toString()
 }
 
+data class NativeFormula(val name: String, val parameters: Array<String>, val body: String) {
+    val signature get() = parameters.joinToString(", ", "$name(", ")")
+    val expression get() = "$signature = $body"
+}
+
 class CardulatorEngine : AutoCloseable {
     companion object {
         init { System.loadLibrary("cardulator_jni") }
@@ -61,7 +66,7 @@ class CardulatorEngine : AutoCloseable {
     external fun nativeRestoreArray(name: String, values: DoubleArray)
     external fun nativeClearHistory()
     external fun nativeValues(constants: Boolean): Array<NativeValue>
-    external fun nativeFormulas(): Array<String>
+    external fun nativeFormulas(): Array<NativeFormula>
     external fun nativeGetHelp(topic: String): String
     external fun nativeSetDegRad(isDeg: Boolean)
     external fun nativeGetDegRad(): Boolean

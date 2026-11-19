@@ -5,6 +5,7 @@
 #include "help_engine.h"
 
 bool preprocessHelp(const std::string& s, std::string& help_out);
+std::vector<UserFunc> getParsedUserFuncs();
 double evaluate(const std::string& expr_str, std::string& err);
 double evaluateWithoutHistory(const std::string& expr_str, std::string& err);
 double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);

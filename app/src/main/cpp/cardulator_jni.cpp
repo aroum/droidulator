@@ -689,15 +689,35 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeValues(JNIEnv* env, jobject
 JNIEXPORT jobjectArray JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeFormulas(JNIEnv* env, jobject thiz) try {
     JniSessionScope session(*jniSession(env, thiz));
-    auto cls = env->FindClass("java/lang/String");
+    auto cls = env->FindClass("com/cardputer/cardulator/NativeFormula");
     if (!cls) return nullptr;
-    auto out = env->NewObjectArray(static_cast<jsize>(engineState().user_funcs.size()), cls, nullptr);
+    auto strings = env->FindClass("java/lang/String");
+    if (!strings) return nullptr;
+    auto ctor = env->GetMethodID(cls, "<init>", "(Ljava/lang/String;[Ljava/lang/String;Ljava/lang/String;)V");
+    if (!ctor) return nullptr;
+    const auto formulas = getParsedUserFuncs();
+    auto out = env->NewObjectArray(static_cast<jsize>(formulas.size()), cls, nullptr);
     if (!out) return nullptr;
-    for (jsize i = 0; i < static_cast<jsize>(engineState().user_funcs.size()); ++i) {
-        auto expression = toJavaString(env, engineState().user_funcs[i]);
-        if (!expression) return nullptr;
-        env->SetObjectArrayElement(out, i, expression);
-        env->DeleteLocalRef(expression);
+    for (jsize i = 0; i < static_cast<jsize>(formulas.size()); ++i) {
+        if (env->PushLocalFrame(8) < 0) return nullptr;
+        const auto& formula = formulas[i];
+        auto name = toJavaString(env, formula.name);
+        if (!name) { env->PopLocalFrame(nullptr); return nullptr; }
+        auto body = toJavaString(env, formula.body);
+        if (!body) { env->PopLocalFrame(nullptr); return nullptr; }
+        auto parameters = env->NewObjectArray(static_cast<jsize>(formula.params.size()), strings, nullptr);
+        if (!parameters) { env->PopLocalFrame(nullptr); return nullptr; }
+        for (jsize j = 0; j < static_cast<jsize>(formula.params.size()); ++j) {
+            auto param = toJavaString(env, formula.params[j]);
+            if (!param) { env->PopLocalFrame(nullptr); return nullptr; }
+            env->SetObjectArrayElement(parameters, j, param);
+            env->DeleteLocalRef(param);
+            if (env->ExceptionCheck()) { env->PopLocalFrame(nullptr); return nullptr; }
+        }
+        auto item = env->NewObject(cls, ctor, name, parameters, body);
+        if (!item) { env->PopLocalFrame(nullptr); return nullptr; }
+        env->SetObjectArrayElement(out, i, item);
+        env->PopLocalFrame(nullptr);
         if (env->ExceptionCheck()) return nullptr;
     }
     return out;

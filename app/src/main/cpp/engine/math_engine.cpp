@@ -16,7 +16,7 @@ static thread_local size_t loopEvaluationDepth = 0;
 static thread_local size_t loopIterationsRemaining = 100000;
 static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
 
-inline std::vector<UserFunc> getParsedUserFuncs() {
+std::vector<UserFunc> getParsedUserFuncs() {
     std::vector<UserFunc> res;
     for (const auto& f_str : engineState().user_funcs) {
         size_t eq = f_str.find('=');

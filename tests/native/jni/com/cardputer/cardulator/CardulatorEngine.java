@@ -9,7 +9,7 @@ public class CardulatorEngine {
   native void nativeRegisterScript(String name, String code); native void nativeUnregisterScript(String name);
   native double nativeGetLastNumericVal();
   native NativeValue[] nativeValues(boolean constants);
-  native String[] nativeFormulas();
+  native NativeFormula[] nativeFormulas();
   native String nativeGetVariables(); native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
   native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
@@ -58,7 +58,7 @@ public class CardulatorEngine {
     if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("arr") && v.elements.length == 2 && Double.isNaN(v.elements[1])))
       throw new AssertionError("typed array");
     e.nativeEvaluate("jni_formula(x)=x^2");
-    if (java.util.Arrays.stream(e.nativeFormulas()).noneMatch(f -> f.startsWith("jni_formula(")))
+    if (java.util.Arrays.stream(e.nativeFormulas()).noneMatch(f -> f.name.equals("jni_formula") && f.parameters.length == 1 && f.parameters[0].equals("x") && f.body.equals("x^2")))
       throw new AssertionError("formula snapshot");
     e.nativeRestoreScriptFunction(new String[]{"abc","1","x","return x*2"}); if(e.nativeGetScriptFunctions().length != 1) throw new AssertionError("function");
     String zero=e.nativeEvaluate("conv(0, \"rad\")");
@@ -99,5 +99,17 @@ final class NativeValue {
     this.name = name;
     this.scalar = scalar;
     this.elements = elements;
+  }
+}
+
+final class NativeFormula {
+  final String name;
+  final String[] parameters;
+  final String body;
+
+  NativeFormula(String name, String[] parameters, String body) {
+    this.name = name;
+    this.parameters = parameters;
+    this.body = body;
   }
 }
