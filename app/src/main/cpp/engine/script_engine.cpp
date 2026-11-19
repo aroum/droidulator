@@ -678,6 +678,11 @@ void runScript(const std::string& code) {
                     ++ip;
                     continue;
                 }
+                if (std::unordered_set<std::string>(lhs_vars.begin(), lhs_vars.end()).size() != lhs_vars.size()) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Duplicate tuple target");
+                    ++ip;
+                    continue;
+                }
                 bool reserved = false;
                 for (const auto& name : lhs_vars) {
                     if (isReservedName(name) || std::any_of(engineState().user_consts.begin(), engineState().user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }

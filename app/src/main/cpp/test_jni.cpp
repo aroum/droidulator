@@ -262,6 +262,9 @@ int main() {
         runScript("invalid-increment-name++");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-increment-name"; }));
+        runScript("tuple_preserved=7; tuple_preserved,tuple_preserved=1,2");
+        std::string tupleError;
+        assert(evaluate("tuple_preserved", tupleError) == 7 && tupleError.empty());
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
