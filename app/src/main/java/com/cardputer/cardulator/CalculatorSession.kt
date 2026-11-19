@@ -7,7 +7,10 @@ import androidx.lifecycle.MutableLiveData
 import java.util.concurrent.Executors
 import java.util.concurrent.Future
 
-data class ScriptDraft(val originalName: String?, var name: String, var code: String)
+data class ScriptDraft(
+    val originalName: String?, var name: String, var code: String,
+    var nameCursor: Int = name.length, var codeCursor: Int = code.length
+)
 
 data class DefinitionDraft(
     val title: String, val hint: String, val tab: String,
