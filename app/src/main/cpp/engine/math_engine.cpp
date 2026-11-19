@@ -665,9 +665,17 @@ inline std::string preprocessLen(const std::string& s) {
     if (s.find("len(") == std::string::npos) return s;
     std::string res = s;
     size_t pos = 0;
-    while ((pos = res.find("len(", pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-        if (!prev_ok) { pos += 4; continue; }
+    while (pos < res.size()) {
+        size_t call = std::string::npos;
+        for (const auto& token : expression::tokenize(std::string_view(res).substr(pos))) {
+            if (token.kind == expression::Kind::Word && token.text == "len" &&
+                res.compare(pos + token.start + 3, 1, "(") == 0) {
+                call = pos + token.start;
+                break;
+            }
+        }
+        if (call == std::string::npos) break;
+        pos = call;
         const size_t close = expression::matchingGroupEnd(res, pos + 3);
         if (close == std::string::npos) break;
         std::string arg = res.substr(pos + 4, close - pos - 4);
