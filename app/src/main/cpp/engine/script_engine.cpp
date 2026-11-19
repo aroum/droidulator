@@ -200,7 +200,13 @@ static bool executeForStep(const std::string& step, std::string& err) {
     for (auto st : step_stmts) {
         st.erase(0, st.find_first_not_of(" \t"));
         st.erase(st.find_last_not_of(" \t") + 1);
-        if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
+        if (st.size() > 2 && (st.substr(0, 2) == "++" || st.substr(0, 2) == "--")) {
+            st = std::string(expression::trim(std::string_view(st).substr(2))) + st.substr(0, 2);
+        }
+        std::string arrayName, indexExpression, valueExpression;
+        if (parseArrayElementAssignment(st, arrayName, indexExpression, valueExpression)) {
+            assignArrayElement(arrayName, indexExpression, valueExpression, err);
+        } else if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
             std::string var_name = st.substr(0, st.size() - 2);
             var_name.erase(0, var_name.find_first_not_of(" \t"));
             var_name.erase(var_name.find_last_not_of(" \t") + 1);
@@ -553,34 +559,6 @@ void runScript(const std::string& code) {
                     trim(init_str);
                     trim(cond_str);
                     trim(step_str);
-                    if (step_str.size() > 2 && step_str.substr(0, 2) == "++") {
-                        std::string var = step_str.substr(2);
-                        trim(var);
-                        step_str = var + " = " + var + " + 1";
-                    } else if (step_str.size() > 2 && step_str.substr(0, 2) == "--") {
-                        std::string var = step_str.substr(2);
-                        trim(var);
-                        step_str = var + " = " + var + " - 1";
-                    } else if (step_str.size() > 2 && step_str.substr(step_str.size() - 2) == "++") {
-                        std::string var = step_str.substr(0, step_str.size() - 2);
-                        trim(var);
-                        step_str = var + " = " + var + " + 1";
-                    } else if (step_str.size() > 2 && step_str.substr(step_str.size() - 2) == "--") {
-                        std::string var = step_str.substr(0, step_str.size() - 2);
-                        trim(var);
-                        step_str = var + " = " + var + " - 1";
-                    } else if (size_t plus_eq = step_str.find("+="); plus_eq != std::string::npos) {
-                        std::string var = step_str.substr(0, plus_eq);
-                        std::string val = step_str.substr(plus_eq + 2);
-                        trim(var); trim(val);
-                        step_str = var + " = " + var + " + (" + val + ")";
-                    } else if (size_t minus_eq = step_str.find("-="); minus_eq != std::string::npos) {
-                        std::string var = step_str.substr(0, minus_eq);
-                        std::string val = step_str.substr(minus_eq + 2);
-                        trim(var); trim(val);
-                        step_str = var + " = " + var + " - (" + val + ")";
-                    }
-                    
                     size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
                     if (end_ip != std::string::npos) {
                         std::string err;
