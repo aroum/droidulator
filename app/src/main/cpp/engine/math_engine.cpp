@@ -675,155 +675,42 @@ inline std::string replaceLogicalWords(const std::string& s) {
     return res;
 }
 
-// Forward declaration: preprocessLen is defined below evaluateRelational
-inline std::string preprocessLen(const std::string& s);
-
 inline double evaluateRelational(const std::string& expr, std::string& err) {
-    auto findOp = [&](const std::string& op) -> size_t {
-        int p = 0, b = 0;
-        bool q = false;
-        if (expr.size() < op.size()) return std::string::npos;
-        for (size_t i = 0; i <= expr.size() - op.size(); ++i) {
-            char c = expr[i];
-            if (c == '"' || c == '\'') {
-                if (!q) { q = true; } else { q = false; }
-            } else if (!q) {
-                if (c == '(') p++;
-                else if (c == ')') p--;
-                else if (c == '[') b++;
-                else if (c == ']') b--;
-                else if (p == 0 && b == 0) {
-                    if (expr.substr(i, op.size()) == op) {
-                        if (op == "<" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == ">" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == "=" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == "=" && i > 0 && expr[i-1] == '=') continue;
-                        return i;
-                    }
+    const std::string_view operators[] = {"||", "^^", "&&", "==", "!=", "<=", ">=", "<", ">"};
+    std::vector<char> groups;
+    std::optional<expression::Token> selected;
+    size_t rank = std::size(operators);
+    for (const auto& token : expression::tokenize(expr)) {
+        if (token.kind == expression::Kind::Open) {
+            groups.push_back(token.text.front());
+        } else if (token.kind == expression::Kind::Close) {
+            if (!expression::closeGroup(groups, token.text.front())) break;
+        } else if (groups.empty() && token.kind == expression::Kind::Operator) {
+            for (size_t i = 0; i < rank; ++i) {
+                if (token.text == operators[i]) {
+                    rank = i;
+                    selected = token;
+                    break;
                 }
             }
         }
-        return std::string::npos;
-    };
-    
-    // Check ||
-    size_t pos = findOp("||");
-    if (pos == std::string::npos) pos = findOp(" or ");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + (expr[pos] == '|' ? 2 : 4));
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessArrayLookups(lhs, err_l), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessArrayLookups(rhs, err_r), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != 0.0 || rval != 0.0) ? 1.0 : 0.0;
     }
-    
-    // Logical XOR compares truth values, not the numeric operands themselves.
-    pos = findOp("^^");
-    if (pos != std::string::npos) {
-        std::string err_l, err_r;
-        double lval = evaluate(expr.substr(0, pos), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(expr.substr(pos + 2), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != 0.0) != (rval != 0.0) ? 1.0 : 0.0;
-    }
+    if (!selected) return std::numeric_limits<double>::quiet_NaN();
+    const auto left = evaluate(expr.substr(0, selected->start), err);
+    if (!err.empty()) return 0;
+    const auto right = evaluate(expr.substr(selected->start + selected->text.size()), err);
+    if (!err.empty()) return 0;
 
-    // Check &&
-    pos = findOp("&&");
-    if (pos == std::string::npos) pos = findOp(" and ");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + (expr[pos] == '&' ? 2 : 5));
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != 0.0 && rval != 0.0) ? 1.0 : 0.0;
-    }
-    
-    // Check ==
-    pos = findOp("==");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval == rval) ? 1.0 : 0.0;
-    }
-    
-    // Check !=
-    pos = findOp("!=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != rval) ? 1.0 : 0.0;
-    }
-    
-    // Check <=
-    pos = findOp("<=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval <= rval) ? 1.0 : 0.0;
-    }
-    
-    // Check >=
-    pos = findOp(">=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval >= rval) ? 1.0 : 0.0;
-    }
-    
-    // Check <
-    pos = findOp("<");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 1);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval < rval) ? 1.0 : 0.0;
-    }
-    
-    // Check >
-    pos = findOp(">");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 1);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval > rval) ? 1.0 : 0.0;
-    }
-    
-    return std::numeric_limits<double>::quiet_NaN();
+    const auto op = selected->text;
+    if (op == "||") return left != 0 || right != 0;
+    if (op == "^^") return (left != 0) != (right != 0);
+    if (op == "&&") return left != 0 && right != 0;
+    if (op == "==") return left == right;
+    if (op == "!=") return left != right;
+    if (op == "<=") return left <= right;
+    if (op == ">=") return left >= right;
+    if (op == "<") return left < right;
+    return left > right;
 }
 
 static std::string fmtInternal(double val) {
