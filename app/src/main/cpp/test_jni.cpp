@@ -356,6 +356,14 @@ int main() {
         assert(evaluate("sum(ast_reduction,1,3,ast_reduction)", signatureError) == 6 && signatureError.empty());
         runScript("fn ast_print_once(x) { print(x); return x }");
         engineState().script_console_output.clear();
+        assert(evaluate("if(0,ast_print_once(1),2)", signatureError) == 2 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("if(1,2,ast_call_array[99])", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("iff(0,ast_print_once(1),1,3,ast_call_array[99])", signatureError) == 3 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("sum(loop_ast_index,1,3,ast_print_once(loop_ast_index))", signatureError) == 6 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
+        engineState().script_console_output.clear();
         evaluate("ast_print_once(3)+unknown_ast_name", signatureError);
         assert(!signatureError.empty());
         assert(engineState().script_console_output.size() == 1);

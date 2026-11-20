@@ -1060,13 +1060,17 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return *arithmetic;
     }
 
-    std::string subbed = substituteUserFuncs(expr_str, err);
+    // Select conditional branches and bind reduction indices before executing
+    // calls or array lookups inside their bodies.
+    const auto controlFlow = preprocessInlineConditionalsAndLoops(expr_str, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
-
-    subbed = preprocessArrayLookups(subbed, err);
+    std::string subbed = substituteUserFuncs(controlFlow, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
 
     subbed = preprocessInlineConditionalsAndLoops(subbed, err);
+    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
+
+    subbed = preprocessArrayLookups(subbed, err);
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
     
     std::string preprocessed = preprocessExpression(replaceLogicalWords(subbed));
