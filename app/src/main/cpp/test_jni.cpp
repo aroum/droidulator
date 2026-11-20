@@ -497,6 +497,20 @@ int main() {
         assert(engineState().script_console_output.size() == 2);
         assert(!evaluateLiteralAst("[1,2]"));
         assert(!evaluateLiteralAst("sum([[1,2]])"));
+        assert(evaluateLiteralAst("[1,2+3,7][2]") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("([1,2,3])[2]!") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("(ast_statistics)[4]") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([[1,2][2],3])") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,[1/0][1],7)") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("-[2,3][1]") == -2 && signatureError.empty());
+        for (const auto& source : {"[1,2][0]", "[1,2][3]", "[1,2][1.5]", "[][1]"}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::isnan(*result));
+            assert(signatureError.find("Invalid or out of bounds index") != std::string::npos);
+        }
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("[1,ast_print_once(2)][ast_script_call(1)]") == 2 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());

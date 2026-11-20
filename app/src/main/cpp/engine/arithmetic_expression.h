@@ -37,17 +37,22 @@ public:
             return std::nullopt; // Array-valued roots still use the existing array evaluator.
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
-        // Resolve named-array reductions as typed nodes before scalar name lookup.
+        const auto isArrayNode = [&](size_t index) {
+            const auto& argument = parser.nodes[index];
+            return argument.op == 'b' || (arrays && !argument.op && !argument.symbol.empty() &&
+                !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
+        };
+        // Bind array consumers before scalar name lookup.
         for (auto& node : parser.nodes) {
+            if (node.op == 'i') {
+                if (!isArrayNode(node.left)) return std::nullopt;
+                if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
+                continue;
+            }
             if (node.op != 'c') continue;
             const auto& args = parser.callArguments[node.right];
-            const auto isArray = [&](size_t index) {
-                const auto& argument = parser.nodes[index];
-                return argument.op == 'b' || (arrays && !argument.op && !argument.symbol.empty() &&
-                    !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
-            };
             if (node.symbol == "dot" && args.size() == 2 && binary && binary("dot") &&
-                isArray(args[0]) && isArray(args[1])) {
+                isArrayNode(args[0]) && isArrayNode(args[1])) {
                 node.op = 'd';
                 node.left = args[0];
                 node.right = args[1];
@@ -55,7 +60,7 @@ public:
                 if (!parser.nodes[node.right].op) parser.nodes[node.right].op = 'a';
                 continue;
             }
-            if (node.symbol == "len" && args.size() == 1 && isArray(args.front())) {
+            if (node.symbol == "len" && args.size() == 1 && isArrayNode(args.front())) {
                 node.op = 'z';
                 node.left = args.front();
                 if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
@@ -65,7 +70,7 @@ public:
             const auto statistic = vectorStatistic(node.symbol);
             if (!statistic || args.size() != 1) continue;
             auto& argument = parser.nodes[args.front()];
-            if (!isArray(args.front())) continue;
+            if (!isArrayNode(args.front())) continue;
             if (!argument.op) argument.op = 'a';
             node.op = 's';
             node.left = args.front();
@@ -73,7 +78,7 @@ public:
         }
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
-            if (node.op == 's' || node.op == 'z' || node.op == 'd') consumedArrays[node.left] = true;
+            if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i') consumedArrays[node.left] = true;
             if (node.op == 'd') consumedArrays[node.right] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
@@ -86,7 +91,7 @@ public:
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -193,6 +198,13 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'i') {
+                const auto& source = parser.nodes[node.left];
+                node.value = indexedValue(arrayValue(node.left), parser.nodes[node.right].value,
+                    source.symbol.empty() ? "expression" : source.symbol, error);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
             if (node.op == 'b') {
                 auto& values = parser.literalArrays[node.left];
                 values.reserve(parser.callArguments[node.right].size());
@@ -263,22 +275,10 @@ public:
                 case 'G': node.value = left >= right; break;
                 case 'H': node.value = left < right; break;
                 case 'I': node.value = left > right; break;
-                case '[': {
-                    // Calls may restore the array table; resolve storage only when used.
-                    const auto array = arrays(node.symbol);
-                    if (!array) {
-                        error = "Array " + std::string(node.symbol) + " not defined";
-                        return std::numeric_limits<double>::quiet_NaN();
-                    }
-                    if (!std::isfinite(left) || std::trunc(left) != left || left < 1 ||
-                        left > static_cast<double>(array->size())) {
-                        error = "Invalid or out of bounds index for array " + std::string(node.symbol) +
-                            " (size " + std::to_string(array->size()) + ")";
-                        return std::numeric_limits<double>::quiet_NaN();
-                    }
-                    node.value = (*array)[static_cast<size_t>(left) - 1];
+                case '[':
+                    node.value = indexedValue(arrays(node.symbol), left, node.symbol, error);
+                    if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
                     break;
-                }
                 case 'c': {
                     const auto& args = parser.callArguments[node.right];
                     if (node.customFunction) {
@@ -335,6 +335,19 @@ public:
     }
 
 private:
+    static double indexedValue(const std::vector<double>* array, double index, std::string_view name, std::string& error) {
+        if (!array) {
+            error = "Array " + std::string(name) + " not defined";
+        } else if (!std::isfinite(index) || std::trunc(index) != index || index < 1 ||
+                   index > static_cast<double>(array->size())) {
+            error = "Invalid or out of bounds index for array " + std::string(name) +
+                " (size " + std::to_string(array->size()) + ")";
+        } else {
+            return (*array)[static_cast<size_t>(index) - 1];
+        }
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
     struct Node {
         double value = 0;
         char op = 0;
@@ -472,6 +485,12 @@ private:
             } else {
                 return invalid;
             }
+        }
+        while (next < tokens.size() && tokens[next].text == "[") {
+            ++next;
+            const auto index = parse(0, depth + 1);
+            if (index == invalid || next == tokens.size() || tokens[next++].text != "]") return invalid;
+            left = add({0, 'i', left, index});
         }
         while (next < tokens.size() && tokens[next].text == "!") {
             ++next;
