@@ -323,17 +323,17 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                 }
                 
                 std::string body_subbed;
-                for (size_t i = 0; i < f.body.size();) {
-                    if (std::isalpha(static_cast<unsigned char>(f.body[i])) || f.body[i] == '_') {
-                        size_t end = i + 1;
-                        while (end < f.body.size() && (std::isalnum(static_cast<unsigned char>(f.body[end])) || f.body[end] == '_')) ++end;
-                        const auto token = f.body.substr(i, end - i);
-                        auto param = std::find(f.params.begin(), f.params.end(), token);
-                        if (param == f.params.end()) body_subbed += token;
-                        else body_subbed += "(" + args[static_cast<size_t>(param - f.params.begin())] + ")";
-                        i = end;
-                    } else body_subbed += f.body[i++];
+                size_t copied = 0;
+                for (const auto& token : expression::tokenize(f.body)) {
+                    body_subbed.append(f.body, copied, token.start - copied);
+                    const auto param = token.kind == expression::Kind::Word
+                        ? std::find(f.params.begin(), f.params.end(), token.text)
+                        : f.params.end();
+                    if (param == f.params.end()) body_subbed += token.text;
+                    else body_subbed += "(" + args[static_cast<size_t>(param - f.params.begin())] + ")";
+                    copied = token.start + token.text.size();
                 }
+                body_subbed.append(f.body, copied, std::string::npos);
                 
                 expr.replace(pos, (end + 1) - pos, "(" + body_subbed + ")");
                 changed = true;

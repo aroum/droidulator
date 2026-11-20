@@ -261,6 +261,9 @@ int main() {
         signatureError.clear();
         evaluateInput("invalid_signature(x) extra = x", signatureError, signatureDefinition);
         assert(!signatureError.empty());
+        evaluateInput("scaled_parameter(k)=1k+k", signatureError, signatureDefinition);
+        assert(signatureError.empty());
+        assert(evaluate("scaled_parameter(2)", signatureError) == 1002 && signatureError.empty());
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));
