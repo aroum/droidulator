@@ -112,13 +112,24 @@ inline std::vector<Token> tokenize(std::string_view source) {
     return result;
 }
 
-inline size_t callOffset(std::string_view source, std::string_view name, size_t start = 0) {
-    for (const auto& token : tokenize(source)) {
-        if (token.start >= start && token.kind == Kind::Word && token.text == name &&
-            token.start + name.size() < source.size() && source[token.start + name.size()] == '(')
-            return token.start;
+struct CallSite {
+    size_t nameOffset;
+    size_t openOffset;
+};
+
+inline std::optional<CallSite> findCall(std::string_view source, std::string_view name, size_t start = 0) {
+    const auto tokens = tokenize(source);
+    for (size_t i = 0; i + 1 < tokens.size(); ++i) {
+        const auto& token = tokens[i];
+        if (token.start >= start && token.kind == Kind::Word && token.text == name && tokens[i + 1].text == "(")
+            return CallSite{token.start, tokens[i + 1].start};
     }
-    return std::string_view::npos;
+    return std::nullopt;
+}
+
+inline size_t callOffset(std::string_view source, std::string_view name, size_t start = 0) {
+    const auto call = findCall(source, name, start);
+    return call ? call->nameOffset : std::string_view::npos;
 }
 
 inline bool isIdentifier(std::string_view source) {

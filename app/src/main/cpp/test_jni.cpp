@@ -359,6 +359,10 @@ int main() {
         assert(evaluate("if(0,ast_print_once(1),2)", signatureError) == 2 && signatureError.empty());
         assert(engineState().script_console_output.empty());
         assert(evaluate("if(1,2,ast_call_array[99])", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("if (1,2,unknown_unselected_name)", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("sum (spaced_loop_index,1,3,spaced_loop_index)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("scaled_parameter (2)*50%", signatureError) == 501 && signatureError.empty());
+        assert(evaluate("ast_script_call (1)*50%", signatureError) == 1 && signatureError.empty());
         assert(evaluate("if (1,2,1/0)", signatureError) == 2 && signatureError.empty());
         assert(evaluate("if (0,ast_print_once(1),if (1,4,1/0))", signatureError) == 4 && signatureError.empty());
         assert(engineState().script_console_output.empty());
@@ -484,6 +488,13 @@ int main() {
         assert(preprocessPercentage("\"50%\"") == "\"50%\"");
         assert(preprocessLen("\"len(missing_array)\"") == "\"len(missing_array)\"");
         assert(expression::callOffset("\"f(1)\" + f(2)", "f") == 9);
+        const std::string spacedCall = "\"f (1)\" + f \t(2)";
+        const auto callSite = expression::findCall(spacedCall, "f");
+        assert(callSite && callSite->nameOffset == spacedCall.find("f \t") && callSite->openOffset == spacedCall.rfind('('));
+        assert(!expression::findCall("different_f (2)", "f"));
+        assert(preprocessLen("len ([1,2,3])") == "3");
+        assert(preprocessVectorStats("dot ([1,2], [3,4])") == "11");
+        assert(preprocessLen("\"len (x)\"") == "\"len (x)\"");
         assert(expression::matchingGroupEnd("f(\")\", [1,2])", 1) == 12);
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),

@@ -64,14 +64,11 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
         scriptFunctions.reserve(engineState().user_script_funcs.size());
         for (const auto& function : engineState().user_script_funcs) scriptFunctions.push_back(function.name);
         for (const auto& name : scriptFunctions) {
-            std::string search = name + "(";
             size_t pos = 0;
-            while ((pos = expression::callOffset(expr, name, pos)) != std::string::npos) {
-                bool prev_ok = (pos == 0 || (!std::isalnum(static_cast<unsigned char>(expr[pos - 1])) && expr[pos - 1] != '_'));
-                if (!prev_ok) { pos += search.size(); continue; }
-                
-                size_t start = pos + search.size();
-                const size_t end = expression::matchingGroupEnd(expr, start - 1);
+            while (const auto call = expression::findCall(expr, name, pos)) {
+                pos = call->nameOffset;
+                const size_t start = call->openOffset + 1;
+                const size_t end = expression::matchingGroupEnd(expr, call->openOffset);
                 if (end == std::string::npos) { err = "Mismatched Brackets"; return expr; }
 
                 std::string args_str = expr.substr(start, end - start);
@@ -118,13 +115,12 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
     while (changed && limit-- > 0) {
         changed = false;
         for (const auto& f : funcs) {
-            std::string search = f.name + "(";
             size_t pos = 0;
-            while ((pos = expression::callOffset(expr, f.name, pos)) != std::string::npos) {
-                if (pos > 0 && (std::isalnum(static_cast<unsigned char>(expr[pos - 1])) || expr[pos - 1] == '_')) { pos += search.size(); continue; }
+            while (const auto call = expression::findCall(expr, f.name, pos)) {
+                pos = call->nameOffset;
                 if (++substitutions > 10000) { err = "Formula expansion limit exceeded"; return expr; }
-                size_t start = pos + search.size();
-                const size_t end = expression::matchingGroupEnd(expr, start - 1);
+                const size_t start = call->openOffset + 1;
+                const size_t end = expression::matchingGroupEnd(expr, call->openOffset);
                 if (end == std::string::npos) { err = "Mismatched Brackets"; return expr; }
 
                 std::string args_str = expr.substr(start, end - start);
@@ -486,16 +482,16 @@ static std::string fmtInternal(double val) {
 }
 
 inline std::string preprocessLen(const std::string& s) {
-    if (s.find("len(") == std::string::npos) return s;
+    if (s.find("len") == std::string::npos) return s;
     std::string res = s;
     size_t pos = 0;
     while (pos < res.size()) {
-        const size_t call = expression::callOffset(res, "len", pos);
-        if (call == std::string::npos) break;
-        pos = call;
-        const size_t close = expression::matchingGroupEnd(res, pos + 3);
+        const auto call = expression::findCall(res, "len", pos);
+        if (!call) break;
+        pos = call->nameOffset;
+        const size_t close = expression::matchingGroupEnd(res, call->openOffset);
         if (close == std::string::npos) break;
-        std::string arg = res.substr(pos + 4, close - pos - 4);
+        std::string arg = res.substr(call->openOffset + 1, close - call->openOffset - 1);
         arg.erase(0, arg.find_first_not_of(" \t"));
         arg.erase(arg.find_last_not_of(" \t") + 1);
         
@@ -558,13 +554,12 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
     for (const auto& fname : cond_funcs) {
         std::string target = fname + "(";
         size_t pos = 0;
-        while ((pos = expression::callOffset(res, fname, pos)) != std::string::npos) {
-            bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-            if (!prev_ok) { pos += target.size(); continue; }
-            const size_t close = expression::matchingGroupEnd(res, pos + target.size() - 1);
+        while (const auto call = expression::findCall(res, fname, pos)) {
+            pos = call->nameOffset;
+            const size_t close = expression::matchingGroupEnd(res, call->openOffset);
             if (close == std::string::npos) break;
 
-            std::string inside = res.substr(pos + target.size(), close - pos - target.size());
+            std::string inside = res.substr(call->openOffset + 1, close - call->openOffset - 1);
             auto args = expression::splitArguments(inside);
             if (fname == "if") {
                 if (args.size() != 3) {
@@ -612,13 +607,12 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
     for (const auto& fname : loop_funcs) {
         std::string target = fname + "(";
         size_t pos = 0;
-        while ((pos = expression::callOffset(res, fname, pos)) != std::string::npos) {
-            bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-            if (!prev_ok) { pos += target.size(); continue; }
-            const size_t close = expression::matchingGroupEnd(res, pos + target.size() - 1);
+        while (const auto call = expression::findCall(res, fname, pos)) {
+            pos = call->nameOffset;
+            const size_t close = expression::matchingGroupEnd(res, call->openOffset);
             if (close == std::string::npos) break;
 
-            std::string inside = res.substr(pos + target.size(), close - pos - target.size());
+            std::string inside = res.substr(call->openOffset + 1, close - call->openOffset - 1);
             auto args = expression::splitArguments(inside);
             if (args.size() == 4 && isValidLoopIdent(args[0]) && (!isDefinedScalarName(args[0]) || exprReferencesIdent(args[3], args[0]))) {
                 double start_d = evaluate(args[1], err);
@@ -681,13 +675,11 @@ std::string preprocessVectorStats(const std::string& s) {
 
     // 1. Process 2-argument vector function: dot(A, B)
     size_t pos = 0;
-    while ((pos = expression::callOffset(res, "dot", pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-        if (!prev_ok) { pos += 4; continue; }
-        
-        const size_t close = expression::matchingGroupEnd(res, pos + 3);
+    while (const auto call = expression::findCall(res, "dot", pos)) {
+        pos = call->nameOffset;
+        const size_t close = expression::matchingGroupEnd(res, call->openOffset);
         if (close == std::string::npos) break;
-        const auto arguments = expression::splitArguments(res.substr(pos + 4, close - pos - 4));
+        const auto arguments = expression::splitArguments(res.substr(call->openOffset + 1, close - call->openOffset - 1));
         if (arguments.size() != 2) { pos += 4; continue; }
         const auto& arg1_str = arguments[0];
         const auto& arg2_str = arguments[1];
@@ -714,14 +706,11 @@ std::string preprocessVectorStats(const std::string& s) {
     for (const auto& fname : funcs) {
         std::string target = fname + "(";
         size_t fpos = 0;
-        while ((fpos = expression::callOffset(res, fname, fpos)) != std::string::npos) {
-            bool prev_ok = (fpos == 0 || (!std::isalnum((unsigned char)res[fpos - 1]) && res[fpos - 1] != '_'));
-            if (!prev_ok) { fpos += target.size(); continue; }
-
-            const size_t close = expression::matchingGroupEnd(res, fpos + target.size() - 1);
+        while (const auto call = expression::findCall(res, fname, fpos)) {
+            fpos = call->nameOffset;
+            const size_t close = expression::matchingGroupEnd(res, call->openOffset);
             if (close == std::string::npos) break;
-
-            std::string arg = res.substr(fpos + target.size(), close - fpos - target.size());
+            std::string arg = res.substr(call->openOffset + 1, close - call->openOffset - 1);
             arg.erase(0, arg.find_first_not_of(" \t"));
             arg.erase(arg.find_last_not_of(" \t") + 1);
 
