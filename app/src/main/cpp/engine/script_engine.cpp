@@ -409,96 +409,75 @@ void runScript(const std::string& code) {
         }
         // if (cond) {
         else if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
-            size_t open_paren = line.find('(');
-            const size_t close_paren = findScriptHeaderClose(line, open_paren);
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                
-                size_t end_ip = findMatchingBlockEnd(lines, ip);
-                if (end_ip != std::string::npos) {
-                    std::string err;
-                    const bool cond_bool = evaluateScriptCondition(cond_str, err);
-
-                    
-                    if (!err.empty()) {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                        ip = end_ip + 1;
-                    } else if (cond_bool) {
-                        blocks.push_back({ "if", true, ip, end_ip, "" });
-                        ip++;
-                    } else {
-                        blocks.push_back({ "if", false, ip, end_ip, "" });
-                        size_t next_branch = findMatchingBlockEnd(lines, ip, true);
-                        if (next_branch != std::string::npos) {
-                            ip = next_branch;
-                        } else {
-                            ip = end_ip;
-                        }
-                    }
-                } else {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
-                    ip = afterScriptBlock(lines, ip);
-                }
-            } else {
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            const size_t end = findMatchingBlockEnd(lines, ip);
+            if (close == std::string::npos || end == std::string::npos) {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
                 ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            std::string error;
+            const bool condition = evaluateScriptCondition(line.substr(open + 1, close - open - 1), error);
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                ip = end + 1;
+                continue;
+            }
+            blocks.push_back({"if", condition, ip, end, ""});
+            if (condition) {
+                ++ip;
+            } else {
+                const size_t next = findMatchingBlockEnd(lines, ip, true);
+                ip = next == std::string::npos ? end : next;
             }
         }
         // } else if (cond) { / else if (cond) { / } elif (cond) { / elif (cond) {
         else if ((line.rfind("} else if", 0) == 0 || line.rfind("else if", 0) == 0 ||
                   line.rfind("} elif", 0) == 0 || line.rfind("elif", 0) == 0) && line.back() == '{') {
-            if (!blocks.empty() && blocks.back().type == "if") {
-                if (blocks.back().condition_met) {
-                    ip = blocks.back().end_ip;
-                } else {
-                    size_t open_paren = line.find('(');
-                    const size_t close_paren = findScriptHeaderClose(line, open_paren);
-                    if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                        std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                        cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                        cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                        
-                        std::string err;
-                        const bool cond_bool = evaluateScriptCondition(cond_str, err);
-                        
-                        if (!err.empty()) {
-                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                            ip = blocks.back().end_ip;
-                        } else if (cond_bool) {
-                            blocks.back().condition_met = true;
-                            ip++;
-                        } else {
-                            size_t next_branch = findMatchingBlockEnd(lines, ip, true);
-                            if (next_branch != std::string::npos) {
-                                ip = next_branch;
-                            } else {
-                                ip = blocks.back().end_ip;
-                            }
-                        }
-                    } else {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
-                        ip = blocks.back().end_ip;
-                    }
-                }
-            } else {
+            if (blocks.empty() || blocks.back().type != "if") {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
                 ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            if (blocks.back().condition_met) {
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            if (close == std::string::npos) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            std::string error;
+            const bool condition = evaluateScriptCondition(line.substr(open + 1, close - open - 1), error);
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            if (condition) {
+                blocks.back().condition_met = true;
+                ++ip;
+            } else {
+                const size_t next = findMatchingBlockEnd(lines, ip, true);
+                ip = next == std::string::npos ? blocks.back().end_ip : next;
             }
         }
         // } else { / else {
         else if (line == "} else {" || line == "else {") {
-            if (!blocks.empty() && blocks.back().type == "if") {
-                if (blocks.back().condition_met) {
-                    ip = blocks.back().end_ip;
-                } else {
-                    blocks.back().condition_met = true;
-                    ip++;
-                }
-            } else {
+            if (blocks.empty() || blocks.back().type != "if") {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
                 ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            if (blocks.back().condition_met) {
+                ip = blocks.back().end_ip;
+            } else {
+                blocks.back().condition_met = true;
+                ++ip;
             }
         }
         // while (cond) {
