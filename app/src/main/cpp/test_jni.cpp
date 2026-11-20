@@ -306,6 +306,10 @@ int main() {
         evaluate("ast_print_once(3)+unknown_ast_name", signatureError);
         assert(!signatureError.empty());
         assert(engineState().script_console_output.size() == 1);
+        assert(evaluate("ast_call_array[ast_script_call (1)]*50%", signatureError) == 4.5 && signatureError.empty());
+        evaluateInput("ast_shadow_array(ast_call_array)=sum(ast_call_array)*50%", signatureError, signatureDefinition);
+        const double shadowResult = evaluate("ast_shadow_array (2)", signatureError);
+        assert(shadowResult == 1 && signatureError.empty());
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));

@@ -698,7 +698,7 @@ inline std::string preprocessLen(const std::string& s) {
         
         int size_val = 0;
         bool found = false;
-        bool is_scalar = false;
+        bool is_scalar = formulaArgument(arg).has_value();
         for (const auto& ua : engineState().user_args) {
             if (ua.name == arg) {
                 is_scalar = true;
@@ -2179,17 +2179,19 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
                 }
                 arr_ptr = &temp_arr;
                 disp_name = inline_arr_expr;
-            } else {
-                if (engineState().user_arrays.find(array_name) == engineState().user_arrays.end()) {
-                    err = "Array " + array_name + " not defined";
-                    return expr;
-                }
-                arr_ptr = &engineState().user_arrays[array_name];
             }
 
             double idx_val = evaluate(index_expr, err);
             if (!err.empty()) {
                 return expr;
+            }
+            if (inline_arr_expr.empty()) {
+                // Evaluating the index may call a script function and replace the table.
+                arr_ptr = lookupArray(array_name);
+                if (!arr_ptr) {
+                    err = "Array " + array_name + " not defined";
+                    return expr;
+                }
             }
             const auto& arr = *arr_ptr;
             if (!std::isfinite(idx_val) || std::trunc(idx_val) != idx_val || idx_val < 1 || idx_val > static_cast<double>(arr.size())) {
@@ -2230,7 +2232,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
     }
     
-    bool is_scalar_var = false;
+    bool is_scalar_var = formulaArgument(trimmed).has_value();
     for (const auto& ua : engineState().user_args) {
         if (ua.name == trimmed) { is_scalar_var = true; break; }
     }
@@ -2477,11 +2479,6 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
         return res;
         }
-    }
-    
-    if (engineState().user_arrays.find(trimmed) != engineState().user_arrays.end()) {
-        is_array = true;
-        return engineState().user_arrays[trimmed];
     }
     
     return {};
