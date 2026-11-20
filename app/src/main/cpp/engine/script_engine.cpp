@@ -480,112 +480,55 @@ void runScript(const std::string& code) {
                 ++ip;
             }
         }
-        // while (cond) {
-        else if ((line.rfind("while (", 0) == 0 || line.rfind("while(", 0) == 0) && line.back() == '{') {
-            bool found_block = false;
-            size_t block_idx = 0;
-            for (size_t b = 0; b < blocks.size(); ++b) {
-                if (blocks[b].start_ip == ip) {
-                    found_block = true;
-                    block_idx = b;
-                    break;
-                }
-            }
-            
-            size_t open_paren = line.find('(');
-            const size_t close_paren = findScriptHeaderClose(line, open_paren);
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                
-                size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
-                if (end_ip != std::string::npos) {
-                    std::string err;
-                    const bool cond_bool = evaluateScriptCondition(cond_str, err);
-                    
-                    if (!err.empty()) {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                        if (found_block) blocks.erase(blocks.begin() + block_idx);
-                        ip = end_ip + 1;
-                    } else if (cond_bool) {
-                        if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
-                        if (!found_block) {
-                            blocks.push_back({ "while", true, ip, end_ip, "" });
-                        }
-                        ip++;
-                    } else {
-                        if (found_block) {
-                            blocks.erase(blocks.begin() + block_idx);
-                        }
-                        ip = end_ip;
-                    }
-                } else {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
-                    ip = afterScriptBlock(lines, ip);
-                }
-            } else {
-                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
+        // Both loop forms share block tracking, limits and exit handling.
+        else if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 ||
+                  line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
+            const bool isFor = line.rfind("for", 0) == 0;
+            const std::string type = isFor ? "for" : "while";
+            const auto existing = std::find_if(blocks.begin(), blocks.end(), [ip](const BlockState& block) {
+                return block.start_ip == ip;
+            });
+            const bool active = existing != blocks.end();
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            const size_t end = active ? existing->end_ip : findMatchingBlockEnd(lines, ip);
+            if (close == std::string::npos || end == std::string::npos) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched " + type);
                 ip = afterScriptBlock(lines, ip);
+                continue;
             }
-        }
-        // for (init; cond; step) {
-        else if ((line.rfind("for (", 0) == 0 || line.rfind("for(", 0) == 0) && line.back() == '{') {
-            bool found_block = false;
-            size_t block_idx = 0;
-            for (size_t b = 0; b < blocks.size(); ++b) {
-                if (blocks[b].start_ip == ip) {
-                    found_block = true;
-                    block_idx = b;
-                    break;
-                }
-            }
-
-            size_t open_paren = line.find('(');
-            const size_t close_paren = findScriptHeaderClose(line, open_paren);
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string inner = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                const auto header = expression::splitArguments(inner, ';', 3);
-                if (header.size() == 3) {
-                    const auto& init_str = header[0];
-                    const auto& cond_str = header[1];
-                    const auto& step_str = header[2];
-                    size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
-                    if (end_ip != std::string::npos) {
-                        std::string err;
-                        if (!found_block && !init_str.empty()) {
-                            executeScriptAssignments(init_str, err);
-                        }
-
-                        const bool cond_bool = err.empty() && (cond_str.empty() || evaluateScriptCondition(cond_str, err));
-                        if (!err.empty()) {
-                            engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                            if (found_block) blocks.erase(blocks.begin() + block_idx);
-                            ip = end_ip + 1;
-                        } else if (cond_bool) {
-                            if (++loop_iterations > max_loop_iterations) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached"); break; }
-                            if (!found_block) {
-                                blocks.push_back({ "for", true, ip, end_ip, step_str });
-                            }
-                            ip++;
-                        } else {
-                            if (found_block) {
-                                blocks.erase(blocks.begin() + block_idx);
-                            }
-                            ip = end_ip + 1;
-                        }
-                    } else {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
-                        ip = afterScriptBlock(lines, ip);
-                    }
-                } else {
+            std::string conditionText(expression::trim(std::string_view(line).substr(open + 1, close - open - 1)));
+            std::string step;
+            std::string error;
+            if (isFor) {
+                const auto header = expression::splitArguments(conditionText, ';', 3);
+                if (header.size() != 3) {
                     engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
                     ip = afterScriptBlock(lines, ip);
+                    continue;
                 }
-            } else {
-                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
-                ip = afterScriptBlock(lines, ip);
+                conditionText = header[1];
+                step = header[2];
+                if (!active) executeScriptAssignments(header[0], error);
             }
+            const bool condition = error.empty() && ((isFor && conditionText.empty()) || evaluateScriptCondition(conditionText, error));
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+                continue;
+            }
+            if (!condition) {
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+                continue;
+            }
+            if (++loop_iterations > max_loop_iterations) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached");
+                break;
+            }
+            if (!active) blocks.push_back({type, true, ip, end, step});
+            ++ip;
         }
         else if (isBlockEnd(line)) {
             const auto block = std::find_if(blocks.rbegin(), blocks.rend(), [ip](const BlockState& candidate) {

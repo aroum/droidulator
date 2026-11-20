@@ -244,6 +244,12 @@ int main() {
         assert(evaluate("fn_multiple_steps (3)", stepError) == 3 && stepError.empty());
         runScript("empty_for_count=0; for(;;) { empty_for_count++; if(empty_for_count==3) { break } }");
         assert(evaluate("empty_for_count", stepError) == 3 && stepError.empty());
+        runScript("mixed_loop_count=0; for(i=0;i<3;i++) { j=0; while(j<4) { j++; if(j==2) { continue }; if(j==4) { break }; mixed_loop_count+=1 } }");
+        assert(evaluate("mixed_loop_count", stepError) == 6 && stepError.empty());
+        assert(evaluate("i", stepError) == 3 && stepError.empty());
+        runScript("while(0) { mixed_loop_count=999 }; after_false_while=7");
+        assert(evaluate("mixed_loop_count", stepError) == 6 && stepError.empty());
+        assert(evaluate("after_false_while", stepError) == 7 && stepError.empty());
         runScript("invalid_for_body=0; for(i=0;i<3) { invalid_for_body=1 }; after_invalid_for=7");
         assert(evaluate("invalid_for_body", stepError) == 0 && stepError.empty());
         assert(evaluate("after_invalid_for", stepError) == 7 && stepError.empty());
