@@ -937,19 +937,11 @@ void runScript(const std::string& code) {
             continue;
         }
         else {
-            if (line.rfind("plot", 0) == 0) {
-                std::string err;
-                double result = 0.0;
-                if (handlePlotCommands(line, err, result)) {
-                    if (!err.empty()) {
-                        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
-                    }
-                }
-            } else {
-                bool isDef = false;
-                std::string eval_err;
-                evaluateInput(line, eval_err, isDef);
-                if (!eval_err.empty()) engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
+            bool isDef = false;
+            std::string eval_err;
+            evaluateInput(line, eval_err, isDef);
+            if (!eval_err.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
             }
             ip++;
         }
