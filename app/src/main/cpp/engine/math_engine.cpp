@@ -235,11 +235,13 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
 
 inline std::string substituteUserFuncs(std::string expr, std::string& err) {
     if (!engineState().user_script_funcs.empty()) {
-        const auto scriptFunctions = engineState().user_script_funcs;
-        for (const auto& sf : scriptFunctions) {
-            std::string search = sf.name + "(";
+        std::vector<std::string> scriptFunctions;
+        scriptFunctions.reserve(engineState().user_script_funcs.size());
+        for (const auto& function : engineState().user_script_funcs) scriptFunctions.push_back(function.name);
+        for (const auto& name : scriptFunctions) {
+            std::string search = name + "(";
             size_t pos = 0;
-            while ((pos = expression::callOffset(expr, sf.name, pos)) != std::string::npos) {
+            while ((pos = expression::callOffset(expr, name, pos)) != std::string::npos) {
                 bool prev_ok = (pos == 0 || (!std::isalnum(static_cast<unsigned char>(expr[pos - 1])) && expr[pos - 1] != '_'));
                 if (!prev_ok) { pos += search.size(); continue; }
                 
@@ -271,7 +273,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                     arg_vals.push_back(val);
                 }
                 
-                double func_res = executeScriptFunc(sf.name, arg_vals, err);
+                double func_res = executeScriptFunc(name, arg_vals, err);
                 if (!err.empty()) return expr;
                 
                 std::ostringstream oss;
