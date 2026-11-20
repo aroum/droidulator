@@ -982,6 +982,38 @@ Java_com_cardputer_cardulator_CardulatorEngine_nativeRegisterScript(JNIEnv *env,
     throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return;
 }
 
+JNIEXPORT jobjectArray JNICALL
+Java_com_cardputer_cardulator_CardulatorEngine_nativeFormatNumbers(JNIEnv *env, jobject thiz, jdoubleArray values) try {
+    JniSessionScope session(*jniSession(env, thiz));
+    if (!values) {
+        throwJavaException(env, "java/lang/IllegalArgumentException", "Values must not be null");
+        return nullptr;
+    }
+    const jsize count = env->GetArrayLength(values);
+    std::vector<jdouble> numbers(static_cast<size_t>(count));
+    if (count) env->GetDoubleArrayRegion(values, 0, count, numbers.data());
+    if (env->ExceptionCheck()) return nullptr;
+    jclass strings = env->FindClass("java/lang/String");
+    if (!strings) return nullptr;
+    auto result = env->NewObjectArray(count, strings, nullptr);
+    env->DeleteLocalRef(strings);
+    if (!result) return nullptr;
+    for (jsize i = 0; i < count; ++i) {
+        jstring text = toJavaString(env, fmtNum(numbers[static_cast<size_t>(i)]));
+        if (!text) return nullptr;
+        env->SetObjectArrayElement(result, i, text);
+        env->DeleteLocalRef(text);
+        if (env->ExceptionCheck()) return nullptr;
+    }
+    return result;
+} catch (const std::bad_alloc&) {
+    throwJavaException(env, "java/lang/OutOfMemoryError", "Native engine ran out of memory"); return nullptr;
+} catch (const std::exception&) {
+    throwJavaException(env, "java/lang/RuntimeException", "Native engine error"); return nullptr;
+} catch (...) {
+    throwJavaException(env, "java/lang/RuntimeException", "Unknown native engine error"); return nullptr;
+}
+
 JNIEXPORT jstring JNICALL
 Java_com_cardputer_cardulator_CardulatorEngine_nativeFormatNumber(JNIEnv *env, jobject thiz, jdouble val) try {
     JniSessionScope session(*jniSession(env, thiz));

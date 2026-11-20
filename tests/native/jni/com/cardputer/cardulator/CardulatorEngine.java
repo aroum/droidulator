@@ -14,9 +14,25 @@ public class CardulatorEngine {
   native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
   native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
   native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
+  native String nativeFormatNumber(double value);
+  native String[] nativeFormatNumbers(double[] values);
+  native void nativeSetFormatSettings(int mode, int precision, boolean grouping);
   public static void main(String[] args) {
     System.load(args[0]);
     CardulatorEngine e = new CardulatorEngine(); e.nativeInit(); e.nativeInitUnits(args[1]);
+    double[] formattingValues = {0, -0.125, 1.0/3, 1234567.89, 1e-15, Double.NaN, Double.POSITIVE_INFINITY};
+    for (int mode=0; mode<3; mode++) for (int precision=0; precision<=12; precision++) {
+      e.nativeSetFormatSettings(mode, precision, true);
+      String[] formatted = e.nativeFormatNumbers(formattingValues);
+      if (formatted.length != formattingValues.length) throw new AssertionError("batch formatting length");
+      for (int i=0; i<formatted.length; i++)
+        if (!formatted[i].equals(e.nativeFormatNumber(formattingValues[i])))
+          throw new AssertionError("batch formatting mismatch");
+    }
+    if (e.nativeFormatNumbers(new double[0]).length != 0) throw new AssertionError("empty formatting batch");
+    try { e.nativeFormatNumbers(null); throw new AssertionError("null formatting batch accepted"); }
+    catch (IllegalArgumentException expected) { }
+    e.nativeSetFormatSettings(0, 12, false);
     CardulatorEngine second = new CardulatorEngine();
     second.nativeInit();
     e.nativeEvaluate("session_value=42");

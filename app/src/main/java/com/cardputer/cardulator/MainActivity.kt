@@ -8,9 +8,7 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.Editable
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -416,6 +414,8 @@ class MainActivity : AppCompatActivity() {
     private val formulaRunner by lazy {
         FormulaRunner(this, session, dialogs, { queueCommand(it) }, { activeDialogs.remove(it) })
     }
+
+    private val outputRenderer by lazy { ReplOutputRenderer(highlighter) }
 
     private val libraryPanel by lazy { LibraryPanel(this, itemsContainer, menuCards) }
 
@@ -963,84 +963,11 @@ class MainActivity : AppCompatActivity() {
         rebuildReplOutput()
     }
 
-    private fun formatHighlightedReplEntry(input: String, res: String, isError: Boolean): android.text.SpannableStringBuilder {
-        val entrySsb = android.text.SpannableStringBuilder()
-
-        // 1. Prompt prefix "> "
-        val promptStart = entrySsb.length
-        entrySsb.append("> ")
-        entrySsb.setSpan(
-            ForegroundColorSpan(ThemePalette.fgDim),
-            promptStart,
-            entrySsb.length,
-            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
-
-        // 2. Input expression with full syntax highlighting
-        val exprStart = entrySsb.length
-        entrySsb.append(input)
-        highlighter.highlight(entrySsb, exprStart, input)
-
-        entrySsb.append("\n")
-
-        // 3. Output / Result line
-        val resStart = entrySsb.length
-        if (isError) {
-            entrySsb.append("= ").append(res).append("\n")
-            entrySsb.setSpan(
-                ForegroundColorSpan(ThemePalette.red),
-                resStart,
-                entrySsb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        } else {
-            if (input.startsWith("print(") || input.startsWith("plot(")) {
-                entrySsb.append("= ").append(res).append("\n")
-            } else {
-                entrySsb.append(res).append("\n")
-            }
-            entrySsb.setSpan(
-                ForegroundColorSpan(ThemePalette.green),
-                resStart,
-                entrySsb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        return entrySsb
-    }
-
     private fun rebuildReplOutput() {
-        val ssb = android.text.SpannableStringBuilder()
-        if (!hideWelcomeMessage) {
-            val welcomeStart = ssb.length
-            ssb.append(welcomeMessage)
-            ssb.setSpan(
-                ForegroundColorSpan(ThemePalette.fgDim),
-                welcomeStart,
-                ssb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        for (item in replDisplayItems) {
-            if (item.isRawText) {
-                ssb.append(item.rawOutput)
-            } else {
-                val res = if (item.arrayValues != null) {
-                    item.rawOutput.substringBeforeLast("[") + item.arrayValues.joinToString(", ", "[", "]") {
-                        session.engine.nativeFormatNumber(it)
-                    }
-                } else if (item.hasNum) {
-                    item.prefix + session.engine.nativeFormatNumber(item.numVal) + item.suffix
-                } else {
-                    item.rawOutput
-                }
-                ssb.append(formatHighlightedReplEntry(item.input, res, item.isError))
-            }
-        }
-
-        tvOutput.text = ssb
+        tvOutput.text = outputRenderer.render(
+            replDisplayItems, welcomeMessage, !hideWelcomeMessage,
+            session.engine::nativeFormatNumbers
+        )
         scrollView.post {
             scrollView.fullScroll(ScrollView.FOCUS_DOWN)
         }
@@ -1048,7 +975,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun appendOutputEntry(entry: ReplDisplayItem) {
         replDisplayItems.add(entry)
-        val entrySsb = formatHighlightedReplEntry(entry.input, entry.rawOutput, entry.isError)
+        val entrySsb = outputRenderer.entry(entry.input, entry.rawOutput, entry.isError)
         if (replDisplayItems.size > 500) {
             replDisplayItems.removeAt(0)
             rebuildReplOutput()

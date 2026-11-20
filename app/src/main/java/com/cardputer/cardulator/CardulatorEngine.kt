@@ -79,6 +79,7 @@ class CardulatorEngine : AutoCloseable {
     external fun nativeRestorePlot(lines: Array<NativePlotLine>, limits: DoubleArray)
     external fun nativeLastArray(): DoubleArray?
     external fun nativeFormatNumber(value: Double): String
+    external fun nativeFormatNumbers(values: DoubleArray): Array<String>
     external fun nativeHasLastNumeric(): Boolean
     external fun nativeGetLastNumericVal(): Double
     external fun nativeGetLastNumericPrefix(): String
