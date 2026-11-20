@@ -23,7 +23,6 @@ bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, st
 void handleTabCompletion(std::string& expression, int& cursor_pos);
 void resetTabState();
 std::vector<std::string> getConvUnitMatches(const std::string& from_unit, const std::string& prefix);
-double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues = nullptr);
 
 #include "plot_engine.h"
 #include "script_engine.h"
