@@ -89,7 +89,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     int max_steps = 1000000;
     int loopIterations = 0;
     
-    auto lines = func.statements;
+    const auto& lines = func.statements;
     size_t ip = 0;
     struct FnBlock {
         std::string type;
@@ -231,8 +231,8 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     }
 
     if (step_count >= max_steps && !has_returned && err.empty()) err = "Function statement limit reached";
-    engineState().user_args = orig_args;
-    engineState().user_arrays = orig_arrays;
+    engineState().user_args = std::move(orig_args);
+    engineState().user_arrays = std::move(orig_arrays);
 
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
     return ret_val;
