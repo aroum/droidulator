@@ -21,24 +21,28 @@ internal class ReplOutputRenderer(private val highlighter: CalculatorSyntaxHighl
         items: List<ReplDisplayItem>,
         welcome: String,
         showWelcome: Boolean,
-        formatNumbers: (DoubleArray) -> Array<String>
+        results: List<String>
     ): SpannableStringBuilder {
         val text = SpannableStringBuilder()
         if (showWelcome) appendColored(text, welcome, ThemePalette.fgDim)
-        for (item in items) {
-            if (item.isRawText) {
-                text.append(item.rawOutput)
-                continue
-            }
-            val result = when {
-                item.arrayValues != null -> item.rawOutput.substringBeforeLast("[") +
-                    formatNumbers(item.arrayValues).joinToString(", ", "[", "]")
-                item.hasNum -> item.prefix + formatNumbers(doubleArrayOf(item.numVal)).single() + item.suffix
-                else -> item.rawOutput
-            }
-            text.append(entry(item.input, result, item.isError))
+        for ((index, item) in items.withIndex()) {
+            if (item.isRawText) text.append(item.rawOutput)
+            else text.append(entry(item.input, results[index], item.isError))
         }
         return text
+    }
+
+    companion object {
+        fun formatResults(items: List<ReplDisplayItem>, formatNumbers: (DoubleArray) -> Array<String>): List<String> =
+            items.map { item ->
+                when {
+                    item.isRawText -> item.rawOutput
+                    item.arrayValues != null -> item.rawOutput.substringBeforeLast("[") +
+                        formatNumbers(item.arrayValues).joinToString(", ", "[", "]")
+                    item.hasNum -> item.prefix + formatNumbers(doubleArrayOf(item.numVal)).single() + item.suffix
+                    else -> item.rawOutput
+                }
+            }
     }
 
     private fun appendColored(text: SpannableStringBuilder, value: String, color: Int) {

@@ -44,6 +44,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     override fun onDestroy() {
+        if (replOutputDelegate.isInitialized()) replOutput.close()
         activeDialogs.toList().forEach { it.dismiss() }
         activeDialogs.clear()
         super.onDestroy()
@@ -343,8 +344,6 @@ class MainActivity : AppCompatActivity() {
 
         themeSettings.restoreCustomPalette()
 
-        session.engine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
-
         setupTabSpinner()
         setupFormatSpinners()
         setupInputHandlers()
@@ -415,7 +414,14 @@ class MainActivity : AppCompatActivity() {
         FormulaRunner(this, session, dialogs, { queueCommand(it) }, { activeDialogs.remove(it) })
     }
 
-    private val outputRenderer by lazy { ReplOutputRenderer(highlighter) }
+    private val replOutputDelegate = lazy {
+        ReplOutputController(
+            session, ReplOutputRenderer(highlighter), tvOutput, scrollView,
+            welcome = { welcomeMessage to !hideWelcomeMessage },
+            formatSettings = { Triple(fmtMode, fmtPrecision, isDigitGroupingActive) }
+        )
+    }
+    private val replOutput by replOutputDelegate
 
     private val libraryPanel by lazy { LibraryPanel(this, itemsContainer, menuCards) }
 
@@ -951,8 +957,6 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun updateFormatSettings() {
-        session.engine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
-
         val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
         prefs.edit()
             .putInt("fmt_mode", fmtMode)
@@ -963,42 +967,13 @@ class MainActivity : AppCompatActivity() {
         rebuildReplOutput()
     }
 
-    private fun rebuildReplOutput() {
-        tvOutput.text = outputRenderer.render(
-            replDisplayItems, welcomeMessage, !hideWelcomeMessage,
-            session.engine::nativeFormatNumbers
-        )
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
+    private fun rebuildReplOutput() = replOutput.rebuild()
 
-    private fun appendOutputEntry(entry: ReplDisplayItem) {
-        replDisplayItems.add(entry)
-        val entrySsb = outputRenderer.entry(entry.input, entry.rawOutput, entry.isError)
-        if (replDisplayItems.size > 500) {
-            replDisplayItems.removeAt(0)
-            rebuildReplOutput()
-        } else {
-            tvOutput.append(entrySsb)
-        }
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
+    private fun appendOutputEntry(entry: ReplDisplayItem) = replOutput.append(entry)
 
-    private fun appendRawOutput(text: String) {
-        replDisplayItems.add(ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true))
-        if (replDisplayItems.size > 500) {
-            replDisplayItems.removeAt(0)
-            rebuildReplOutput()
-        } else {
-            tvOutput.append(text)
-        }
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
+    private fun appendRawOutput(text: String) = replOutput.append(
+        ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true)
+    )
 
     private fun toggleEnterAction() {
         isEnterSendMode = !isEnterSendMode
@@ -1049,6 +1024,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearSessionAndHistory() {
+        replOutput.invalidate()
         session.engine.nativeClearHistory()
         replHistory.clear()
         replDisplayItems.clear()
