@@ -240,6 +240,11 @@ int main() {
         runScript("fn duplicate_params(x,x) { return x }");
         assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
             [](const CustomScriptFunc& function) { return function.name == "duplicate_params"; }));
+        runScript("fn unfinished_function(x) { return x");
+        assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+            [](const CustomScriptFunc& function) { return function.name == "unfinished_function"; }));
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err: Unclosed function body") != std::string::npos; }));
         runScript("step_array=[1]; for(i=0; i<2; i=step_array[99]) {}");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

@@ -123,6 +123,11 @@ static bool handleScriptFunctionDeclaration(
         end = ip + 1;
         while (end < lines.size() && lines[end] != "end") ++end;
     }
+    if (end == lines.size()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: Unclosed function body");
+        ip = lines.size();
+        return true;
+    }
     std::vector<std::string> body(lines.begin() + ip + 1, lines.begin() + end);
     ip = end + 1;
     auto& functions = state.user_script_funcs;
