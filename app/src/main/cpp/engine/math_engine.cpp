@@ -26,33 +26,28 @@ static std::optional<double> formulaArgument(std::string_view name) {
     return std::nullopt;
 }
 
+static std::optional<UserFunc> parseUserFunctionDefinition(std::string_view source) {
+    const size_t equals = expression::assignmentOffset(source);
+    if (equals == std::string_view::npos) return std::nullopt;
+    const auto lhs = expression::trim(source.substr(0, equals));
+    const auto rhs = expression::trim(source.substr(equals + 1));
+    const size_t open = lhs.find('(');
+    const size_t close = open == std::string_view::npos ? std::string_view::npos : expression::matchingGroupEnd(lhs, open);
+    if (close == std::string_view::npos) return std::nullopt;
+    return UserFunc{
+        std::string(expression::trim(lhs.substr(0, open))),
+        expression::splitArguments(lhs.substr(open + 1, close - open - 1)),
+        std::string(rhs)
+    };
+}
+
 std::vector<UserFunc> getParsedUserFuncs() {
-    std::vector<UserFunc> res;
-    res.reserve(engineState().user_funcs.size());
-    for (const auto& f_str : engineState().user_funcs) {
-        const size_t eq = expression::assignmentOffset(f_str);
-        if (eq == std::string::npos) continue;
-        std::string lhs = f_str.substr(0, eq);
-        std::string rhs = f_str.substr(eq + 1);
-        
-        lhs.erase(0, lhs.find_first_not_of(" \t"));
-        lhs.erase(lhs.find_last_not_of(" \t") + 1);
-        rhs.erase(0, rhs.find_first_not_of(" \t"));
-        rhs.erase(rhs.find_last_not_of(" \t") + 1);
-        
-        size_t paren_open = lhs.find('(');
-        const size_t paren_close = paren_open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(lhs, paren_open);
-        if (paren_open == std::string::npos || paren_close == std::string::npos || paren_close < paren_open) continue;
-        
-        std::string name = lhs.substr(0, paren_open);
-        name.erase(0, name.find_first_not_of(" \t"));
-        name.erase(name.find_last_not_of(" \t") + 1);
-        
-        std::string params_str = lhs.substr(paren_open + 1, paren_close - paren_open - 1);
-        auto params = expression::splitArguments(params_str);
-        res.push_back({std::move(name), std::move(params), std::move(rhs)});
+    std::vector<UserFunc> result;
+    result.reserve(engineState().user_funcs.size());
+    for (const auto& definition : engineState().user_funcs) {
+        if (auto parsed = parseUserFunctionDefinition(definition)) result.push_back(std::move(*parsed));
     }
-    return res;
+    return result;
 }
 
 double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues) {
@@ -1194,9 +1189,12 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
             return executeScriptFunc(name, values, error);
         };
     }
-    for (const auto& function : getParsedUserFuncs()) {
-        if (function.name != name) continue;
-        return [function](const std::vector<double>& values, std::string& error) {
+    for (const auto& definition : engineState().user_funcs) {
+        const auto source = std::string_view(definition);
+        if (expression::trim(source.substr(0, source.find('('))) != name) continue;
+        auto parsed = parseUserFunctionDefinition(source);
+        if (!parsed) continue;
+        return [function = std::move(*parsed)](const std::vector<double>& values, std::string& error) {
             if (values.size() != function.params.size()) {
                 error = "Arg Count Mismatch";
                 return std::numeric_limits<double>::quiet_NaN();
