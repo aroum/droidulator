@@ -2194,28 +2194,20 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         bool is1_arr = false, is2_arr = false;
         std::string err1, err2;
         std::vector<double> a1 = parseArrayExpr(b_op1, is1_arr, err1);
+        if (!err1.empty()) { err = err1; return {}; }
         std::vector<double> a2 = parseArrayExpr(b_op2, is2_arr, err2);
-        if (b_op == ".*" || b_op == "./" || is1_arr || is2_arr || !err1.empty() || !err2.empty()) {
+        if (!err2.empty()) { err = err2; return {}; }
+        if (b_op == ".*" || b_op == "./" || is1_arr || is2_arr) {
             bool is_scalar = false;
             double scalar_res = 0;
-            std::string bin_err;
-            std::vector<double> res = evaluateArrayBinaryOpParsed(b_op1, b_op, b_op2, is_scalar, scalar_res, bin_err, a1, is1_arr, a2, is2_arr);
-            if (!bin_err.empty()) {
-                if (is1_arr || is2_arr || b_op == ".*" || b_op == "./" || !err1.empty() || !err2.empty()) {
-                    err = bin_err;
-                    return {};
-                }
-            } else if (!res.empty() || is_scalar) {
-                if (is_scalar) {
-                    return {scalar_res};
-                } else {
-                    is_array = true;
-                    return res;
-                }
-            }
+            std::vector<double> res = evaluateArrayBinaryOpParsed(b_op1, b_op, b_op2, is_scalar, scalar_res, err, a1, is1_arr, a2, is2_arr);
+            if (!err.empty()) return {};
+            if (is_scalar) return {scalar_res};
+            is_array = true;
+            return res;
         }
     }
-    
+
     // Parentheses unwrapping: (expr)
     if (trimmed.front() == '(' && trimmed.back() == ')') {
         int depth = 0;
@@ -2448,18 +2440,24 @@ static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_st
     double op1_scalar = 0;
     double op2_scalar = 0;
     if (!is_op1_arr) {
-        const auto expanded = preprocessArrayLookups(op1_str, err);
-        if (!err.empty()) return {};
-        op1_scalar = evaluate(expanded, err);
-        if (!err.empty()) return {};
+        if (!op1_arr.empty()) op1_scalar = op1_arr.front();
+        else {
+            const auto expanded = preprocessArrayLookups(op1_str, err);
+            if (!err.empty()) return {};
+            op1_scalar = evaluate(expanded, err);
+            if (!err.empty()) return {};
+        }
     }
     if (!is_op2_arr) {
-        const auto expanded = preprocessArrayLookups(op2_str, err);
-        if (!err.empty()) return {};
-        op2_scalar = evaluate(expanded, err);
-        if (!err.empty()) return {};
+        if (!op2_arr.empty()) op2_scalar = op2_arr.front();
+        else {
+            const auto expanded = preprocessArrayLookups(op2_str, err);
+            if (!err.empty()) return {};
+            op2_scalar = evaluate(expanded, err);
+            if (!err.empty()) return {};
+        }
     }
-    
+
     if (is_op1_arr && is_op2_arr) {
         if (op1_arr.size() != op2_arr.size()) {
             err = "Array size mismatch (" + std::to_string(op1_arr.size()) + " vs " + std::to_string(op2_arr.size()) + ")";

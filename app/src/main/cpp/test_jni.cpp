@@ -398,6 +398,15 @@ int main() {
         runScript("array_assignment_once=[ast_print_once(1)]+[ast_print_once(2)]");
         assert(engineState().user_arrays.at("array_assignment_once") == std::vector<double>({3}));
         assert(engineState().script_console_output.size() == 2);
+        runScript("array_scalar_once=[1,2]*sum([ast_print_once(1),2])");
+        assert(engineState().user_arrays.at("array_scalar_once") == std::vector<double>({3,6}));
+        assert(engineState().script_console_output.size() == 1);
+        runScript("scalar_array_once=sum([ast_print_once(1),2])*[1,2]");
+        assert(engineState().user_arrays.at("scalar_array_once") == std::vector<double>({3,6}));
+        assert(engineState().script_console_output.size() == 1);
+        runScript("empty_array_result=[]+[]");
+        assert(engineState().user_arrays.count("empty_array_result") == 1);
+        assert(engineState().user_arrays.at("empty_array_result").empty());
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
