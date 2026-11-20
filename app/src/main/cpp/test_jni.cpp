@@ -533,6 +533,17 @@ int main() {
         assert(evaluateArrayAst("script_map_formula([1,2,3])") && typedArray == std::vector<double>({1,4,9}) && signatureError.empty());
         assert(evaluateArrayAst("ast_script_call([1,2,3])") && typedArray == std::vector<double>({2,4,6}) && signatureError.empty());
         assert(evaluateArrayAst("sqrt([])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,ast_statistics,[])") && typedArray == std::vector<double>({1,2,2,5}) && signatureError.empty());
+        assert(engineState().user_arrays.at("ast_statistics") == std::vector<double>({1,2,2,5}));
+        assert(evaluateLiteralAst("sum(if(1,if(0,[1/0],[2,3]),[]))") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("len(if(0,[1/0],[2,3])+1)") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(sqrt(if(1,[1,4],[1/0])))") == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateArrayAst("if(1,[ast_print_once(1)],[ast_print_once(2)])") && typedArray == std::vector<double>({1}) && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
         assert(evaluateLiteralAst("sum(sqrt([1,4,9]))") == 6 && signatureError.empty());
         assert(evaluateLiteralAst("len(script_map_formula([2,3]))") == 2 && signatureError.empty());
         assert(evaluateLiteralAst("if(1,sum(sqrt([1,4])),sum(sqrt([-1])))") == 3 && signatureError.empty());

@@ -41,7 +41,7 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
-            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'a' || (arrays && !argument.op && !argument.symbol.empty() &&
+            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
         // Bind array consumers before scalar name lookup.
@@ -69,6 +69,25 @@ public:
             }
             if (node.op != 'c') continue;
             const auto& args = parser.callArguments[node.right];
+            if (node.symbol == "if" || node.symbol == "iff") {
+                if ((node.symbol == "if" && args.size() != 3) || args.size() < 3 || args.size() % 2 == 0)
+                    return std::nullopt;
+                bool allArrays = isArrayNode(args.back());
+                for (size_t i = 0; i + 1 < args.size(); i += 2) {
+                    if (isArrayNode(args[i])) return std::nullopt;
+                    allArrays = allArrays && isArrayNode(args[i + 1]);
+                }
+                node.op = 'q';
+                node.arrayConditional = allArrays;
+                if (allArrays) {
+                    node.arraySlot = parser.literalArrays.size();
+                    parser.literalArrays.emplace_back();
+                    for (size_t i = 1; i < args.size(); i += 2)
+                        if (!parser.nodes[args[i]].op) parser.nodes[args[i]].op = 'a';
+                    if (!parser.nodes[args.back()].op) parser.nodes[args.back()].op = 'a';
+                }
+                continue;
+            }
             if (node.symbol == "dot" && args.size() == 2 && binary && binary("dot") &&
                 isArrayNode(args[0]) && isArrayNode(args[1])) {
                 node.op = 'd';
@@ -102,6 +121,11 @@ public:
         }
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            if (node.arrayConditional) {
+                const auto& args = parser.callArguments[node.right];
+                for (size_t i = 1; i < args.size(); i += 2) consumedArrays[args[i]] = true;
+                consumedArrays[args.back()] = true;
+            }
             if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i' || node.op == 't' || node.op == 'u') consumedArrays[node.left] = true;
             if (node.op == 'd' || node.op == 't') consumedArrays[node.right] = true;
         }
@@ -112,17 +136,17 @@ public:
             consumedArrays[root] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u') && !consumedArrays[i]) return std::nullopt;
+            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u' || parser.nodes[i].arrayConditional) && !consumedArrays[i]) return std::nullopt;
         const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
             const auto& node = parser.nodes[index];
             if (node.op == 'b') return &parser.literalArrays[node.left];
-            if (node.op == 't' || node.op == 'u') return &parser.literalArrays[node.arraySlot];
+            if (node.op == 't' || node.op == 'u' || node.arrayConditional) return &parser.literalArrays[node.arraySlot];
             return arrays ? arrays(node.symbol) : nullptr;
         };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'q') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -141,12 +165,6 @@ public:
             if (node.op == 'c') {
                 const auto& arguments = parser.callArguments[node.right];
                 const auto arity = arguments.size();
-                if (node.symbol == "if" || node.symbol == "iff") {
-                    if ((node.symbol == "if" && arity != 3) || arity < 3 || arity % 2 == 0)
-                        return std::nullopt;
-                    node.op = 'q';
-                    continue;
-                }
                 // Four-argument reductions can bind their first argument as a loop index.
                 if (arity == 4 && (parser.nodes[arguments.front()].op == 0 || parser.nodes[arguments.front()].op == 'v') &&
                     !parser.nodes[arguments.front()].symbol.empty() &&
@@ -205,6 +223,19 @@ public:
                 if (!complete[selected]) {
                     work.push_back({selected});
                     continue;
+                }
+                if (node.arrayConditional) {
+                    const auto& source = parser.nodes[selected];
+                    const auto values = arrayValue(selected);
+                    if (!values) {
+                        error = "Array not defined";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    auto& target = parser.literalArrays[node.arraySlot];
+                    if (source.op == 'b') target = std::move(parser.literalArrays[source.left]);
+                    else if (source.op == 't' || source.op == 'u' || source.arrayConditional)
+                        target = std::move(parser.literalArrays[source.arraySlot]);
+                    else target = *values;
                 }
                 node.value = parser.nodes[selected].value;
                 complete[index] = true;
@@ -408,7 +439,7 @@ public:
             const double first = values->empty() ? 0.0 : values->front();
             const auto& node = parser.nodes[root];
             if (node.op == 'b') *arrayResult = std::move(parser.literalArrays[node.left]);
-            else if (node.op == 't' || node.op == 'u') *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
+            else if (node.op == 't' || node.op == 'u' || node.arrayConditional) *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
             else *arrayResult = *values;
             return first;
         }
@@ -445,6 +476,7 @@ private:
         VectorStatistic statistic = VectorStatistic::Sum;
         char arrayOperation = 0;
         size_t arraySlot = 0;
+        bool arrayConditional = false;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
