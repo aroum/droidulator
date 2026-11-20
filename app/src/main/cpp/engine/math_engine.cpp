@@ -1200,10 +1200,19 @@ static std::optional<double> lookupScalar(std::string_view name) {
     return std::nullopt;
 }
 
-static expression::ArithmeticExpression::CustomFunction lookupFormula(std::string_view name) {
+static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std::string_view name) {
     if (formulaArgument(name)) return {};
-    for (const auto& function : engineState().user_script_funcs)
-        if (function.name == name) return {};
+    for (const auto& function : engineState().user_script_funcs) {
+        if (function.name != name) continue;
+        return [name = std::string(name)](const std::vector<double>& values, std::string& error) {
+            // Script functions use their own parameters and session variables.
+            formulaBindings.emplace_back();
+            struct BindingScope {
+                ~BindingScope() { formulaBindings.pop_back(); }
+            } scope;
+            return executeScriptFunc(name, values, error);
+        };
+    }
     for (const auto& function : getParsedUserFuncs()) {
         if (function.name != name) continue;
         return [function](const std::vector<double>& values, std::string& error) {
@@ -1248,7 +1257,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupFormula)) {
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction)) {
         if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
     }

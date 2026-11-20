@@ -41,20 +41,18 @@ public:
                 if (!arrays || (lookup && lookup(node.symbol))) return std::nullopt;
                 const auto array = arrays(node.symbol);
                 if (!array) return std::nullopt;
-                node.value = static_cast<double>(array->size());
-                node.op = 0;
                 continue;
             }
             if (node.op == '[') {
                 if (!arrays) return std::nullopt;
-                node.array = arrays(node.symbol);
                 continue;
             }
             if (node.op == 'c') {
                 const auto& arguments = parser.callArguments[node.right];
                 const auto arity = arguments.size();
                 // Four-argument reductions can bind their first argument as a loop index.
-                if (arity == 4 && !parser.nodes[arguments.front()].op && !parser.nodes[arguments.front()].symbol.empty() &&
+                if (arity == 4 && (parser.nodes[arguments.front()].op == 0 || parser.nodes[arguments.front()].op == 'v') &&
+                    !parser.nodes[arguments.front()].symbol.empty() &&
                     (node.symbol == "sum" || node.symbol == "prod" ||
                      node.symbol == "min" || node.symbol == "max")) return std::nullopt;
                 if (arity == 1 && unary && (node.function = unary(node.symbol))) continue;
@@ -70,10 +68,28 @@ public:
             if (!lookup) return std::nullopt;
             const auto value = lookup(node.symbol);
             if (!value) return std::nullopt;
-            node.value = *value;
+            node.op = 'v';
         }
         for (auto& node : parser.nodes) {
             if (!node.op) continue;
+            if (node.op == 'v') {
+                const auto value = lookup(node.symbol);
+                if (!value) {
+                    error = "Unknown variable: " + std::string(node.symbol);
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                node.value = *value;
+                continue;
+            }
+            if (node.op == 'l') {
+                const auto array = arrays(node.symbol);
+                if (!array) {
+                    error = "Array " + std::string(node.symbol) + " not defined";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                node.value = static_cast<double>(array->size());
+                continue;
+            }
             const double left = parser.nodes[node.left].value;
             const double right = node.op == 'c' ? 0 : parser.nodes[node.right].value;
             if (node.op >= 'A' && node.op <= 'I') {
@@ -92,19 +108,22 @@ public:
                 case 'G': node.value = left >= right; break;
                 case 'H': node.value = left < right; break;
                 case 'I': node.value = left > right; break;
-                case '[':
-                    if (!node.array) {
+                case '[': {
+                    // Calls may restore the array table; resolve storage only when used.
+                    const auto array = arrays(node.symbol);
+                    if (!array) {
                         error = "Array " + std::string(node.symbol) + " not defined";
                         return std::numeric_limits<double>::quiet_NaN();
                     }
                     if (!std::isfinite(left) || std::trunc(left) != left || left < 1 ||
-                        left > static_cast<double>(node.array->size())) {
+                        left > static_cast<double>(array->size())) {
                         error = "Invalid or out of bounds index for array " + std::string(node.symbol) +
-                            " (size " + std::to_string(node.array->size()) + ")";
+                            " (size " + std::to_string(array->size()) + ")";
                         return std::numeric_limits<double>::quiet_NaN();
                     }
-                    node.value = (*node.array)[static_cast<size_t>(left) - 1];
+                    node.value = (*array)[static_cast<size_t>(left) - 1];
                     break;
+                }
                 case 'c': {
                     const auto& args = parser.callArguments[node.right];
                     if (node.customFunction) {
@@ -160,7 +179,6 @@ private:
         size_t right = 0;
         std::string_view symbol{};
         UnaryFunction function = nullptr;
-        const std::vector<double>* array = nullptr;
         BinaryFunction binaryFunction = nullptr;
         VariadicFunction variadicFunction = nullptr;
         CustomFunction customFunction;

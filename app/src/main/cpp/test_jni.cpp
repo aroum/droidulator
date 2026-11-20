@@ -291,6 +291,21 @@ int main() {
         evaluateInput("formula_unused_argument(x)=42", signatureError, signatureDefinition);
         evaluate("formula_unused_argument (sqrt(-1))", signatureError);
         assert(!signatureError.empty());
+        runScript("ast_call_array=[7,9]; fn ast_script_call(x) { return x*2 }");
+        assert(evaluate("ast_script_call (3)+ast_call_array[2]", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("ast_call_array[1]+ast_script_call (3)+ast_call_array[2]", signatureError) == 22 && signatureError.empty());
+        runScript("fn ast_script_global(y) { return formula_scope_value+y }");
+        evaluateInput("ast_formula_script(formula_scope_value)=ast_script_global(2)+formula_scope_value", signatureError, signatureDefinition);
+        assert(evaluate("ast_formula_script (3)", signatureError) == 15 && signatureError.empty());
+        evaluate("ast_script_call ()", signatureError);
+        assert(signatureError == "Arg Count Mismatch");
+        evaluateInput("ast_reduction=99", signatureError, signatureDefinition);
+        assert(evaluate("sum(ast_reduction,1,3,ast_reduction)", signatureError) == 6 && signatureError.empty());
+        runScript("fn ast_print_once(x) { print(x); return x }");
+        engineState().script_console_output.clear();
+        evaluate("ast_print_once(3)+unknown_ast_name", signatureError);
+        assert(!signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));
