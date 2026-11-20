@@ -51,6 +51,10 @@ internal class DefinitionEditorController(
             }
         })
         editor = Editor(draft, dialog, et)
+        if (session.commandRunning) {
+            dialog.setCancelable(false)
+            et.isEnabled = false
+        }
         dialog.setOnDismissListener {
             untrack(dialog)
             if (editor?.dialog === dialog) editor = null
