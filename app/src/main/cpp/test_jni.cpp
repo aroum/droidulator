@@ -466,6 +466,17 @@ int main() {
         }
         assert(engineState().user_arrays.at("ast_statistics") == std::vector<double>({1,2,2,5}));
         assert(evaluate("ast_script_call(1)+sum(ast_statistics)", signatureError) == 12 && signatureError.empty());
+        engineState().user_arrays["ast_dot_right"] = {2,3,4,5};
+        const auto astDot = expression::ArithmeticExpression::evaluate("dot (ast_statistics,ast_dot_right)", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+        assert(astDot && *astDot == 41 && signatureError.empty());
+        assert(evaluate("dot([1,2,2,5],[2,3,4,5])", signatureError) == 41 && signatureError.empty());
+        assert(evaluate("dot(empty_array_result,empty_array_result)", signatureError) == 0 && signatureError.empty());
+        assert(evaluate("dot([],[])", signatureError) == 0 && signatureError.empty());
+        evaluate("dot(ast_statistics,empty_array_result)", signatureError);
+        assert(signatureError == "Array size mismatch (4 vs 0)");
+        assert(evaluate("dot(2,3)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("ast_script_call(1)+dot(ast_statistics,ast_dot_right)", signatureError) == 43 && signatureError.empty());
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());

@@ -7,6 +7,7 @@
 #include <map>
 #include <numeric>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <vector>
 
@@ -65,5 +66,13 @@ inline double evaluateStatistic(VectorStatistic operation, const std::vector<dou
             return operation == VectorStatistic::Deviation ? std::sqrt(variance) : variance;
         }
     }
+}
+
+inline double vectorDot(const std::vector<double>& left, const std::vector<double>& right, std::string& error) {
+    if (left.size() != right.size()) {
+        error = "Array size mismatch (" + std::to_string(left.size()) + " vs " + std::to_string(right.size()) + ")";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return std::inner_product(left.begin(), left.end(), right.begin(), 0.0);
 }
 }

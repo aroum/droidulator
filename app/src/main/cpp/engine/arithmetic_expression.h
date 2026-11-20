@@ -36,12 +36,27 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         // Resolve named-array reductions as typed nodes before scalar name lookup.
         for (auto& node : parser.nodes) {
-            if (node.op != 'c' || !arrays || !variadic || !variadic(node.symbol)) continue;
-            const auto statistic = vectorStatistic(node.symbol);
+            if (node.op != 'c' || !arrays) continue;
             const auto& args = parser.callArguments[node.right];
+            const auto isArray = [&](size_t index) {
+                const auto& argument = parser.nodes[index];
+                return !argument.op && !argument.symbol.empty() &&
+                    !(lookup && lookup(argument.symbol)) && arrays(argument.symbol);
+            };
+            if (node.symbol == "dot" && args.size() == 2 && binary && binary("dot") &&
+                isArray(args[0]) && isArray(args[1])) {
+                node.op = 'd';
+                node.left = args[0];
+                node.right = args[1];
+                parser.nodes[node.left].op = 'a';
+                parser.nodes[node.right].op = 'a';
+                continue;
+            }
+            if (!variadic || !variadic(node.symbol)) continue;
+            const auto statistic = vectorStatistic(node.symbol);
             if (!statistic || args.size() != 1) continue;
             auto& argument = parser.nodes[args.front()];
-            if (argument.op || argument.symbol.empty() || (lookup && lookup(argument.symbol)) || !arrays(argument.symbol)) continue;
+            if (!isArray(args.front())) continue;
             argument.op = 'a';
             node.op = 's';
             node.left = args.front();
@@ -50,7 +65,7 @@ public:
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 's') continue;
+            if (node.op == 'a' || node.op == 's' || node.op == 'd') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -157,6 +172,17 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'd') {
+                const auto left = arrays(parser.nodes[node.left].symbol);
+                const auto right = arrays(parser.nodes[node.right].symbol);
+                if (!left || !right) {
+                    error = "Array not defined";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                node.value = vectorDot(*left, *right, error);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
             if (node.op == 's') {
                 const auto name = parser.nodes[node.left].symbol;
                 const auto array = arrays(name);

@@ -689,11 +689,9 @@ std::string preprocessVectorStats(const std::string& s) {
         auto vec1 = parseArrayExpr(arg1_str, is1_arr, err1);
         auto vec2 = parseArrayExpr(arg2_str, is2_arr, err2);
 
-        if (is1_arr && is2_arr && err1.empty() && err2.empty() && vec1.size() == vec2.size() && !vec1.empty()) {
-            double dot_val = 0.0;
-            for (size_t i = 0; i < vec1.size(); ++i) {
-                dot_val += vec1[i] * vec2[i];
-            }
+        if (is1_arr && is2_arr && err1.empty() && err2.empty() && vec1.size() == vec2.size()) {
+            std::string dotError;
+            const double dot_val = expression::vectorDot(vec1, vec2, dotError);
             std::string rep = fmtInternal(dot_val);
             res.replace(pos, close - pos + 1, rep);
             pos += rep.size();
@@ -2177,11 +2175,7 @@ static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_st
         
         if (op_str == "*") {
             is_scalar_result = true;
-            double sum = 0;
-            for (size_t i = 0; i < op1_arr.size(); ++i) {
-                sum += op1_arr[i] * op2_arr[i];
-            }
-            scalar_val = sum;
+            scalar_val = expression::vectorDot(op1_arr, op2_arr, err);
             return {};
         }
         
