@@ -32,24 +32,33 @@ public:
                                           ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr,
                                           VariadicLookup variadic = nullptr, CustomLookup custom = nullptr) {
         ArithmeticExpression parser(tokenize(source));
+        if (!parser.tokens.empty() && parser.tokens.front().text == "[" &&
+            matchingGroupEnd(source, parser.tokens.front().start) == parser.tokens.back().start)
+            return std::nullopt; // Array-valued roots still use the existing array evaluator.
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         // Resolve named-array reductions as typed nodes before scalar name lookup.
         for (auto& node : parser.nodes) {
-            if (node.op != 'c' || !arrays) continue;
+            if (node.op != 'c') continue;
             const auto& args = parser.callArguments[node.right];
             const auto isArray = [&](size_t index) {
                 const auto& argument = parser.nodes[index];
-                return !argument.op && !argument.symbol.empty() &&
-                    !(lookup && lookup(argument.symbol)) && arrays(argument.symbol);
+                return argument.op == 'b' || (arrays && !argument.op && !argument.symbol.empty() &&
+                    !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
             };
             if (node.symbol == "dot" && args.size() == 2 && binary && binary("dot") &&
                 isArray(args[0]) && isArray(args[1])) {
                 node.op = 'd';
                 node.left = args[0];
                 node.right = args[1];
-                parser.nodes[node.left].op = 'a';
-                parser.nodes[node.right].op = 'a';
+                if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
+                if (!parser.nodes[node.right].op) parser.nodes[node.right].op = 'a';
+                continue;
+            }
+            if (node.symbol == "len" && args.size() == 1 && isArray(args.front())) {
+                node.op = 'z';
+                node.left = args.front();
+                if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
                 continue;
             }
             if (!variadic || !variadic(node.symbol)) continue;
@@ -57,15 +66,27 @@ public:
             if (!statistic || args.size() != 1) continue;
             auto& argument = parser.nodes[args.front()];
             if (!isArray(args.front())) continue;
-            argument.op = 'a';
+            if (!argument.op) argument.op = 'a';
             node.op = 's';
             node.left = args.front();
             node.statistic = *statistic;
         }
+        std::vector<bool> consumedArrays(parser.nodes.size(), false);
+        for (const auto& node : parser.nodes) {
+            if (node.op == 's' || node.op == 'z' || node.op == 'd') consumedArrays[node.left] = true;
+            if (node.op == 'd') consumedArrays[node.right] = true;
+        }
+        for (size_t i = 0; i < parser.nodes.size(); ++i)
+            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b') && !consumedArrays[i]) return std::nullopt;
+        const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
+            const auto& node = parser.nodes[index];
+            if (node.op == 'b') return &parser.literalArrays[node.left];
+            return arrays ? arrays(node.symbol) : nullptr;
+        };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 's' || node.op == 'd') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -156,11 +177,11 @@ public:
             }
             if (frame.stage == 0) {
                 frame.stage = 1;
-                if (node.op == 'c') {
+                if (node.op == 'c' || node.op == 'b') {
                     const auto& args = parser.callArguments[node.right];
                     for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
                         if (!complete[*argument]) work.push_back({*argument});
-                } else if (node.op == 'f' || node.op == 'n' || node.op == '[' || node.op == 's') {
+                } else if (node.op == 'f' || node.op == 'n' || node.op == '[' || node.op == 's' || node.op == 'z') {
                     if (!complete[node.left]) work.push_back({node.left});
                 } else if (node.op && node.op != 'v' && node.op != 'l' && node.op != 'a') {
                     if (!complete[node.right]) work.push_back({node.right});
@@ -172,9 +193,22 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'b') {
+                auto& values = parser.literalArrays[node.left];
+                values.reserve(parser.callArguments[node.right].size());
+                for (const auto argument : parser.callArguments[node.right]) {
+                    const double value = parser.nodes[argument].value;
+                    if (!std::isfinite(value)) {
+                        error = std::isnan(value) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    values.push_back(value);
+                }
+                continue;
+            }
             if (node.op == 'd') {
-                const auto left = arrays(parser.nodes[node.left].symbol);
-                const auto right = arrays(parser.nodes[node.right].symbol);
+                const auto left = arrayValue(node.left);
+                const auto right = arrayValue(node.right);
                 if (!left || !right) {
                     error = "Array not defined";
                     return std::numeric_limits<double>::quiet_NaN();
@@ -183,14 +217,14 @@ public:
                 if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
                 continue;
             }
-            if (node.op == 's') {
+            if (node.op == 's' || node.op == 'z') {
                 const auto name = parser.nodes[node.left].symbol;
-                const auto array = arrays(name);
+                const auto array = arrayValue(node.left);
                 if (!array) {
                     error = "Array " + std::string(name) + " not defined";
                     return std::numeric_limits<double>::quiet_NaN();
                 }
-                node.value = evaluateStatistic(node.statistic, *array);
+                node.value = node.op == 'z' ? static_cast<double>(array->size()) : evaluateStatistic(node.statistic, *array);
                 continue;
             }
             if (node.op == 'v') {
@@ -320,6 +354,7 @@ private:
     std::vector<Token> tokens;
     std::vector<Node> nodes;
     std::vector<std::vector<size_t>> callArguments;
+    std::vector<std::vector<double>> literalArrays;
     size_t next = 0;
 
     size_t add(Node node) {
@@ -362,7 +397,23 @@ private:
         if (next == tokens.size()) return invalid;
         const auto token = tokens[next++];
         size_t left;
-        if (token.kind == Kind::Number || token.kind == Kind::ScaledNumber) {
+        if (token.text == "[") {
+            std::vector<size_t> elements;
+            if (next < tokens.size() && tokens[next].text != "]") {
+                while (true) {
+                    if (elements.size() >= 100000) return invalid;
+                    const auto element = parse(0, depth + 1);
+                    if (element == invalid) return invalid;
+                    elements.push_back(element);
+                    if (next == tokens.size() || tokens[next].kind != Kind::Comma) break;
+                    ++next;
+                }
+            }
+            if (next == tokens.size() || tokens[next++].text != "]") return invalid;
+            left = add({0, 'b', literalArrays.size(), callArguments.size()});
+            literalArrays.emplace_back();
+            callArguments.push_back(std::move(elements));
+        } else if (token.kind == Kind::Number || token.kind == Kind::ScaledNumber) {
             std::string literal(token.text);
             if (token.kind == Kind::ScaledNumber) {
                 const auto split = token.text.find_first_not_of("0123456789.");

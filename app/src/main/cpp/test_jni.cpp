@@ -477,6 +477,26 @@ int main() {
         assert(signatureError == "Array size mismatch (4 vs 0)");
         assert(evaluate("dot(2,3)", signatureError) == 6 && signatureError.empty());
         assert(evaluate("ast_script_call(1)+dot(ast_statistics,ast_dot_right)", signatureError) == 43 && signatureError.empty());
+        const auto evaluateLiteralAst = [&](const std::string& source) {
+            signatureError.clear();
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+        };
+        for (const auto& [name, expected] : statistics) {
+            const auto result = evaluateLiteralAst(name + "([1,2,2,5])");
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateLiteralAst("len([1,2+3,4])") == 3 && signatureError.empty());
+        assert(evaluateLiteralAst("dot([1,2], [3,4])") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("dot(ast_statistics, [2,3,4,5])") == 41 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([mean([2,4]),sum([1,2])])") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,sum([1,2]),sum([1/0]))") == 3 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([])+len([])+dot([],[])") == 0 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("sum([ast_print_once(1),ast_print_once(2)])") == 3 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 2);
+        assert(!evaluateLiteralAst("[1,2]"));
+        assert(!evaluateLiteralAst("sum([[1,2]])"));
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
