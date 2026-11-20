@@ -376,6 +376,16 @@ int main() {
         assert(engineState().script_console_output.size() == 1);
         evaluateScriptReturnValues("1,", returnArray, signatureError);
         assert(signatureError == "Empty return value");
+        runScript("tuple_probe_a,tuple_probe_b=1,2");
+        assert(evaluate("tuple_probe_a", signatureError) == 1 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 2 && signatureError.empty());
+        runScript("tuple_probe_a,tuple_probe_b=sum([ast_print_once(1),2])");
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
+        runScript("tuple_probe_a,tuple_probe_b=1,");
+        assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));

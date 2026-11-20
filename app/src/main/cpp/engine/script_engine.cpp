@@ -214,6 +214,72 @@ static bool isScriptConstant(const std::string& name) {
     });
 }
 
+static bool assignScriptTuple(const std::string& lhs, const std::string& rhs, std::string& error) {
+    const auto names = expression::splitArguments(lhs);
+    if (names.empty() || std::any_of(names.begin(), names.end(), [](const auto& name) {
+        return !expression::isIdentifier(name);
+    })) {
+        error = "Invalid tuple assignment";
+        return false;
+    }
+    if (std::unordered_set<std::string>(names.begin(), names.end()).size() != names.size()) {
+        error = "Duplicate tuple target";
+        return false;
+    }
+    for (const auto& name : names) {
+        if (isReservedName(name) || isScriptConstant(name)) {
+            error = "Const or reserved name";
+            return false;
+        }
+    }
+    std::vector<double> values;
+    bool calledFunction = false;
+    const size_t open = rhs.find('(');
+    if (open != std::string::npos && expression::matchingGroupEnd(rhs, open) == rhs.size() - 1) {
+        const std::string name(expression::trim(std::string_view(rhs).substr(0, open)));
+        const auto& functions = engineState().user_script_funcs;
+        if (std::any_of(functions.begin(), functions.end(), [&](const auto& function) { return function.name == name; })) {
+            calledFunction = true;
+            const auto text = std::string_view(rhs).substr(open + 1, rhs.size() - open - 2);
+            const auto expressions = expression::splitArguments(text);
+            if (!expression::trim(text).empty() && expressions.empty()) {
+                error = "Invalid function arguments";
+                return false;
+            }
+            std::vector<double> arguments;
+            arguments.reserve(expressions.size());
+            for (const auto& argument : expressions) {
+                if (argument.empty()) {
+                    error = "Empty function argument";
+                    return false;
+                }
+                arguments.push_back(evaluate(argument, error));
+                if (!error.empty()) return false;
+            }
+            executeScriptFunc(name, arguments, error, &values);
+        }
+    }
+    if (!calledFunction) {
+        bool array = false;
+        values = evaluateScriptReturnValues(rhs, array, error);
+    }
+    if (!error.empty()) return false;
+    auto& state = engineState();
+    for (size_t i = 0; i < names.size(); ++i) {
+        const auto& name = names[i];
+        const double value = i < values.size() ? values[i] : 0.0;
+        state.user_arrays.erase(name);
+        const auto target = std::find_if(state.user_args.begin(), state.user_args.end(), [&](const UserArg& argument) {
+            return argument.name == name;
+        });
+        if (target == state.user_args.end()) state.user_args.push_back({name, value});
+        else target->val = value;
+        if (std::find(state.autocomplete_words.begin(), state.autocomplete_words.end(), name) == state.autocomplete_words.end())
+            state.autocomplete_words.push_back(name);
+    }
+    return true;
+}
+
 bool executeScriptAssignments(const std::string& step, std::string& err) {
     if (step.empty()) return true;
     bool isDef = false;
@@ -581,80 +647,9 @@ void runScript(const std::string& code) {
             
             // Check if LHS contains multiple variables separated by commas (tuple assignment e.g. x, y = fn())
             if (lhs.find(',') != std::string::npos) {
-                const auto lhs_vars = expression::splitArguments(lhs);
-                if (lhs_vars.empty() || std::any_of(lhs_vars.begin(), lhs_vars.end(),
-                    [](const auto& name) { return !expression::isIdentifier(name); })) {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Invalid tuple assignment");
-                    ++ip;
-                    continue;
-                }
-                if (std::unordered_set<std::string>(lhs_vars.begin(), lhs_vars.end()).size() != lhs_vars.size()) {
-                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Duplicate tuple target");
-                    ++ip;
-                    continue;
-                }
-                bool reserved = false;
-                for (const auto& name : lhs_vars) {
-                    if (isReservedName(name) || std::any_of(engineState().user_consts.begin(), engineState().user_consts.end(), [&](const UserConst& c) { return c.name == name; })) { reserved = true; break; }
-                }
-                if (reserved) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const or reserved name"); ip++; continue; }
-                
-                // Evaluate RHS expression
-                bool is_arr = false;
-                std::string parse_err;
-                std::vector<double> vals;
-                
-                // Use the same function executor as expression calls.
-                size_t open_p = rhs.find('(');
-                bool executed_fn = false;
-                if (open_p != std::string::npos && rhs.back() == ')') {
-                    std::string fn_name = rhs.substr(0, open_p);
-                    fn_name.erase(0, fn_name.find_first_not_of(" \t"));
-                    fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    const auto found = std::find_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f) { return f.name == fn_name; });
-                    if (found != engineState().user_script_funcs.end()) {
-                        executed_fn = true;
-                        const auto argText = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
-                        auto argExprs = argText.find_first_not_of(" \t") == std::string::npos ? std::vector<std::string>{} : expression::splitArguments(argText);
-                        std::vector<double> evaluated;
-                        for (const auto& arg : argExprs) {
-                            evaluated.push_back(evaluate(arg, parse_err));
-                            if (!parse_err.empty()) break;
-                        }
-                        if (parse_err.empty()) executeScriptFunc(fn_name, evaluated, parse_err, &vals);
-                    }
-                }
-                if (!parse_err.empty()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + parse_err); ip++; continue; }
-
-                if (!executed_fn) {
-                    vals = parseArrayExpr(rhs, is_arr, parse_err);
-                    if (!is_arr || !parse_err.empty()) {
-                        std::string eval_err;
-                        const auto expanded = preprocessArrayLookups(preprocessLen(rhs), eval_err);
-                        double single_v = eval_err.empty() ? evaluate(expanded, eval_err) : 0.0;
-                        if (!eval_err.empty()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err); ip++; continue; }
-                        vals = {single_v};
-                    }
-                }
-                
-                for (size_t var_i = 0; var_i < lhs_vars.size(); ++var_i) {
-                    const std::string& var_name = lhs_vars[var_i];
-                    double val = (var_i < vals.size()) ? vals[var_i] : 0.0;
-                    engineState().user_arrays.erase(var_name);
-                    bool found = false;
-                    for (auto& a : engineState().user_args) {
-                        if (a.name == var_name) {
-                            a.val = val;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        engineState().user_args.push_back({var_name, val});
-                    }
-                    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), var_name) == engineState().autocomplete_words.end()) {
-                        engineState().autocomplete_words.push_back(var_name);
-                    }
+                std::string error;
+                if (!assignScriptTuple(lhs, rhs, error)) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
                 }
                 if (engineState().script_has_returned) break;
                 ip++;
