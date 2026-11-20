@@ -209,6 +209,12 @@ int main() {
         assert(evaluate("-17%5", percentError) == -2 && percentError.empty());
         assert(evaluate("200+10%", percentError) == 220 && percentError.empty());
         assert(std::abs(evaluate("17%-5", percentError) + 4.83) < 1e-12 && percentError.empty());
+        assert(evaluate("not 0", percentError) == 1 && percentError.empty());
+        assert(evaluate("!1", percentError) == 0 && percentError.empty());
+        assert(evaluate("not not 3", percentError) == 1 && percentError.empty());
+        assert(evaluate("-not 0", percentError) == -1 && percentError.empty());
+        assert(evaluate("!3!", percentError) == 0 && percentError.empty());
+        assert(evaluate("not 0 and 2", percentError) == 1 && percentError.empty());
         engineState().user_args.clear(); engineState().user_arrays.clear(); engineState().user_funcs.clear();
     }
     {

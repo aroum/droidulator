@@ -159,6 +159,13 @@ public:
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
                 case '*': node.value = left * right; break;
+                case 'n':
+                    if (!std::isfinite(left)) {
+                        error = std::isnan(left) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    node.value = left == 0.0;
+                    break;
                 case '%': node.value = node.binaryFunction(left, right); break;
                 case '^': node.value = std::pow(left, right); break;
                 case '/':
@@ -227,9 +234,12 @@ private:
 
     size_t parse(int minimum, unsigned depth) {
         if (depth >= 128 || next == tokens.size()) return invalid;
-        bool negative = false;
-        while (next < tokens.size() && (tokens[next].text == "+" || tokens[next].text == "-")) {
-            negative ^= tokens[next++].text == "-";
+        std::vector<char> prefixes;
+        while (next < tokens.size()) {
+            const auto prefix = tokens[next].text;
+            if (prefix != "+" && prefix != "-" && prefix != "!" && prefix != "not") break;
+            if (prefix != "+") prefixes.push_back(prefix == "-" ? '-' : 'n');
+            ++next;
         }
         if (next == tokens.size()) return invalid;
         const auto token = tokens[next++];
@@ -298,9 +308,12 @@ private:
             ++next;
             left = add({0, 'f', left, 0, "fact"});
         }
-        if (negative) {
-            const auto minusOne = add({-1});
-            left = add({0, '*', minusOne, left});
+        for (auto prefix = prefixes.rbegin(); prefix != prefixes.rend(); ++prefix) {
+            if (*prefix == 'n') left = add({0, 'n', left});
+            else {
+                const auto minusOne = add({-1});
+                left = add({0, '*', minusOne, left});
+            }
         }
         while (next < tokens.size()) {
             const auto op = binaryOperator(tokens[next].text);
