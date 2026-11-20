@@ -976,6 +976,23 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
     return {};
 }
 
+static std::optional<double> evaluateAst(const std::string& source, std::string& error) {
+    auto& state = engineState();
+    state.g_math_domain_err.clear();
+    state.g_last_result_angle = AngleUnit::NONE;
+    state.g_last_eval_is_array = false;
+    std::optional<std::vector<double>> array;
+    const auto result = expression::ArithmeticExpression::evaluate(source, error, lookupScalar,
+        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array);
+    if (!result) return std::nullopt;
+    if (!state.g_math_domain_err.empty()) error = state.g_math_domain_err;
+    if (array) {
+        state.g_last_eval_is_array = true;
+        state.g_last_eval_array = std::move(*array);
+    }
+    return result;
+}
+
 double evaluate(const std::string& expr_str, std::string& err) {
     struct LoopBudgetScope {
         LoopBudgetScope() { if (loopEvaluationDepth++ == 0) loopIterationsRemaining = 100000; }
@@ -995,10 +1012,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction)) {
-        if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
-        return *arithmetic;
-    }
+    if (const auto arithmetic = evaluateAst(expr_str, err)) return *arithmetic;
 
     // Select conditional branches and bind reduction indices before executing
     // calls or array lookups inside their bodies.
@@ -1373,7 +1387,13 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             }
         } else {
             bool is_arr = false;
-            std::vector<double> arr = parseArrayExpr(rhs, is_arr, err);
+            std::vector<double> arr;
+            if (const auto result = evaluateAst(rhs, err)) {
+                is_arr = engineState().g_last_eval_is_array;
+                arr = is_arr ? engineState().g_last_eval_array : std::vector<double>{*result};
+            } else {
+                arr = parseArrayExpr(rhs, is_arr, err);
+            }
             if (err.empty() && is_arr) {
                 engineState().user_arrays[lhs] = arr;
                 engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {

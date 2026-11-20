@@ -16,6 +16,7 @@ public class CardulatorEngine {
   native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
   native String nativeFormatNumber(double value);
   native String[] nativeFormatNumbers(double[] values);
+  native double[] nativeLastArray();
   native void nativeSetFormatSettings(int mode, int precision, boolean grouping);
   public static void main(String[] args) {
     System.load(args[0]);
@@ -42,6 +43,12 @@ public class CardulatorEngine {
     if (e.nativeGetLastNumericVal() != 42 || second.nativeGetLastNumericVal() != 17)
       throw new AssertionError("JNI sessions share state");
     second.nativeDestroy(second.nativeHandle);
+    e.nativeEvaluate("[1,2]+[3,4]");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{4,6})) throw new AssertionError("AST array output");
+    e.nativeEvaluate("[]");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[0])) throw new AssertionError("empty AST array output");
+    e.nativeEvaluate("sum([1,2])");
+    if (e.nativeLastArray() != null || e.nativeGetLastNumericVal() != 3) throw new AssertionError("scalar after array output");
     e.nativeInit();
     if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
     String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);

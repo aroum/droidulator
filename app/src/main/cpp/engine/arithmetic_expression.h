@@ -30,9 +30,11 @@ public:
     static std::optional<double> evaluate(std::string_view source, std::string& error,
                                           ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
                                           ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr,
-                                          VariadicLookup variadic = nullptr, CustomLookup custom = nullptr) {
+                                          VariadicLookup variadic = nullptr, CustomLookup custom = nullptr,
+                                          std::optional<std::vector<double>>* arrayResult = nullptr) {
+        if (arrayResult) arrayResult->reset();
         ArithmeticExpression parser(tokenize(source));
-        if (!parser.tokens.empty() && parser.tokens.front().text == "[" &&
+        if (!arrayResult && !parser.tokens.empty() && parser.tokens.front().text == "[" &&
             matchingGroupEnd(source, parser.tokens.front().start) == parser.tokens.back().start)
             return std::nullopt; // Array-valued roots still use the existing array evaluator.
         const auto root = parser.parse(0, 0);
@@ -96,6 +98,12 @@ public:
         for (const auto& node : parser.nodes) {
             if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i' || node.op == 't') consumedArrays[node.left] = true;
             if (node.op == 'd' || node.op == 't') consumedArrays[node.right] = true;
+        }
+        const bool rootArray = isArrayNode(root);
+        if (rootArray) {
+            if (!arrayResult) return std::nullopt;
+            if (!parser.nodes[root].op) parser.nodes[root].op = 'a';
+            consumedArrays[root] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
             if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't') && !consumedArrays[i]) return std::nullopt;
@@ -360,6 +368,19 @@ public:
                     node.value = left / right;
                     break;
             }
+        }
+        if (rootArray) {
+            const auto values = arrayValue(root);
+            if (!values) {
+                error = "Array not defined";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            const double first = values->empty() ? 0.0 : values->front();
+            const auto& node = parser.nodes[root];
+            if (node.op == 'b') *arrayResult = std::move(parser.literalArrays[node.left]);
+            else if (node.op == 't') *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
+            else *arrayResult = *values;
+            return first;
         }
         const double value = parser.nodes[root].value;
         if (std::isinf(value)) error = "Overflow Error";

@@ -512,6 +512,19 @@ int main() {
         assert(engineState().script_console_output.size() == 2);
         assert(!evaluateLiteralAst("[1,2]"));
         assert(!evaluateLiteralAst("sum([[1,2]])"));
+        std::optional<std::vector<double>> typedArray;
+        const auto typedArithmetic = expression::ArithmeticExpression::evaluate("[1,2]+[3,4]", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedArithmetic == 4 && typedArray == std::vector<double>({4,6}) && signatureError.empty());
+        const auto typedEmpty = expression::ArithmeticExpression::evaluate("[]", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedEmpty == 0 && typedArray && typedArray->empty() && signatureError.empty());
+        const auto typedScalar = expression::ArithmeticExpression::evaluate("2+3", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedScalar == 5 && !typedArray && signatureError.empty());
+        runScript("typed_ast_assignment=[ast_print_once(1),2]+[3,4]");
+        assert(engineState().user_arrays.at("typed_ast_assignment") == std::vector<double>({4,6}));
+        assert(engineState().script_console_output.size() == 1);
         assert(evaluateLiteralAst("[1,2+3,7][2]") == 5 && signatureError.empty());
         assert(evaluateLiteralAst("([1,2,3])[2]!") == 2 && signatureError.empty());
         assert(evaluateLiteralAst("(ast_statistics)[4]") == 5 && signatureError.empty());
