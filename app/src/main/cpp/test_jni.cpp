@@ -245,6 +245,15 @@ int main() {
             [](const CustomScriptFunc& function) { return function.name == "unfinished_function"; }));
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err: Unclosed function body") != std::string::npos; }));
+        for (const auto& header : {"fn invalid_header {", "fn invalid_header(x) extra {"}) {
+            runScript(std::string(header) + " invalid_body_ran=1 }");
+            assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+                [](const UserArg& arg) { return arg.name == "invalid_body_ran"; }));
+            assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+                [](const CustomScriptFunc& function) { return function.name == "invalid_header"; }));
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err: Invalid function signature") != std::string::npos; }));
+        }
         runScript("step_array=[1]; for(i=0; i<2; i=step_array[99]) {}");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

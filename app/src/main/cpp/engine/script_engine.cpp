@@ -89,7 +89,12 @@ static bool handleScriptFunctionDeclaration(
 
     const size_t open = line.find('(');
     const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
-    if (open == std::string::npos || close == std::string::npos) return false;
+    if (open == std::string::npos || close == std::string::npos) {
+        engineState().script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: Invalid function signature");
+        const auto end = findMatchingBlockEnd(lines, ip);
+        ip = end == std::string::npos ? lines.size() : end + 1;
+        return true;
+    }
 
     const auto trim = [](std::string text) {
         text.erase(0, text.find_first_not_of(" \t"));
@@ -104,7 +109,9 @@ static bool handleScriptFunctionDeclaration(
     auto& state = engineState();
     size_t end = findMatchingBlockEnd(lines, ip);
     std::string error;
-    if (!expression::trim(parameterText).empty() && params.empty()) error = "Invalid parameter list";
+    const auto suffix = expression::trim(std::string_view(line).substr(close + 1));
+    if (!suffix.empty() && suffix != "{") error = "Invalid function signature";
+    else if (!expression::trim(parameterText).empty() && params.empty()) error = "Invalid parameter list";
     else if (!expression::isIdentifier(name)) error = "Invalid function name";
     else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !expression::isIdentifier(param); }))
         error = "Invalid parameter name";
