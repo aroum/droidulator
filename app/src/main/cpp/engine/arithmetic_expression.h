@@ -1,6 +1,7 @@
 #pragma once
 
 #include "expression_tokens.h"
+#include "vector_statistics.h"
 #include <array>
 #include <cmath>
 #include <cstdlib>
@@ -33,9 +34,23 @@ public:
         ArithmeticExpression parser(tokenize(source));
         const auto root = parser.parse(0, 0);
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
+        // Resolve named-array reductions as typed nodes before scalar name lookup.
+        for (auto& node : parser.nodes) {
+            if (node.op != 'c' || !arrays || !variadic || !variadic(node.symbol)) continue;
+            const auto statistic = vectorStatistic(node.symbol);
+            const auto& args = parser.callArguments[node.right];
+            if (!statistic || args.size() != 1) continue;
+            auto& argument = parser.nodes[args.front()];
+            if (argument.op || argument.symbol.empty() || (lookup && lookup(argument.symbol)) || !arrays(argument.symbol)) continue;
+            argument.op = 'a';
+            node.op = 's';
+            node.left = args.front();
+            node.statistic = *statistic;
+        }
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
+            if (node.op == 'a' || node.op == 's') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -130,9 +145,9 @@ public:
                     const auto& args = parser.callArguments[node.right];
                     for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
                         if (!complete[*argument]) work.push_back({*argument});
-                } else if (node.op == 'f' || node.op == 'n' || node.op == '[') {
+                } else if (node.op == 'f' || node.op == 'n' || node.op == '[' || node.op == 's') {
                     if (!complete[node.left]) work.push_back({node.left});
-                } else if (node.op && node.op != 'v' && node.op != 'l') {
+                } else if (node.op && node.op != 'v' && node.op != 'l' && node.op != 'a') {
                     if (!complete[node.right]) work.push_back({node.right});
                     if (!complete[node.left]) work.push_back({node.left});
                 }
@@ -141,7 +156,17 @@ public:
             }
             complete[index] = true;
             work.pop_back();
-            if (!node.op) continue;
+            if (!node.op || node.op == 'a') continue;
+            if (node.op == 's') {
+                const auto name = parser.nodes[node.left].symbol;
+                const auto array = arrays(name);
+                if (!array) {
+                    error = "Array " + std::string(name) + " not defined";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                node.value = evaluateStatistic(node.statistic, *array);
+                continue;
+            }
             if (node.op == 'v') {
                 const auto value = lookup(node.symbol);
                 if (!value) {
@@ -260,6 +285,7 @@ private:
         BinaryFunction binaryFunction = nullptr;
         VariadicFunction variadicFunction = nullptr;
         CustomFunction customFunction;
+        VectorStatistic statistic = VectorStatistic::Sum;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}

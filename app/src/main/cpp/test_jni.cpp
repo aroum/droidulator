@@ -452,6 +452,20 @@ int main() {
         runScript("empty_array_result=[]+[]");
         assert(engineState().user_arrays.count("empty_array_result") == 1);
         assert(engineState().user_arrays.at("empty_array_result").empty());
+        engineState().user_arrays["ast_statistics"] = {1,2,2,5};
+        const std::vector<std::pair<std::string, double>> statistics = {
+            {"sum",10}, {"prod",20}, {"mean",2.5}, {"min",1}, {"max",5},
+            {"median",2}, {"mode",2}, {"var",3}, {"std",std::sqrt(3.0)}
+        };
+        for (const auto& [name, expected] : statistics) {
+            const auto result = expression::ArithmeticExpression::evaluate(name + " (ast_statistics)", signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+            assert(std::abs(evaluate(name + "([1,2,2,5])", signatureError) - expected) < 1e-12 && signatureError.empty());
+            assert(evaluate(name + "(empty_array_result)", signatureError) == 0 && signatureError.empty());
+        }
+        assert(engineState().user_arrays.at("ast_statistics") == std::vector<double>({1,2,2,5}));
+        assert(evaluate("ast_script_call(1)+sum(ast_statistics)", signatureError) == 12 && signatureError.empty());
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());

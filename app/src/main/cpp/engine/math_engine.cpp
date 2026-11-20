@@ -719,58 +719,7 @@ std::string preprocessVectorStats(const std::string& s) {
             auto vec = parseArrayExpr(arg, is_arr, parse_err);
 
             if (is_arr && parse_err.empty() && !vec.empty()) {
-                double computed_val = 0.0;
-                if (fname == "mean") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    computed_val = sum / vec.size();
-                } else if (fname == "sum") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    computed_val = sum;
-                } else if (fname == "prod") {
-                    double prod = 1.0;
-                    for (double v : vec) prod *= v;
-                    computed_val = prod;
-                } else if (fname == "min") {
-                    double m = vec[0];
-                    for (double v : vec) if (v < m) m = v;
-                    computed_val = m;
-                } else if (fname == "max") {
-                    double m = vec[0];
-                    for (double v : vec) if (v > m) m = v;
-                    computed_val = m;
-                } else if (fname == "median") {
-                    std::vector<double> sorted = vec;
-                    std::sort(sorted.begin(), sorted.end());
-                    size_t sz = sorted.size();
-                    if (sz % 2 == 0) computed_val = (sorted[sz/2 - 1] + sorted[sz/2]) / 2.0;
-                    else computed_val = sorted[sz/2];
-                } else if (fname == "mode") {
-                    std::map<double, int> counts;
-                    for (double v : vec) counts[v]++;
-                    double bval = vec[0];
-                    int maxc = 0;
-                    for (const auto& kv : counts) {
-                        if (kv.second > maxc) { maxc = kv.second; bval = kv.first; }
-                    }
-                    computed_val = bval;
-                } else if (fname == "var") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    double m = sum / vec.size();
-                    double vsum = 0.0;
-                    for (double v : vec) vsum += (v - m) * (v - m);
-                    computed_val = (vec.size() > 1) ? vsum / (vec.size() - 1) : 0.0;
-                } else if (fname == "std") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    double m = sum / vec.size();
-                    double vsum = 0.0;
-                    for (double v : vec) vsum += (v - m) * (v - m);
-                    double var_v = (vec.size() > 1) ? vsum / (vec.size() - 1) : 0.0;
-                    computed_val = std::sqrt(var_v);
-                }
+                const double computed_val = expression::evaluateStatistic(*expression::vectorStatistic(fname), vec);
 
                 std::string rep = fmtInternal(computed_val);
                 res.replace(fpos, close - fpos + 1, rep);
@@ -2064,62 +2013,10 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                 if (func_name == "len") {
                     is_array = false;
                     return {(double)arg_vec.size()};
-                } else if (func_name == "mean") {
+                }
+                if (const auto statistic = expression::vectorStatistic(func_name)) {
                     is_array = false;
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    return {arg_vec.empty() ? 0.0 : sum / arg_vec.size()};
-                } else if (func_name == "sum") {
-                    is_array = false;
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    return {sum};
-                } else if (func_name == "prod") {
-                    is_array = false;
-                    double prod = 1.0;
-                    for (double v : arg_vec) prod *= v;
-                    return {arg_vec.empty() ? 0.0 : prod};
-                } else if (func_name == "min") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double m = arg_vec[0];
-                    for (double v : arg_vec) if (v < m) m = v;
-                    return {m};
-                } else if (func_name == "max") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double m = arg_vec[0];
-                    for (double v : arg_vec) if (v > m) m = v;
-                    return {m};
-                } else if (func_name == "median") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    std::vector<double> sorted = arg_vec;
-                    std::sort(sorted.begin(), sorted.end());
-                    size_t sz = sorted.size();
-                    if (sz % 2 == 0) return {(sorted[sz/2 - 1] + sorted[sz/2]) / 2.0};
-                    else return {sorted[sz/2]};
-                } else if (func_name == "mode") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    std::map<double, int> counts;
-                    for (double v : arg_vec) counts[v]++;
-                    double bval = arg_vec[0];
-                    int maxc = 0;
-                    for (const auto& kv : counts) {
-                        if (kv.second > maxc) { maxc = kv.second; bval = kv.first; }
-                    }
-                    return {bval};
-                } else if (func_name == "std" || func_name == "var") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    double m = sum / arg_vec.size();
-                    double vsum = 0.0;
-                    for (double v : arg_vec) vsum += (v - m) * (v - m);
-                    double var_v = (arg_vec.size() > 1) ? vsum / (arg_vec.size() - 1) : 0.0;
-                    return {(func_name == "std") ? std::sqrt(var_v) : var_v};
+                    return {expression::evaluateStatistic(*statistic, arg_vec)};
                 }
                 is_array = true;
                 std::vector<double> res(arg_vec.size());
