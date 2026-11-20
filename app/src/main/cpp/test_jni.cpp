@@ -249,6 +249,12 @@ int main() {
         assert(evaluate("after_invalid_for", stepError) == 7 && stepError.empty());
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("Err: Mismatched for syntax") != std::string::npos; }));
+        for (const auto& header : {"if(1) {", "while(1) {"}) {
+            runScript(std::string("unclosed_block_body=0; ") + header + " unclosed_block_body=1");
+            assert(evaluate("unclosed_block_body", stepError) == 0 && stepError.empty());
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err: Mismatched") != std::string::npos; }));
+        }
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

@@ -439,11 +439,11 @@ void runScript(const std::string& code) {
                     }
                 } else {
                     engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
-                    ip++;
+                    ip = afterScriptBlock(lines, ip);
                 }
             } else {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
-                ip++;
+                ip = afterScriptBlock(lines, ip);
             }
         }
         // } else if (cond) { / else if (cond) { / } elif (cond) { / elif (cond) {
@@ -543,11 +543,11 @@ void runScript(const std::string& code) {
                     }
                 } else {
                     engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
-                    ip++;
+                    ip = afterScriptBlock(lines, ip);
                 }
             } else {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched while");
-                ip++;
+                ip = afterScriptBlock(lines, ip);
             }
         }
         // for (init; cond; step) {
