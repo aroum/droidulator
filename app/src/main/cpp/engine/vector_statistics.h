@@ -75,4 +75,30 @@ inline double vectorDot(const std::vector<double>& left, const std::vector<doubl
     }
     return std::inner_product(left.begin(), left.end(), right.begin(), 0.0);
 }
+
+inline std::vector<double> vectorElementwise(std::string_view operation,
+    const std::vector<double>* left, double leftScalar,
+    const std::vector<double>* right, double rightScalar, std::string& error) {
+    if (left && right && left->size() != right->size()) {
+        error = "Array size mismatch (" + std::to_string(left->size()) + " vs " + std::to_string(right->size()) + ")";
+        return {};
+    }
+    const size_t count = left ? left->size() : right ? right->size() : 0;
+    std::vector<double> result(count);
+    for (size_t i = 0; i < count; ++i) {
+        const double a = left ? (*left)[i] : leftScalar;
+        const double b = right ? (*right)[i] : rightScalar;
+        if (operation == "+") result[i] = a + b;
+        else if (operation == "-") result[i] = a - b;
+        else if (operation == ".*" || (operation == "*" && !(left && right))) result[i] = a * b;
+        else if (operation == "./" || (operation == "/" && !(left && right))) {
+            if (b == 0.0) { error = "Division by zero"; return {}; }
+            result[i] = a / b;
+        } else {
+            error = "Invalid operator: " + std::string(operation);
+            return {};
+        }
+    }
+    return result;
+}
 }

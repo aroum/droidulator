@@ -2167,82 +2167,16 @@ static std::vector<double> evaluateArrayBinaryOpParsed(const std::string& op1_st
         }
     }
 
-    if (is_op1_arr && is_op2_arr) {
-        if (op1_arr.size() != op2_arr.size()) {
-            err = "Array size mismatch (" + std::to_string(op1_arr.size()) + " vs " + std::to_string(op2_arr.size()) + ")";
-            return {};
-        }
-        
-        if (op_str == "*") {
-            is_scalar_result = true;
-            scalar_val = expression::vectorDot(op1_arr, op2_arr, err);
-            return {};
-        }
-        
-        std::vector<double> res(op1_arr.size());
-        for (size_t i = 0; i < op1_arr.size(); ++i) {
-            if (op_str == ".*") {
-                res[i] = op1_arr[i] * op2_arr[i];
-            } else if (op_str == "./") {
-                if (op2_arr[i] == 0.0) {
-                    err = "Division by zero";
-                    return {};
-                }
-                res[i] = op1_arr[i] / op2_arr[i];
-            } else if (op_str == "+") {
-                res[i] = op1_arr[i] + op2_arr[i];
-            } else if (op_str == "-") {
-                res[i] = op1_arr[i] - op2_arr[i];
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
+    if (is_op1_arr && is_op2_arr && op_str == "*") {
+        is_scalar_result = true;
+        scalar_val = expression::vectorDot(op1_arr, op2_arr, err);
+        return {};
     }
-    else if (is_op1_arr && !is_op2_arr) {
-        std::vector<double> res(op1_arr.size());
-        for (size_t i = 0; i < op1_arr.size(); ++i) {
-            if (op_str == "*" || op_str == ".*") {
-                res[i] = op1_arr[i] * op2_scalar;
-            } else if (op_str == "/" || op_str == "./") {
-                if (op2_scalar == 0.0) {
-                    err = "Division by zero";
-                    return {};
-                }
-                res[i] = op1_arr[i] / op2_scalar;
-            } else if (op_str == "+") {
-                res[i] = op1_arr[i] + op2_scalar;
-            } else if (op_str == "-") {
-                res[i] = op1_arr[i] - op2_scalar;
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
+    if (is_op1_arr || is_op2_arr) {
+        return expression::vectorElementwise(op_str, is_op1_arr ? &op1_arr : nullptr, op1_scalar,
+            is_op2_arr ? &op2_arr : nullptr, op2_scalar, err);
     }
-    else if (!is_op1_arr && is_op2_arr) {
-        std::vector<double> res(op2_arr.size());
-        for (size_t i = 0; i < op2_arr.size(); ++i) {
-            if (op_str == "*" || op_str == ".*") {
-                res[i] = op1_scalar * op2_arr[i];
-            } else if (op_str == "/" || op_str == "./") {
-                if (op2_arr[i] == 0.0) { err = "Division by zero"; return {}; }
-                res[i] = op1_scalar / op2_arr[i];
-            } else if (op_str == "+") {
-                res[i] = op1_scalar + op2_arr[i];
-            } else if (op_str == "-") {
-                res[i] = op1_scalar - op2_arr[i];
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
-    }
-    
-    else if (!is_op1_arr && !is_op2_arr) {
+    {
         if (op1_str.empty() && op_str == "-") {
             is_scalar_result = true;
             scalar_val = -op2_scalar;

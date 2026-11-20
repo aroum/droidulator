@@ -482,6 +482,21 @@ int main() {
             return expression::ArithmeticExpression::evaluate(source, signatureError,
                 lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
         };
+        assert(evaluateLiteralAst("sum([1,2]+[3,4])") == 10 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(2*[1,2]-1)") == 4 && signatureError.empty());
+        assert(evaluateLiteralAst("dot([1,2]+1,[3,4])") == 18 && signatureError.empty());
+        assert(evaluateLiteralAst("([2,4]./[1,2])[2]") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(1./[2,4])") == 0.75 && signatureError.empty());
+        assert(evaluateLiteralAst("[1,2]*[3,4]") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([1,2].*[3,4])") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("len([]+[])") == 0 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,sum([1,2]./[0,0]),9)") == 9 && signatureError.empty());
+        const auto mismatchedArray = evaluateLiteralAst("sum([1]+[1,2])");
+        assert(mismatchedArray && std::isnan(*mismatchedArray) && signatureError == "Array size mismatch (1 vs 2)");
+        const auto invalidArrayDivision = evaluateLiteralAst("sum([1]/[1])");
+        assert(invalidArrayDivision && std::isnan(*invalidArrayDivision) && signatureError == "Invalid operator: /");
+        const auto zeroArrayDivision = evaluateLiteralAst("sum(1./[0])");
+        assert(zeroArrayDivision && std::isnan(*zeroArrayDivision) && signatureError == "Division by zero");
         for (const auto& [name, expected] : statistics) {
             const auto result = evaluateLiteralAst(name + "([1,2,2,5])");
             assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());

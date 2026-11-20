@@ -39,11 +39,27 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
-            return argument.op == 'b' || (arrays && !argument.op && !argument.symbol.empty() &&
+            return argument.op == 'b' || argument.op == 't' || argument.op == 'a' || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
         // Bind array consumers before scalar name lookup.
         for (auto& node : parser.nodes) {
+            if (node.op == '+' || node.op == '-' || node.op == '*' || node.op == '/' || node.op == 'J' || node.op == 'K') {
+                const bool leftArray = isArrayNode(node.left);
+                const bool rightArray = isArrayNode(node.right);
+                if (leftArray || rightArray) {
+                    if (leftArray && rightArray && node.op == '*') node.op = 'd';
+                    else {
+                        node.arrayOperation = node.op;
+                        node.op = 't';
+                        node.arraySlot = parser.literalArrays.size();
+                        parser.literalArrays.emplace_back();
+                    }
+                    if (leftArray && !parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
+                    if (rightArray && !parser.nodes[node.right].op) parser.nodes[node.right].op = 'a';
+                }
+                continue;
+            }
             if (node.op == 'i') {
                 if (!isArrayNode(node.left)) return std::nullopt;
                 if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
@@ -78,20 +94,21 @@ public:
         }
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
-            if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i') consumedArrays[node.left] = true;
-            if (node.op == 'd') consumedArrays[node.right] = true;
+            if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i' || node.op == 't') consumedArrays[node.left] = true;
+            if (node.op == 'd' || node.op == 't') consumedArrays[node.right] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b') && !consumedArrays[i]) return std::nullopt;
+            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't') && !consumedArrays[i]) return std::nullopt;
         const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
             const auto& node = parser.nodes[index];
             if (node.op == 'b') return &parser.literalArrays[node.left];
+            if (node.op == 't') return &parser.literalArrays[node.arraySlot];
             return arrays ? arrays(node.symbol) : nullptr;
         };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -198,6 +215,20 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 't') {
+                const auto left = isArrayNode(node.left) ? arrayValue(node.left) : nullptr;
+                const auto right = isArrayNode(node.right) ? arrayValue(node.right) : nullptr;
+                if ((isArrayNode(node.left) && !left) || (isArrayNode(node.right) && !right)) {
+                    error = "Array not defined";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                const char operation = node.arrayOperation;
+                const auto text = operation == 'J' ? std::string(".*") : operation == 'K' ? std::string("./") : std::string(1, operation);
+                parser.literalArrays[node.arraySlot] = vectorElementwise(text, left, parser.nodes[node.left].value,
+                    right, parser.nodes[node.right].value, error);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
             if (node.op == 'i') {
                 const auto& source = parser.nodes[node.left];
                 node.value = indexedValue(arrayValue(node.left), parser.nodes[node.right].value,
@@ -309,6 +340,7 @@ public:
                 case 'f': node.value = node.function(left); break;
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
+                case 'J':
                 case '*': node.value = left * right; break;
                 case 'n':
                     if (!std::isfinite(left)) {
@@ -319,6 +351,7 @@ public:
                     break;
                 case '%': node.value = node.binaryFunction(left, right); break;
                 case '^': node.value = std::pow(left, right); break;
+                case 'K':
                 case '/':
                     if (right == 0) {
                         error = "Division by Zero";
@@ -359,6 +392,8 @@ private:
         VariadicFunction variadicFunction = nullptr;
         CustomFunction customFunction;
         VectorStatistic statistic = VectorStatistic::Sum;
+        char arrayOperation = 0;
+        size_t arraySlot = 0;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -394,6 +429,8 @@ private:
         if (op == ">") return {'I', 9, true};
         if (op == "+" || op == "-") return {op.front(), 10};
         if (op == "*" || op == "/" || op == "%") return {op.front(), 11};
+        if (op == ".*") return {'J', 11};
+        if (op == "./") return {'K', 11};
         if (op == "^") return {'^', 12};
         return {0, -1};
     }
