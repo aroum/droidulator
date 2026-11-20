@@ -45,6 +45,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onDestroy() {
         if (replOutputDelegate.isInitialized()) replOutput.close()
+        if (helpPanelDelegate.isInitialized()) helpPanel.close()
         activeDialogs.toList().forEach { it.dismiss() }
         activeDialogs.clear()
         super.onDestroy()
@@ -425,7 +426,8 @@ class MainActivity : AppCompatActivity() {
 
     private val libraryPanel by lazy { LibraryPanel(this, itemsContainer, menuCards) }
 
-    private val helpPanel by lazy { HelpPanel(itemsContainer, menuCards, dialogs) }
+    private val helpPanelDelegate = lazy { HelpPanel(itemsContainer, menuCards, dialogs, session) }
+    private val helpPanel by helpPanelDelegate
 
     private val unitsPanel by lazy { UnitsPanel(this, itemsContainer, menuCards, dialogs) }
 
@@ -1111,6 +1113,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshTabContent(tabName: String) {
+        if (helpPanelDelegate.isInitialized()) helpPanel.cancel()
         findViewById<View>(R.id.search_toggle).visibility = if (tabName in searchableTabs) View.VISIBLE else View.GONE
         dismissErrorOverlay()
         btnAddItem.visibility = View.GONE
@@ -1188,7 +1191,7 @@ class MainActivity : AppCompatActivity() {
         itemsContainer.removeAllViews()
 
         when (tabName) {
-            "Help" -> helpPanel.render(session.engine)
+            "Help" -> helpPanel.render(::filterCards)
             "Variables", "Constants" -> {
                 val constants = tabName == "Constants"
                 libraryPanel.renderValues(
