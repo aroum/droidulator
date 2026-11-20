@@ -140,7 +140,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 || line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
             const bool isFor = line.rfind("for", 0) == 0;
             const size_t open = line.find('(');
-            const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
+            const size_t close = findScriptHeaderClose(line, open);
             const size_t end = findMatchingBlockEnd(lines, ip);
             if (open == std::string::npos || close == std::string::npos || end == std::string::npos) { err = "Mismatched loop"; break; }
             auto existing = std::find_if(blocks.begin(), blocks.end(), [&](const FnBlock& b) { return b.start_ip == ip && (b.type == "for" || b.type == "while"); });
@@ -168,7 +168,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
 
         if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
             size_t open_p = line.find('(');
-            const size_t close_p = open_p == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_p);
+            const size_t close_p = findScriptHeaderClose(line, open_p);
             size_t end_ip = findMatchingBlockEnd(lines, ip);
             if (open_p != std::string::npos && close_p != std::string::npos && end_ip != std::string::npos) {
                 std::string cond_str = line.substr(open_p + 1, close_p - open_p - 1);
@@ -191,7 +191,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             if (blocks.empty() || blocks.back().type != "if") { err = "Unmatched else if"; break; }
             if (blocks.back().condition_met) { ip = blocks.back().end_ip; continue; }
             const size_t open = line.find('(');
-            const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
+            const size_t close = findScriptHeaderClose(line, open);
             if (open == std::string::npos || close == std::string::npos || close <= open) { err = "Invalid else if"; break; }
             const double value = evaluate(line.substr(open + 1, close - open - 1), err);
             if (!err.empty()) break;

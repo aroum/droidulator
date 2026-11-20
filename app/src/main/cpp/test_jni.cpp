@@ -255,6 +255,16 @@ int main() {
             assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
                 [](const std::string& line) { return line.find("L:1 Err: Mismatched") != std::string::npos; }));
         }
+        for (const auto& header : {"if(1) ignored {", "while(1) ignored {", "for(;;) ignored {"}) {
+            runScript(std::string("invalid_header_body=0; ") + header + " invalid_header_body=1 }; after_header_error=7");
+            assert(evaluate("invalid_header_body", stepError) == 0 && stepError.empty());
+            assert(evaluate("after_header_error", stepError) == 7 && stepError.empty());
+            runScript(std::string("fn fn_invalid_block(x) { ") + header + " print(999) }; return x }");
+            engineState().script_console_output.clear();
+            evaluate("fn_invalid_block (1)", stepError);
+            assert(!stepError.empty());
+            assert(engineState().script_console_output.empty());
+        }
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

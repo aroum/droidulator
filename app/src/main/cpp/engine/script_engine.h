@@ -5,6 +5,15 @@
 #include <algorithm>
 #include <cctype>
 #include "app_state.h"
+#include "expression_tokens.h"
+
+inline size_t findScriptHeaderClose(std::string_view line, size_t open) {
+    if (open == std::string_view::npos) return std::string_view::npos;
+    const auto close = expression::matchingGroupEnd(line, open);
+    if (close == std::string_view::npos || expression::trim(line.substr(close + 1)) != "{")
+        return std::string_view::npos;
+    return close;
+}
 
 inline bool isBlockStart(const std::string& line) {
     if (line.empty()) return false;

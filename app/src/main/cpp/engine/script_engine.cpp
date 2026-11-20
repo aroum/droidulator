@@ -410,7 +410,7 @@ void runScript(const std::string& code) {
         // if (cond) {
         else if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
             size_t open_paren = line.find('(');
-            const size_t close_paren = open_paren == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_paren);
+            const size_t close_paren = findScriptHeaderClose(line, open_paren);
             if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
                 std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
                 cond_str.erase(0, cond_str.find_first_not_of(" \t"));
@@ -454,7 +454,7 @@ void runScript(const std::string& code) {
                     ip = blocks.back().end_ip;
                 } else {
                     size_t open_paren = line.find('(');
-                    const size_t close_paren = open_paren == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_paren);
+                    const size_t close_paren = findScriptHeaderClose(line, open_paren);
                     if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
                         std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
                         cond_str.erase(0, cond_str.find_first_not_of(" \t"));
@@ -514,7 +514,7 @@ void runScript(const std::string& code) {
             }
             
             size_t open_paren = line.find('(');
-            const size_t close_paren = open_paren == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_paren);
+            const size_t close_paren = findScriptHeaderClose(line, open_paren);
             if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
                 std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
                 cond_str.erase(0, cond_str.find_first_not_of(" \t"));
@@ -563,7 +563,7 @@ void runScript(const std::string& code) {
             }
 
             size_t open_paren = line.find('(');
-            const size_t close_paren = open_paren == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_paren);
+            const size_t close_paren = findScriptHeaderClose(line, open_paren);
             if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
                 std::string inner = line.substr(open_paren + 1, close_paren - open_paren - 1);
                 const auto header = expression::splitArguments(inner, ';', 3);
