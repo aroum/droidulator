@@ -242,6 +242,13 @@ int main() {
         assert(expression::splitArguments("x=(1;0;x++", ';', 3).empty());
         runScript("fn fn_multiple_steps(x) { n=0; for(i=0;i<x;i++;n++) {}; return n }");
         assert(evaluate("fn_multiple_steps (3)", stepError) == 3 && stepError.empty());
+        runScript("empty_for_count=0; for(;;) { empty_for_count++; if(empty_for_count==3) { break } }");
+        assert(evaluate("empty_for_count", stepError) == 3 && stepError.empty());
+        runScript("invalid_for_body=0; for(i=0;i<3) { invalid_for_body=1 }; after_invalid_for=7");
+        assert(evaluate("invalid_for_body", stepError) == 0 && stepError.empty());
+        assert(evaluate("after_invalid_for", stepError) == 7 && stepError.empty());
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("Err: Mismatched for syntax") != std::string::npos; }));
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

@@ -77,6 +77,11 @@ static bool evaluateScriptCondition(const std::string& condition, std::string& e
     return error.empty() && !std::isnan(value) && value != 0.0;
 }
 
+static size_t afterScriptBlock(const std::vector<std::string>& lines, size_t start) {
+    const auto end = findMatchingBlockEnd(lines, start);
+    return end == std::string::npos ? lines.size() : end + 1;
+}
+
 static bool handleScriptFunctionDeclaration(
     const std::vector<std::string>& lines, size_t sourceLine, size_t& ip
 ) {
@@ -569,7 +574,7 @@ void runScript(const std::string& code) {
                             executeScriptAssignments(init_str, err);
                         }
 
-                        const bool cond_bool = err.empty() && evaluateScriptCondition(cond_str, err);
+                        const bool cond_bool = err.empty() && (cond_str.empty() || evaluateScriptCondition(cond_str, err));
                         if (!err.empty()) {
                             engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                             if (found_block) blocks.erase(blocks.begin() + block_idx);
@@ -588,15 +593,15 @@ void runScript(const std::string& code) {
                         }
                     } else {
                         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
-                        ip++;
+                        ip = afterScriptBlock(lines, ip);
                     }
                 } else {
                     engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
-                    ip++;
+                    ip = afterScriptBlock(lines, ip);
                 }
             } else {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for");
-                ip++;
+                ip = afterScriptBlock(lines, ip);
             }
         }
         else if (isBlockEnd(line)) {
