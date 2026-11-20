@@ -153,37 +153,41 @@ static bool handleScriptFunctionDeclaration(
     return true;
 }
 
-static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) {
-    auto& state = engineState();
-    expressionText.erase(0, expressionText.find_first_not_of(" \t"));
-    expressionText.erase(expressionText.find_last_not_of(" \t") + 1);
-    if (expressionText.empty()) expressionText = "0";
-
+std::vector<double> evaluateScriptReturnValues(const std::string& text, bool& isArray, std::string& error) {
+    error.clear();
+    isArray = false;
+    const std::string expressionText = expression::trim(text).empty() ? "0" : std::string(expression::trim(text));
     const auto parts = expression::splitArguments(expressionText);
-    std::string error;
-    bool isArray = false;
-    std::vector<double> values;
+    if (parts.empty()) {
+        error = "Invalid return expression";
+        return {};
+    }
     if (parts.size() > 1) {
         isArray = true;
+        std::vector<double> values;
         values.reserve(parts.size());
-        for (auto part : parts) {
-            part.erase(0, part.find_first_not_of(" \t"));
-            part.erase(part.find_last_not_of(" \t") + 1);
-            const auto expanded = preprocessArrayLookups(part, error);
-            if (!error.empty()) break;
-            const double value = evaluate(expanded, error);
-            if (!error.empty()) break;
+        for (const auto& part : parts) {
+            if (part.empty()) {
+                error = "Empty return value";
+                return {};
+            }
+            const double value = evaluate(part, error);
+            if (!error.empty()) return {};
             values.push_back(value);
         }
-    } else {
-        values = parseArrayExpr(expressionText, isArray, error);
-        if (!isArray || !error.empty()) {
-            isArray = false;
-            error.clear();
-            const auto expanded = preprocessArrayLookups(expressionText, error);
-            if (error.empty()) values = {evaluate(expanded, error)};
-        }
+        return values;
     }
+    auto values = parseArrayExpr(expressionText, isArray, error);
+    if (!error.empty() || isArray || !values.empty()) return values;
+    const double value = evaluate(expressionText, error);
+    return error.empty() ? std::vector<double>{value} : std::vector<double>{};
+}
+
+static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) {
+    auto& state = engineState();
+    std::string error;
+    bool isArray = false;
+    auto values = evaluateScriptReturnValues(expressionText, isArray, error);
 
     state.script_return_val = values.empty() ? 0.0 : values.front();
     state.script_return_vec = std::move(values);

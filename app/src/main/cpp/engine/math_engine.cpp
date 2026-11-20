@@ -120,24 +120,9 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             continue;
         }
 
-        if (line.rfind("return ", 0) == 0 || line == "return") {
-            std::string ret_expr = (line.size() > 7) ? line.substr(7) : "0";
-            ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-            ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-            if (ret_expr.empty()) ret_expr = "0";
-            const auto parts = expression::splitArguments(ret_expr);
-            std::vector<double> values;
-            if (parts.size() == 1) {
-                bool array = false;
-                values = parseArrayExpr(parts[0], array, err);
-                if (!err.empty()) break;
-                if (!array) values = {evaluate(parts[0], err)};
-            } else {
-                for (const auto& part : parts) {
-                    values.push_back(evaluate(part, err));
-                    if (!err.empty()) break;
-                }
-            }
+        if (line.rfind("return", 0) == 0 && (line.size() == 6 || std::isspace(static_cast<unsigned char>(line[6])))) {
+            bool array = false;
+            auto values = evaluateScriptReturnValues(line.substr(6), array, err);
             if (!err.empty()) break;
             ret_val = values.empty() ? 0.0 : values.front();
             if (returnValues) *returnValues = std::move(values);

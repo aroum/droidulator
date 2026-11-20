@@ -338,6 +338,15 @@ int main() {
         assert(evaluate("fn_header_constant", signatureError) == 7 && signatureError.empty());
         assert(!executeScriptAssignments("pi=0", signatureError));
         assert(signatureError == "Reserved name: pi");
+        runScript("fn fn_tab_return(x) { return\tx+1 }");
+        assert(evaluate("fn_tab_return (2)", signatureError) == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        bool returnArray = false;
+        const auto scalarReturn = evaluateScriptReturnValues("sum([ast_print_once(1),2])", returnArray, signatureError);
+        assert(scalarReturn == std::vector<double>({3}) && !returnArray && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        evaluateScriptReturnValues("1,", returnArray, signatureError);
+        assert(signatureError == "Empty return value");
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));

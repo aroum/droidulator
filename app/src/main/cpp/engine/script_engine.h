@@ -192,3 +192,4 @@ inline std::vector<std::string> splitIntoStatements(const std::string& code, std
 
 void runScript(const std::string& code);
 bool executeScriptAssignments(const std::string& statements, std::string& error);
+std::vector<double> evaluateScriptReturnValues(const std::string& expression, bool& isArray, std::string& error);
