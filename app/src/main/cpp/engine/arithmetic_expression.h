@@ -36,6 +36,10 @@ public:
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
+            if (node.op == '%') {
+                if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
+                continue;
+            }
             if (node.symbol.empty()) continue;
             if (node.op == 'l') {
                 if (!arrays || (lookup && lookup(node.symbol))) return std::nullopt;
@@ -155,6 +159,7 @@ public:
                 case '+': node.value = left + right; break;
                 case '-': node.value = left - right; break;
                 case '*': node.value = left * right; break;
+                case '%': node.value = node.binaryFunction(left, right); break;
                 case '^': node.value = std::pow(left, right); break;
                 case '/':
                     if (right == 0) {
@@ -215,7 +220,7 @@ private:
         if (op == "<") return {'H', 8, true};
         if (op == ">") return {'I', 9, true};
         if (op == "+" || op == "-") return {op.front(), 10};
-        if (op == "*" || op == "/") return {op.front(), 11};
+        if (op == "*" || op == "/" || op == "%") return {op.front(), 11};
         if (op == "^") return {'^', 12};
         return {0, -1};
     }
@@ -301,6 +306,12 @@ private:
             const auto op = binaryOperator(tokens[next].text);
             if (op.precedence < minimum) break;
             ++next;
+            if (op.opcode == '%' && (next == tokens.size() ||
+                (tokens[next].kind != Kind::Number && tokens[next].kind != Kind::ScaledNumber &&
+                 tokens[next].kind != Kind::Word && tokens[next].text != "(" && tokens[next].text != "["))) {
+                // A sign after % starts a new term following a postfix percentage.
+                return invalid;
+            }
             const auto right = parse(op.precedence + (op.rightAssociative ? 0 : 1), depth + 1);
             if (right == invalid) return invalid;
             left = add({0, op.opcode, left, right});

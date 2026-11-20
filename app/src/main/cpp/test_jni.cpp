@@ -204,6 +204,11 @@ int main() {
         std::string modError, percentError;
         evaluate("mod(1,0)", modError); evaluate("1%0", percentError);
         assert(modError == "Division by Zero" && percentError == modError);
+        assert(evaluate("17%5*2", percentError) == 4 && percentError.empty());
+        assert(evaluate("17%(2+3)", percentError) == 2 && percentError.empty());
+        assert(evaluate("-17%5", percentError) == -2 && percentError.empty());
+        assert(evaluate("200+10%", percentError) == 220 && percentError.empty());
+        assert(std::abs(evaluate("17%-5", percentError) + 4.83) < 1e-12 && percentError.empty());
         engineState().user_args.clear(); engineState().user_arrays.clear(); engineState().user_funcs.clear();
     }
     {
