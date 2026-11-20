@@ -734,14 +734,7 @@ void runScript(const std::string& code) {
             }
             
             if (isReservedName(lhs)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + lhs); ip++; continue; }
-            bool is_const_assign = false;
-            for (const auto& cn : engineState().user_consts) {
-                if (cn.name == lhs) {
-                    is_const_assign = true;
-                    break;
-                }
-            }
-            if (is_const_assign) {
+            if (isScriptConstant(lhs)) {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
                 ip++;
                 continue;
