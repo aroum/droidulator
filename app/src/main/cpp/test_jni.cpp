@@ -265,6 +265,13 @@ int main() {
             assert(!stepError.empty());
             assert(engineState().script_console_output.empty());
         }
+        for (const auto& branch : {"else {", "elif(1) {", "if(0) {} elif(1) ignored {"}) {
+            runScript(std::string("invalid_branch_body=0; ") + branch + " invalid_branch_body=1 }; after_branch_error=7");
+            assert(evaluate("invalid_branch_body", stepError) == 0 && stepError.empty());
+            assert(evaluate("after_branch_error", stepError) == 7 && stepError.empty());
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        }
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

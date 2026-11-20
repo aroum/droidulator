@@ -479,12 +479,12 @@ void runScript(const std::string& code) {
                         }
                     } else {
                         engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
-                        ip++;
+                        ip = blocks.back().end_ip;
                     }
                 }
             } else {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
-                ip++;
+                ip = afterScriptBlock(lines, ip);
             }
         }
         // } else { / else {
@@ -498,7 +498,7 @@ void runScript(const std::string& code) {
                 }
             } else {
                 engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
-                ip++;
+                ip = afterScriptBlock(lines, ip);
             }
         }
         // while (cond) {
