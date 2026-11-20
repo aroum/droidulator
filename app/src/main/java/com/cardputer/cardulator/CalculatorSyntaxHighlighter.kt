@@ -5,6 +5,20 @@ import android.text.Spannable
 import android.text.style.ForegroundColorSpan
 import android.widget.EditText
 
+internal data class SyntaxColors(
+    val number: Int, val function: Int, val constant: Int,
+    val keyword: Int, val operation: Int, val error: Int,
+    val string: Int, val brackets: IntArray
+) {
+    companion object {
+        fun capture() = SyntaxColors(
+            ThemePalette.purple, ThemePalette.aqua, ThemePalette.yellow,
+            ThemePalette.red, ThemePalette.orange, ThemePalette.red,
+            ThemePalette.green, ThemePalette.rainbowColors.toIntArray()
+        )
+    }
+}
+
 internal class CalculatorSyntaxHighlighter {
     private val highlightingEditables = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Editable, Boolean>())
     private val pendingHighlight = java.util.WeakHashMap<EditText, Runnable>()
@@ -28,13 +42,15 @@ internal class CalculatorSyntaxHighlighter {
     }
 
     // --- Syntax Highlighting & Bracket Matching ---
-    fun highlight(ssb: Spannable, startOffset: Int, text: String) {
-        val numColor = ThemePalette.purple
-        val funcColor = ThemePalette.aqua
-        val constColor = ThemePalette.yellow
-        val keywordColor = ThemePalette.red
-        val opColor = ThemePalette.orange
-        val errColor = ThemePalette.red
+    // This method only touches the supplied text and palette, so detached output
+    // can be prepared on a worker while editor highlighting stays on the UI thread.
+    fun highlight(ssb: Spannable, startOffset: Int, text: String, palette: SyntaxColors = SyntaxColors.capture()) {
+        val numColor = palette.number
+        val funcColor = palette.function
+        val constColor = palette.constant
+        val keywordColor = palette.keyword
+        val opColor = palette.operation
+        val errColor = palette.error
         val masked = text.toCharArray()
         var quote: Char? = null
         var escaped = false
@@ -48,7 +64,7 @@ internal class CalculatorSyntaxHighlighter {
                 if (escaped) escaped = false
                 else if (c == '\\') escaped = true
                 else if (c == quote) {
-                    ssb.setSpan(ForegroundColorSpan(ThemePalette.green), startOffset + stringStart, startOffset + i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    ssb.setSpan(ForegroundColorSpan(palette.string), startOffset + stringStart, startOffset + i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
                     quote = null
                 }
             }
@@ -57,7 +73,7 @@ internal class CalculatorSyntaxHighlighter {
                 if (quote == null) stringStart = -1
             }
         }
-        if (quote != null) ssb.setSpan(ForegroundColorSpan(ThemePalette.green), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (quote != null) ssb.setSpan(ForegroundColorSpan(palette.string), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         val code = String(masked)
 
         for (match in SYNTAX_REGEX.findAll(code)) {
@@ -73,7 +89,7 @@ internal class CalculatorSyntaxHighlighter {
         }
 
         // 6. Rainbow Bracket Highlighting & Matching
-        val colors = ThemePalette.rainbowColors
+        val colors = palette.brackets
         val numColors = colors.size
         var stackSize = 0
         val maxStack = 64

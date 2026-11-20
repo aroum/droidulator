@@ -23,14 +23,17 @@ internal class ReplOutputController(
         val items = session.replDisplayItems.toList()
         val (message, showWelcome) = welcome()
         val (mode, precision, grouping) = formatSettings()
+        val palette = ReplOutputRenderer.Palette.capture()
         pending = session.compute({
             nativeSetFormatSettings(mode, precision, grouping)
-            ReplOutputRenderer.formatResults(items) { nativeFormatNumbers(it) }
+            val formatted = ReplOutputRenderer.formatResults(items) { nativeFormatNumbers(it) }
+            renderer.render(items, message, showWelcome, formatted, palette)
         }) { result ->
             if (closed || version != generation) return@compute
             pending = null
-            val formatted = result.getOrElse { items.map { it.rawOutput } }
-            output.text = renderer.render(items, message, showWelcome, formatted)
+            output.text = result.getOrElse {
+                renderer.render(items, message, showWelcome, items.map { it.rawOutput }, palette)
+            }
             scrollToEnd()
         }
     }
