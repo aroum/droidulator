@@ -54,6 +54,12 @@ public:
             if (node.op == 'c') {
                 const auto& arguments = parser.callArguments[node.right];
                 const auto arity = arguments.size();
+                if (node.symbol == "if" || node.symbol == "iff") {
+                    if ((node.symbol == "if" && arity != 3) || arity < 3 || arity % 2 == 0)
+                        return std::nullopt;
+                    node.op = 'q';
+                    continue;
+                }
                 // Four-argument reductions can bind their first argument as a loop index.
                 if (arity == 4 && (parser.nodes[arguments.front()].op == 0 || parser.nodes[arguments.front()].op == 'v') &&
                     !parser.nodes[arguments.front()].symbol.empty() &&
@@ -74,7 +80,67 @@ public:
             if (!value) return std::nullopt;
             node.op = 'v';
         }
-        for (auto& node : parser.nodes) {
+        // Evaluate only dependencies requested by the root. A conditional requests
+        // conditions in order and exactly one branch; inactive nodes never execute.
+        struct Frame { size_t index; size_t stage = 0; };
+        std::vector<Frame> work;
+        work.reserve(parser.nodes.size());
+        work.push_back({root});
+        std::vector<bool> complete(parser.nodes.size(), false);
+        while (!work.empty()) {
+            auto& frame = work.back();
+            const size_t index = frame.index;
+            auto& node = parser.nodes[index];
+            if (complete[index]) { work.pop_back(); continue; }
+            if (node.op == 'q') {
+                const auto& args = parser.callArguments[node.right];
+                size_t selected = args.back();
+                bool waiting = false;
+                while (frame.stage + 1 < args.size()) {
+                    const size_t condition = args[frame.stage];
+                    if (!complete[condition]) {
+                        work.push_back({condition});
+                        waiting = true;
+                        break;
+                    }
+                    const double value = parser.nodes[condition].value;
+                    if (!std::isfinite(value)) {
+                        error = std::isnan(value) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    if (std::abs(value) > 1e-12) {
+                        selected = args[frame.stage + 1];
+                        break;
+                    }
+                    frame.stage += 2;
+                }
+                if (waiting) continue;
+                if (!complete[selected]) {
+                    work.push_back({selected});
+                    continue;
+                }
+                node.value = parser.nodes[selected].value;
+                complete[index] = true;
+                work.pop_back();
+                continue;
+            }
+            if (frame.stage == 0) {
+                frame.stage = 1;
+                if (node.op == 'c') {
+                    const auto& args = parser.callArguments[node.right];
+                    for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
+                        if (!complete[*argument]) work.push_back({*argument});
+                } else if (node.op == 'f' || node.op == 'n' || node.op == '[') {
+                    if (!complete[node.left]) work.push_back({node.left});
+                } else if (node.op && node.op != 'v' && node.op != 'l') {
+                    if (!complete[node.right]) work.push_back({node.right});
+                    if (!complete[node.left]) work.push_back({node.left});
+                }
+                // Re-enter after the dependencies, including leaf nodes.
+                continue;
+            }
+            complete[index] = true;
+            work.pop_back();
             if (!node.op) continue;
             if (node.op == 'v') {
                 const auto value = lookup(node.symbol);
