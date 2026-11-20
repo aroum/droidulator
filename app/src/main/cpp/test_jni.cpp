@@ -383,6 +383,15 @@ int main() {
         assert(engineState().script_console_output.size() == 1);
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
+        runScript("assignment_preserved=[1,2]; assignment_preserved=unknown_assignment_value");
+        assert(engineState().user_arrays.at("assignment_preserved") == std::vector<double>({1,2}));
+        runScript("assignment_preserved=sum(assignment_preserved)");
+        assert(evaluate("assignment_preserved", signatureError) == 3 && signatureError.empty());
+        assert(engineState().user_arrays.count("assignment_preserved") == 0);
+        runScript("script_map_source=[1,4,9]; script_map_source=sqrt(script_map_source)");
+        assert(engineState().user_arrays.at("script_map_source") == std::vector<double>({1,2,3}));
+        runScript("script_map_formula(x)=x*x; script_map_result=script_map_formula(script_map_source)");
+        assert(engineState().user_arrays.at("script_map_result") == std::vector<double>({1,4,9}));
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
