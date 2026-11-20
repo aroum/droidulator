@@ -522,6 +522,25 @@ int main() {
         const auto typedScalar = expression::ArithmeticExpression::evaluate("2+3", signatureError,
             lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
         assert(typedScalar == 5 && !typedArray && signatureError.empty());
+        evaluateInput("script_map_formula(x)=x*x", signatureError, signatureDefinition);
+        assert(signatureError.empty());
+        const auto evaluateArrayAst = [&](const std::string& source) {
+            signatureError.clear();
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        };
+        assert(evaluateArrayAst("sqrt([1,4,9])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula([1,2,3])") && typedArray == std::vector<double>({1,4,9}) && signatureError.empty());
+        assert(evaluateArrayAst("ast_script_call([1,2,3])") && typedArray == std::vector<double>({2,4,6}) && signatureError.empty());
+        assert(evaluateArrayAst("sqrt([])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateLiteralAst("sum(sqrt([1,4,9]))") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("len(script_map_formula([2,3]))") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,sum(sqrt([1,4])),sum(sqrt([-1])))") == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateArrayAst("ast_print_once([1,2,3])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
+        runScript("map_error_preserved=[7]; map_error_preserved=sqrt([1,-1,4])");
+        assert(engineState().user_arrays.at("map_error_preserved") == std::vector<double>({7}));
         runScript("typed_ast_assignment=[ast_print_once(1),2]+[3,4]");
         assert(engineState().user_arrays.at("typed_ast_assignment") == std::vector<double>({4,6}));
         assert(engineState().script_console_output.size() == 1);

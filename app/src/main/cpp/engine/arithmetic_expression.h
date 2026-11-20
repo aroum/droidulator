@@ -41,7 +41,7 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
-            return argument.op == 'b' || argument.op == 't' || argument.op == 'a' || (arrays && !argument.op && !argument.symbol.empty() &&
+            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'a' || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
         // Bind array consumers before scalar name lookup.
@@ -84,19 +84,25 @@ public:
                 if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
                 continue;
             }
-            if (!variadic || !variadic(node.symbol)) continue;
+            if (args.size() != 1 || !isArrayNode(args.front())) continue;
             const auto statistic = vectorStatistic(node.symbol);
-            if (!statistic || args.size() != 1) continue;
-            auto& argument = parser.nodes[args.front()];
-            if (!isArrayNode(args.front())) continue;
-            if (!argument.op) argument.op = 'a';
-            node.op = 's';
+            if (statistic && variadic && variadic(node.symbol)) {
+                node.op = 's';
+                node.statistic = *statistic;
+            } else {
+                if (unary) node.function = unary(node.symbol);
+                if (!node.function && custom) node.customFunction = custom(node.symbol);
+                if (!node.function && !node.customFunction) continue;
+                node.op = 'u';
+                node.arraySlot = parser.literalArrays.size();
+                parser.literalArrays.emplace_back();
+            }
             node.left = args.front();
-            node.statistic = *statistic;
+            if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
-            if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i' || node.op == 't') consumedArrays[node.left] = true;
+            if (node.op == 's' || node.op == 'z' || node.op == 'd' || node.op == 'i' || node.op == 't' || node.op == 'u') consumedArrays[node.left] = true;
             if (node.op == 'd' || node.op == 't') consumedArrays[node.right] = true;
         }
         const bool rootArray = isArrayNode(root);
@@ -106,17 +112,17 @@ public:
             consumedArrays[root] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't') && !consumedArrays[i]) return std::nullopt;
+            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u') && !consumedArrays[i]) return std::nullopt;
         const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
             const auto& node = parser.nodes[index];
             if (node.op == 'b') return &parser.literalArrays[node.left];
-            if (node.op == 't') return &parser.literalArrays[node.arraySlot];
+            if (node.op == 't' || node.op == 'u') return &parser.literalArrays[node.arraySlot];
             return arrays ? arrays(node.symbol) : nullptr;
         };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -211,7 +217,7 @@ public:
                     const auto& args = parser.callArguments[node.right];
                     for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
                         if (!complete[*argument]) work.push_back({*argument});
-                } else if (node.op == 'f' || node.op == 'n' || node.op == '[' || node.op == 's' || node.op == 'z') {
+                } else if (node.op == 'f' || node.op == 'n' || node.op == '[' || node.op == 's' || node.op == 'z' || node.op == 'u') {
                     if (!complete[node.left]) work.push_back({node.left});
                 } else if (node.op && node.op != 'v' && node.op != 'l' && node.op != 'a') {
                     if (!complete[node.right]) work.push_back({node.right});
@@ -223,6 +229,30 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'u') {
+                const auto* source = arrayValue(node.left);
+                if (!source) {
+                    error = "Array not defined";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                // Script calls can restore the session array table while mapping.
+                std::vector<double> snapshot;
+                if (node.customFunction) { snapshot = *source; source = &snapshot; }
+                auto& values = parser.literalArrays[node.arraySlot];
+                values.reserve(source->size());
+                std::vector<double> argument(1);
+                for (double input : *source) {
+                    argument[0] = input;
+                    const double value = node.function ? node.function(input) : node.customFunction(argument, error);
+                    if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                    if (!std::isfinite(value)) {
+                        error = std::isnan(value) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    values.push_back(value);
+                }
+                continue;
+            }
             if (node.op == 't') {
                 const auto left = isArrayNode(node.left) ? arrayValue(node.left) : nullptr;
                 const auto right = isArrayNode(node.right) ? arrayValue(node.right) : nullptr;
@@ -378,7 +408,7 @@ public:
             const double first = values->empty() ? 0.0 : values->front();
             const auto& node = parser.nodes[root];
             if (node.op == 'b') *arrayResult = std::move(parser.literalArrays[node.left]);
-            else if (node.op == 't') *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
+            else if (node.op == 't' || node.op == 'u') *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
             else *arrayResult = *values;
             return first;
         }
