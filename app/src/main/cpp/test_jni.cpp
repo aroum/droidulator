@@ -273,6 +273,24 @@ int main() {
         evaluateInput("scaled_parameter(k)=1k+k", signatureError, signatureDefinition);
         assert(signatureError.empty());
         assert(evaluate("scaled_parameter(2)", signatureError) == 1002 && signatureError.empty());
+        // Whitespace in calls exercises AST dispatch rather than legacy text expansion.
+        assert(evaluate("scaled_parameter (2)", signatureError) == 1002 && signatureError.empty());
+        evaluateInput("formula_scope_value=10", signatureError, signatureDefinition);
+        evaluateInput("formula_inner(y)=formula_scope_value+y", signatureError, signatureDefinition);
+        evaluateInput("formula_outer(formula_scope_value)=formula_inner(2)+formula_scope_value", signatureError, signatureDefinition);
+        assert(evaluate("formula_outer (3)", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("formula_scope_value", signatureError) == 10 && signatureError.empty());
+        evaluateInput("formula_failure(formula_scope_value)=1/(formula_scope_value-3)", signatureError, signatureDefinition);
+        evaluate("formula_failure (3)", signatureError);
+        assert(signatureError == "Division by Zero");
+        assert(evaluate("formula_scope_value", signatureError) == 10 && signatureError.empty());
+        evaluateInput("formula_no_args()=42", signatureError, signatureDefinition);
+        assert(evaluate("formula_no_args ()+1", signatureError) == 43 && signatureError.empty());
+        evaluate("formula_inner ()", signatureError);
+        assert(signatureError == "Arg Count Mismatch");
+        evaluateInput("formula_unused_argument(x)=42", signatureError, signatureDefinition);
+        evaluate("formula_unused_argument (sqrt(-1))", signatureError);
+        assert(!signatureError.empty());
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));

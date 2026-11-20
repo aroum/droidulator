@@ -15,6 +15,16 @@ std::string preprocessVectorStats(const std::string& s);
 static thread_local size_t loopEvaluationDepth = 0;
 static thread_local size_t loopIterationsRemaining = 100000;
 static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
+// Formula arguments belong to the active call, never to the session's variables.
+static thread_local std::vector<std::vector<UserArg>> formulaBindings;
+
+static std::optional<double> formulaArgument(std::string_view name) {
+    if (!formulaBindings.empty()) {
+        for (const auto& argument : formulaBindings.back())
+            if (argument.name == name) return argument.val;
+    }
+    return std::nullopt;
+}
 
 std::vector<UserFunc> getParsedUserFuncs() {
     std::vector<UserFunc> res;
@@ -1127,6 +1137,7 @@ static const std::map<std::string, VariadicBuiltin>& variadicFunctions() {
 }
 
 static bool shadowsBuiltin(std::string_view name) {
+    if (formulaArgument(name)) return true;
     const auto& state = engineState();
     for (const auto& variable : state.user_args)
         if (variable.name == name) return true;
@@ -1159,12 +1170,14 @@ static expression::ArithmeticExpression::VariadicFunction lookupVariadic(std::st
 }
 
 static const std::vector<double>* lookupArray(std::string_view name) {
+    if (formulaArgument(name)) return nullptr;
     const auto& arrays = engineState().user_arrays;
     const auto found = arrays.find(std::string(name));
     return found == arrays.end() ? nullptr : &found->second;
 }
 
 static std::optional<double> lookupScalar(std::string_view name) {
+    if (const auto argument = formulaArgument(name)) return argument;
     const auto& state = engineState();
     if (name.size() > 1 && name.front() == 'e') {
         size_t number = 0;
@@ -1187,6 +1200,35 @@ static std::optional<double> lookupScalar(std::string_view name) {
     return std::nullopt;
 }
 
+static expression::ArithmeticExpression::CustomFunction lookupFormula(std::string_view name) {
+    if (formulaArgument(name)) return {};
+    for (const auto& function : engineState().user_script_funcs)
+        if (function.name == name) return {};
+    for (const auto& function : getParsedUserFuncs()) {
+        if (function.name != name) continue;
+        return [function](const std::vector<double>& values, std::string& error) {
+            if (values.size() != function.params.size()) {
+                error = "Arg Count Mismatch";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            if (formulaBindings.size() >= 64) {
+                error = "Function recursion limit exceeded";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            std::vector<UserArg> arguments;
+            arguments.reserve(values.size());
+            for (size_t i = 0; i < values.size(); ++i)
+                arguments.push_back({function.params[i], values[i]});
+            formulaBindings.push_back(std::move(arguments));
+            struct BindingScope {
+                ~BindingScope() { formulaBindings.pop_back(); }
+            } scope;
+            return evaluate(function.body, error);
+        };
+    }
+    return {};
+}
+
 double evaluate(const std::string& expr_str, std::string& err) {
     struct LoopBudgetScope {
         LoopBudgetScope() { if (loopEvaluationDepth++ == 0) loopIterationsRemaining = 100000; }
@@ -1206,7 +1248,7 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic)) {
+    if (const auto arithmetic = expression::ArithmeticExpression::evaluate(expr_str, err, lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupFormula)) {
         if (!engineState().g_math_domain_err.empty()) err = engineState().g_math_domain_err;
         return *arithmetic;
     }
@@ -1286,6 +1328,10 @@ double evaluate(const std::string& expr_str, std::string& err) {
         for (size_t i = start_h; i < historySnapshot.size(); ++i) {
             add_dyn_var("e" + std::to_string(firstHistoryNumber + i), &historySnapshot[i]);
         }
+    }
+
+    if (!formulaBindings.empty()) {
+        for (const auto& argument : formulaBindings.back()) add_dyn_var(argument.name, &argument.val);
     }
     
     double val = s_tep.evaluate(preprocessed);
