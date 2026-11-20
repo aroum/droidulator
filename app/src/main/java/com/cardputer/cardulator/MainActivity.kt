@@ -417,6 +417,8 @@ class MainActivity : AppCompatActivity() {
         FormulaRunner(this, session, dialogs, { queueCommand(it) }, { activeDialogs.remove(it) })
     }
 
+    private val libraryPanel by lazy { LibraryPanel(this, itemsContainer, menuCards) }
+
     private val helpPanel by lazy { HelpPanel(itemsContainer, menuCards, dialogs) }
 
     private val unitsPanel by lazy { UnitsPanel(this, itemsContainer, menuCards, dialogs) }
@@ -1282,165 +1284,56 @@ class MainActivity : AppCompatActivity() {
         }
         itemsContainer.removeAllViews()
 
-        val cardBgColor = ThemePalette.bgCard
-        val textColor = ThemePalette.fgText
-        val dimColor = ThemePalette.fgDim
-
         when (tabName) {
             "Help" -> helpPanel.render(session.engine)
-            "Variables" -> {
-                val lines = session.engine.nativeValues(false).filter {
-                    showEVars || !it.name.matches(Regex("e[0-9]+"))
-                }
-
-                if (lines.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = this@MainActivity.getString(R.string.ui_text_005)
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(dp(16), dp(32), dp(16), dp(32))
+            "Variables", "Constants" -> {
+                val constants = tabName == "Constants"
+                libraryPanel.renderValues(
+                    values = session.engine.nativeValues(constants),
+                    constants = constants,
+                    showHistory = showEVars,
+                    onEdit = { name, expression ->
+                        val title = if (constants) R.string.edit_constant else R.string.edit_variable
+                        definitionController.show(getString(title, name), expression, expression, tabName)
+                    },
+                    onDelete = { name ->
+                        dialogs.confirmDelete(name) {
+                            if (constants) session.engine.nativeDeleteConstant(name)
+                            else session.engine.nativeDeleteVariable(name)
+                            saveUserDataToStorage()
+                            refreshTabContent(tabName)
+                        }
                     }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (line in lines) {
-                        val name = line.name
-                        val value = line.expressionValue()
-
-                        val isHistory = name.matches(Regex("e[0-9]+"))
-                        val cardView = menuCards.create(
-                            title = name,
-                            subtitle = "= $value",
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onEdit = if (isHistory) null else fun() {
-                                definitionController.show(getString(R.string.edit_variable, name), "$name = $value", "$name = $value", tabName)
-                            },
-                            onDelete = if (isHistory) null else fun() {
-                                dialogs.confirmDelete(name) {
-                                    session.engine.nativeDeleteVariable(name)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        itemsContainer.addView(cardView)
-                    }
-                }
+                )
             }
-            "Constants" -> {
-                for (entry in session.engine.nativeValues(true)) {
-                    val name = entry.name
-                    val value = entry.expressionValue()
-                    val isBuiltIn = (name == "pi" || name == "e")
-
-                    val cardView = menuCards.create(
-                        title = name,
-                        subtitle = "= $value ${if (isBuiltIn) getString(R.string.builtin_constant) else ""}",
-                        cardBgColor = cardBgColor,
-                        textColor = textColor,
-                        dimColor = dimColor,
-                        onEdit = if (!isBuiltIn) {
-                            {
-                                definitionController.show(getString(R.string.edit_constant, name), "$name = $value", "$name = $value", tabName)
-                            }
-                        } else null,
-                        onDelete = if (!isBuiltIn) {
-                            {
-                                dialogs.confirmDelete(name) {
-                                    session.engine.nativeDeleteConstant(name)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        } else null
-                    )
-                    itemsContainer.addView(cardView)
-                }
-            }
-            "Formulas" -> {
-                val lines = session.engine.nativeFormulas()
-
-                if (lines.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = this@MainActivity.getString(R.string.ui_text_006)
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(dp(16), dp(32), dp(16), dp(32))
-                    }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (formula in lines) {
-                        val name = formula.signature
-                        val line = formula.expression
-                        val bodySubtitle = "= ${formula.body}"
-
-                        val cardView = menuCards.create(
-                            title = name,
-                            subtitle = bodySubtitle,
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onRun = {
-                                formulaRunner.show(formula)
-                            },
-                            onEdit = {
-                                definitionController.show(getString(R.string.edit_formula, name), line, line, tabName)
-                            },
-                            onDelete = {
-                                dialogs.confirmDelete(name) {
-                                    session.engine.nativeDeleteFormula(formula.name)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        itemsContainer.addView(cardView)
+            "Formulas" -> libraryPanel.renderFormulas(
+                formulas = session.engine.nativeFormulas(),
+                onRun = { formulaRunner.show(it) },
+                onEdit = { formula ->
+                    definitionController.show(getString(R.string.edit_formula, formula.signature), formula.expression, formula.expression, tabName)
+                },
+                onDelete = { formula ->
+                    dialogs.confirmDelete(formula.signature) {
+                        session.engine.nativeDeleteFormula(formula.name)
+                        saveUserDataToStorage()
+                        refreshTabContent(tabName)
                     }
                 }
-            }
-            "Scripts" -> {
-                if (userScripts.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = this@MainActivity.getString(R.string.ui_text_007)
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(dp(16), dp(32), dp(16), dp(32))
-                    }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (i in userScripts.indices) {
-                        val script = userScripts[i]
-                        val scriptName = script.first
-                        val scriptCode = script.second
-
-                        val cardView = menuCards.create(
-                            title = scriptName,
-                            subtitle = scriptCode.lines().firstOrNull()?.take(60) ?: "",
-                            runLabel = getString(R.string.action_run),
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onRun = {
-                                queueCommand(scriptCode, scriptName)
-                            },
-                            onEdit = {
-                                openScriptEditor(scriptName)
-                            },
-                            onDelete = {
-                                dialogs.confirmDelete(scriptName) {
-                                    session.engine.nativeUnregisterScript(scriptName)
-                                    userScripts.removeAt(i)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        cardView.tag = "$scriptName $scriptCode"
-                        itemsContainer.addView(cardView)
+            )
+            "Scripts" -> libraryPanel.renderScripts(
+                scripts = userScripts,
+                onRun = { code, name -> queueCommand(code, name) },
+                onEdit = { openScriptEditor(it) },
+                onDelete = { name ->
+                    dialogs.confirmDelete(name) {
+                        session.engine.nativeUnregisterScript(name)
+                        val index = userScripts.indexOfFirst { it.first == name }
+                        if (index >= 0) userScripts.removeAt(index)
+                        saveUserDataToStorage()
+                        refreshTabContent(tabName)
                     }
                 }
-            }
+            )
         }
         filterCards()
     }
