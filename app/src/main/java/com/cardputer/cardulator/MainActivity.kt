@@ -1186,16 +1186,8 @@ class MainActivity : AppCompatActivity() {
             val entry = result.entry
             val definition = result.definition
             if (definition != null) {
-                val editor = definitionController.editor?.takeIf { it.draft === definition }
-                editor?.dialog?.setCancelable(true)
-                editor?.input?.isEnabled = true
-                if (entry.isError) {
-                    if (editor != null) editor.input.error = entry.rawOutput.removePrefix("ERROR: ")
-                    else Toast.makeText(this, entry.rawOutput, Toast.LENGTH_LONG).show()
-                } else {
-                    editor?.dialog?.dismiss()
-                    if (tabs[currentTabPosition] == definition.tab) refreshTabContent(definition.tab)
-                }
+                definitionController.complete(definition, entry)
+                if (!entry.isError && tabs[currentTabPosition] == definition.tab) refreshTabContent(definition.tab)
                 return@observe
             }
             val script = result.scriptName

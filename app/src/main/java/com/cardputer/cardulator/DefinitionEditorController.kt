@@ -13,8 +13,19 @@ internal class DefinitionEditorController(
     private val untrack: (Dialog) -> Unit
 ) {
     data class Editor(val draft: DefinitionDraft, val dialog: Dialog, val input: EditText)
-    var editor: Editor? = null
-        private set
+    private var editor: Editor? = null
+
+    fun complete(draft: DefinitionDraft, result: ReplDisplayItem) {
+        val current = editor?.takeIf { it.draft === draft }
+        current?.dialog?.setCancelable(true)
+        current?.input?.isEnabled = true
+        if (result.isError) {
+            if (current != null) current.input.error = result.rawOutput.removePrefix("ERROR: ")
+            else android.widget.Toast.makeText(activity, result.rawOutput, android.widget.Toast.LENGTH_LONG).show()
+        } else {
+            current?.dialog?.dismiss()
+        }
+    }
 
     fun show(title: String, initialExpr: String, hintText: String, tab: String) {
         val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
