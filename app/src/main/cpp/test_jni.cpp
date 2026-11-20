@@ -236,6 +236,12 @@ int main() {
         runScript("step_count_test=0; for(i=0; i<2; i++; i==1) { step_count_test+=1 }");
         std::string stepError;
         assert(evaluate("step_count_test", stepError) == 2 && stepError.empty());
+        const auto tokenizedHeader = expression::splitArguments("x=mean(1,2);x<3;x++;print(\";\")", ';', 3);
+        assert(tokenizedHeader == std::vector<std::string>({"x=mean(1,2)", "x<3", "x++;print(\";\")"}));
+        assert(expression::splitArguments(";;", ';', 3) == std::vector<std::string>({"", "", ""}));
+        assert(expression::splitArguments("x=(1;0;x++", ';', 3).empty());
+        runScript("fn fn_multiple_steps(x) { n=0; for(i=0;i<x;i++;n++) {}; return n }");
+        assert(evaluate("fn_multiple_steps (3)", stepError) == 3 && stepError.empty());
         runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
             [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));

@@ -557,30 +557,11 @@ void runScript(const std::string& code) {
             const size_t close_paren = open_paren == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open_paren);
             if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
                 std::string inner = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                size_t first_semi = std::string::npos;
-                size_t second_semi = std::string::npos;
-                std::vector<char> headerGroups;
-                for (const auto& token : expression::tokenize(inner)) {
-                    if (token.kind == expression::Kind::Open) headerGroups.push_back(token.text.front());
-                    else if (token.kind == expression::Kind::Close) {
-                        if (!expression::closeGroup(headerGroups, token.text.front())) break;
-                    } else if (headerGroups.empty() && token.text == ";") {
-                        if (first_semi == std::string::npos) first_semi = token.start;
-                        else { second_semi = token.start; break; }
-                    }
-                }
-                if (first_semi != std::string::npos && second_semi != std::string::npos) {
-                    std::string init_str = inner.substr(0, first_semi);
-                    std::string cond_str = inner.substr(first_semi + 1, second_semi - first_semi - 1);
-                    std::string step_str = inner.substr(second_semi + 1);
-                    
-                    auto trim = [](std::string& s) {
-                        s.erase(0, s.find_first_not_of(" \t\r"));
-                        s.erase(s.find_last_not_of(" \t\r") + 1);
-                    };
-                    trim(init_str);
-                    trim(cond_str);
-                    trim(step_str);
+                const auto header = expression::splitArguments(inner, ';', 3);
+                if (header.size() == 3) {
+                    const auto& init_str = header[0];
+                    const auto& cond_str = header[1];
+                    const auto& step_str = header[2];
                     size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
                     if (end_ip != std::string::npos) {
                         std::string err;

@@ -151,14 +151,14 @@ inline std::string_view trim(std::string_view source) {
     return source.substr(first, source.find_last_not_of(" \t\r\n") - first + 1);
 }
 
-inline std::vector<std::string> splitArguments(std::string_view source) {
+inline std::vector<std::string> splitArguments(std::string_view source, char separator = ',', size_t maxParts = std::string_view::npos) {
     std::vector<std::string> arguments;
     std::vector<char> groups;
     size_t start = 0;
     for (const auto& token : tokenize(source)) {
         if (token.kind == Kind::Open) groups.push_back(token.text.front());
         else if (token.kind == Kind::Close && !closeGroup(groups, token.text.front())) return {};
-        else if (token.kind == Kind::Comma && groups.empty()) {
+        else if (token.text.size() == 1 && token.text.front() == separator && groups.empty() && arguments.size() + 1 < maxParts) {
             arguments.emplace_back(trim(source.substr(start, token.start - start)));
             start = token.start + 1;
         }

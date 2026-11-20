@@ -162,12 +162,11 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             const bool active = existing != blocks.end();
             std::string condition = line.substr(open + 1, close - open - 1), step;
             if (isFor) {
-                const size_t first = condition.find(';'), second = first == std::string::npos ? first : condition.find(';', first + 1);
-                if (first == std::string::npos || second == std::string::npos) { err = "Invalid for loop"; break; }
-                const std::string init = condition.substr(0, first);
-                step = condition.substr(second + 1);
-                condition = condition.substr(first + 1, second - first - 1);
-                if (!active && !executeScriptAssignments(init, err)) break;
+                const auto header = expression::splitArguments(condition, ';', 3);
+                if (header.size() != 3) { err = "Invalid for loop"; break; }
+                step = header[2];
+                condition = header[1];
+                if (!active && !executeScriptAssignments(header[0], err)) break;
             }
             const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluate(condition, err);
             if (!err.empty()) break;
