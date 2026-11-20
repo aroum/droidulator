@@ -1611,47 +1611,6 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 return std::numeric_limits<double>::quiet_NaN();
             }
         } else {
-            std::string op1, op, op2;
-            if (parseBinaryOp(rhs, op1, op, op2)) {
-                auto trim = [](std::string& s) {
-                    s.erase(0, s.find_first_not_of(" \t"));
-                    s.erase(s.find_last_not_of(" \t") + 1);
-                };
-                trim(op1); trim(op2);
-                bool is1_arr = false, is2_arr = false;
-                std::string dummy_err;
-                std::vector<double> a1 = parseArrayExpr(op1, is1_arr, dummy_err);
-                std::vector<double> a2 = parseArrayExpr(op2, is2_arr, dummy_err);
-                if (op == ".*" || op == "./" || (!a1.empty() && is1_arr) || (!a2.empty() && is2_arr) || (engineState().user_arrays.find(op1) != engineState().user_arrays.end() && !engineState().user_arrays[op1].empty()) || (engineState().user_arrays.find(op2) != engineState().user_arrays.end() && !engineState().user_arrays[op2].empty())) {
-                    bool is_scalar = false;
-                    double scalar_res = 0;
-                    std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
-                    if (err.empty()) {
-                        if (is_scalar) {
-                            engineState().user_arrays.erase(lhs);
-                            engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
-                                return a.name == lhs;
-                            }), engineState().user_args.end());
-                            engineState().user_args.push_back({lhs, scalar_res});
-                            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
-                                engineState().autocomplete_words.push_back(lhs);
-                            }
-                            return scalar_res;
-                        } else {
-                            engineState().user_arrays[lhs] = res;
-                            engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
-                                return a.name == lhs;
-                            }), engineState().user_args.end());
-                            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
-                                engineState().autocomplete_words.push_back(lhs);
-                            }
-                            return 1.0;
-                        }
-                    }
-                    return std::numeric_limits<double>::quiet_NaN();
-                }
-            }
-
             bool is_arr = false;
             std::vector<double> arr = parseArrayExpr(rhs, is_arr, err);
             if (err.empty() && is_arr) {
@@ -1667,7 +1626,13 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             if (!err.empty()) {
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            double val = evaluate(rhs, err);
+            double val;
+            if (!arr.empty()) {
+                val = arr.front();
+                engineState().g_last_eval_is_array = false;
+            } else {
+                val = evaluate(rhs, err);
+            }
             if (err.empty() && !std::isnan(val)) {
                 if (engineState().g_last_eval_is_array) {
                     engineState().user_arrays[lhs] = engineState().g_last_eval_array;

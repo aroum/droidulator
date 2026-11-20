@@ -392,6 +392,12 @@ int main() {
         assert(engineState().user_arrays.at("script_map_source") == std::vector<double>({1,2,3}));
         runScript("script_map_formula(x)=x*x; script_map_result=script_map_formula(script_map_source)");
         assert(engineState().user_arrays.at("script_map_result") == std::vector<double>({1,4,9}));
+        runScript("assignment_once=sum([ast_print_once(1),2])");
+        assert(evaluate("assignment_once", signatureError) == 3 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        runScript("array_assignment_once=[ast_print_once(1)]+[ast_print_once(2)]");
+        assert(engineState().user_arrays.at("array_assignment_once") == std::vector<double>({3}));
+        assert(engineState().script_console_output.size() == 2);
         runScript("tuple_probe_a,tuple_probe_b=1,");
         assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
         assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
