@@ -154,7 +154,8 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
 
         if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 || line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
             const bool isFor = line.rfind("for", 0) == 0;
-            const size_t open = line.find('('), close = line.rfind(')');
+            const size_t open = line.find('(');
+            const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
             const size_t end = findMatchingBlockEnd(lines, ip);
             if (open == std::string::npos || close == std::string::npos || end == std::string::npos) { err = "Mismatched loop"; break; }
             auto existing = std::find_if(blocks.begin(), blocks.end(), [&](const FnBlock& b) { return b.start_ip == ip && (b.type == "for" || b.type == "while"); });
@@ -166,7 +167,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
                 const std::string init = condition.substr(0, first);
                 step = condition.substr(second + 1);
                 condition = condition.substr(first + 1, second - first - 1);
-                if (!active && init.find_first_not_of(" \t") != std::string::npos) { bool definition = false; evaluateInput(init, err, definition); if (!err.empty()) break; }
+                if (!active && !executeScriptAssignments(init, err)) break;
             }
             const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluate(condition, err);
             if (!err.empty()) break;
@@ -225,8 +226,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
                 auto& block = blocks.back();
                 if (block.type == "for" || block.type == "while") {
                     if (block.type == "for" && block.step_str.find_first_not_of(" \t") != std::string::npos) {
-                        for (const auto& step : splitIntoStatements(block.step_str)) { bool definition = false; evaluateInput(step, err, definition); if (!err.empty()) break; }
-                        if (!err.empty()) break;
+                        if (!executeScriptAssignments(block.step_str, err)) break;
                     }
                     ip = block.start_ip;
                     continue;
@@ -237,15 +237,9 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             continue;
         }
 
-        if (line.find('=') != std::string::npos) {
-            bool isDef = false;
-            evaluateInput(line, err, isDef);
-            if (!err.empty()) break;
-        } else {
-            bool isDef = false;
-            evaluateInput(line, err, isDef);
-            if (!err.empty()) break;
-        }
+        bool isDef = false;
+        evaluateInput(line, err, isDef);
+        if (!err.empty()) break;
         ip++;
     }
 

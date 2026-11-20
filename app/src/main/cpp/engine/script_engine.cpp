@@ -205,7 +205,7 @@ static bool isScriptConstant(const std::string& name) {
     });
 }
 
-static bool executeScriptAssignments(const std::string& step, std::string& err) {
+bool executeScriptAssignments(const std::string& step, std::string& err) {
     if (step.empty()) return true;
     bool isDef = false;
     std::vector<std::string> step_stmts = splitIntoStatements(step);
@@ -263,6 +263,10 @@ static bool executeScriptAssignments(const std::string& step, std::string& err) 
             trim(lhs); trim(rhs);
             if (!expression::isIdentifier(lhs)) {
                 err = "Invalid assignment name";
+                return false;
+            }
+            if (isReservedName(lhs)) {
+                err = "Reserved name: " + lhs;
                 return false;
             }
             if (isScriptConstant(lhs)) {

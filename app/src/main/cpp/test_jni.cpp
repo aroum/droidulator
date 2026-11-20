@@ -315,6 +315,16 @@ int main() {
         evaluateInput("ast_shadow_array(ast_call_array)=sum(ast_call_array)*50%", signatureError, signatureDefinition);
         const double shadowResult = evaluate("ast_shadow_array (2)", signatureError);
         assert(shadowResult == 1 && signatureError.empty());
+        runScript("fn fn_header_array(x) { local_header_array=[0]; for(local_header_array[1]=0; local_header_array[1]<x; local_header_array[1]=local_header_array[1]+1) {}; return local_header_array[1] }");
+        assert(evaluate("fn_header_array (3)", signatureError) == 3 && signatureError.empty());
+        assert(engineState().user_arrays.find("local_header_array") == engineState().user_arrays.end());
+        engineState().user_consts.push_back({"fn_header_constant", 7});
+        runScript("fn fn_header_const_check(x) { for(fn_header_constant=0; 0; x++) {}; return x }");
+        evaluate("fn_header_const_check (3)", signatureError);
+        assert(signatureError == "Const Error");
+        assert(evaluate("fn_header_constant", signatureError) == 7 && signatureError.empty());
+        assert(!executeScriptAssignments("pi=0", signatureError));
+        assert(signatureError == "Reserved name: pi");
         runScript("for(invalid-loop-name=0; 0; i++) {}");
         assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
             [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));
