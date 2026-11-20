@@ -15,12 +15,20 @@ std::string preprocessVectorStats(const std::string& s);
 static thread_local size_t loopEvaluationDepth = 0;
 static thread_local size_t loopIterationsRemaining = 100000;
 static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
-// Formula arguments belong to the active call, never to the session's variables.
-static thread_local std::vector<std::vector<UserArg>> formulaBindings;
+// Formula parameters and reduction indices are local to the active evaluation.
+static thread_local std::vector<std::vector<UserArg>> scalarBindings;
 
-static std::optional<double> formulaArgument(std::string_view name) {
-    if (!formulaBindings.empty()) {
-        for (const auto& argument : formulaBindings.back())
+class ScalarBindingScope {
+public:
+    explicit ScalarBindingScope(std::vector<UserArg> values) { scalarBindings.push_back(std::move(values)); }
+    ~ScalarBindingScope() { scalarBindings.pop_back(); }
+    ScalarBindingScope(const ScalarBindingScope&) = delete;
+    ScalarBindingScope& operator=(const ScalarBindingScope&) = delete;
+};
+
+static std::optional<double> scopedScalar(std::string_view name) {
+    if (!scalarBindings.empty()) {
+        for (const auto& argument : scalarBindings.back())
             if (argument.name == name) return argument.val;
     }
     return std::nullopt;
@@ -493,7 +501,7 @@ inline std::string preprocessLen(const std::string& s) {
         
         int size_val = 0;
         bool found = false;
-        bool is_scalar = formulaArgument(arg).has_value();
+        bool is_scalar = scopedScalar(arg).has_value();
         for (const auto& ua : engineState().user_args) {
             if (ua.name == arg) {
                 is_scalar = true;
@@ -529,6 +537,7 @@ static bool isValidLoopIdent(const std::string& name) {
 }
 
 static bool isDefinedScalarName(const std::string& s) {
+    if (scopedScalar(s)) return true;
     for (const auto& ua : engineState().user_args) if (ua.name == s) return true;
     for (const auto& uc : engineState().user_consts) if (uc.name == s) return true;
     return false;
@@ -627,14 +636,11 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     err = "Overflow Error: loop limit exceeded";
                     return res;
                 }
-                auto old_args = engineState().user_args;
-                size_t var_idx = engineState().user_args.size();
-                for (size_t ui = 0; ui < engineState().user_args.size(); ++ui) {
-                    if (engineState().user_args[ui].name == args[0]) { var_idx = ui; break; }
-                }
-                if (var_idx == engineState().user_args.size()) {
-                    engineState().user_args.push_back({args[0], 0.0});
-                }
+                auto arguments = scalarBindings.empty() ? std::vector<UserArg>{} : scalarBindings.back();
+                size_t var_idx = 0;
+                while (var_idx < arguments.size() && arguments[var_idx].name != args[0]) ++var_idx;
+                if (var_idx == arguments.size()) arguments.push_back({args[0], 0.0});
+                ScalarBindingScope scope(std::move(arguments));
 
                 double acc = 0.0;
                 if (fname == "prod") acc = 1.0;
@@ -642,12 +648,11 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 else if (fname == "max") acc = -std::numeric_limits<double>::infinity();
 
                 for (int64_t idx = i_start; idx <= i_end;) {
-                    if (loopIterationsRemaining == 0) { engineState().user_args = old_args; err = "Overflow Error: loop limit exceeded"; return res; }
+                    if (loopIterationsRemaining == 0) { err = "Overflow Error: loop limit exceeded"; return res; }
                     --loopIterationsRemaining;
-                    engineState().user_args[var_idx].val = static_cast<double>(idx);
+                    scalarBindings.back()[var_idx].val = static_cast<double>(idx);
                     double step_v = evaluate(args[3], err);
                     if (!err.empty()) {
-                        engineState().user_args = old_args;
                         return res;
                     }
                     if (fname == "sum") acc += step_v;
@@ -657,7 +662,6 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     if (idx == i_end) break;
                     ++idx;
                 }
-                engineState().user_args = old_args;
                 if (i_start > i_end && (fname == "min" || fname == "max")) acc = 0.0;
                 std::string rep = fmtInternal(acc);
                 res.replace(pos, close - pos + 1, rep);
@@ -932,7 +936,7 @@ static const std::map<std::string, VariadicBuiltin>& variadicFunctions() {
 }
 
 static bool shadowsBuiltin(std::string_view name) {
-    if (formulaArgument(name)) return true;
+    if (scopedScalar(name)) return true;
     const auto& state = engineState();
     for (const auto& variable : state.user_args)
         if (variable.name == name) return true;
@@ -965,14 +969,14 @@ static expression::ArithmeticExpression::VariadicFunction lookupVariadic(std::st
 }
 
 static const std::vector<double>* lookupArray(std::string_view name) {
-    if (formulaArgument(name)) return nullptr;
+    if (scopedScalar(name)) return nullptr;
     const auto& arrays = engineState().user_arrays;
     const auto found = arrays.find(std::string(name));
     return found == arrays.end() ? nullptr : &found->second;
 }
 
 static std::optional<double> lookupScalar(std::string_view name) {
-    if (const auto argument = formulaArgument(name)) return argument;
+    if (const auto argument = scopedScalar(name)) return argument;
     const auto& state = engineState();
     if (name.size() > 1 && name.front() == 'e') {
         size_t number = 0;
@@ -996,15 +1000,12 @@ static std::optional<double> lookupScalar(std::string_view name) {
 }
 
 static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std::string_view name) {
-    if (formulaArgument(name)) return {};
+    if (scopedScalar(name)) return {};
     for (const auto& function : engineState().user_script_funcs) {
         if (function.name != name) continue;
         return [name = std::string(name)](const std::vector<double>& values, std::string& error) {
             // Script functions use their own parameters and session variables.
-            formulaBindings.emplace_back();
-            struct BindingScope {
-                ~BindingScope() { formulaBindings.pop_back(); }
-            } scope;
+            ScalarBindingScope scope(std::vector<UserArg>{});
             return executeScriptFunc(name, values, error);
         };
     }
@@ -1018,18 +1019,21 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
                 error = "Arg Count Mismatch";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            if (formulaBindings.size() >= 64) {
+            static thread_local unsigned depth = 0;
+            if (depth >= 64) {
                 error = "Function recursion limit exceeded";
                 return std::numeric_limits<double>::quiet_NaN();
             }
+            struct CallDepth {
+                unsigned& value;
+                explicit CallDepth(unsigned& current) : value(current) { ++value; }
+                ~CallDepth() { --value; }
+            } callDepth(depth);
             std::vector<UserArg> arguments;
             arguments.reserve(values.size());
             for (size_t i = 0; i < values.size(); ++i)
                 arguments.push_back({function.params[i], values[i]});
-            formulaBindings.push_back(std::move(arguments));
-            struct BindingScope {
-                ~BindingScope() { formulaBindings.pop_back(); }
-            } scope;
+            ScalarBindingScope scope(std::move(arguments));
             return evaluate(function.body, error);
         };
     }
@@ -1141,8 +1145,8 @@ double evaluate(const std::string& expr_str, std::string& err) {
         }
     }
 
-    if (!formulaBindings.empty()) {
-        for (const auto& argument : formulaBindings.back()) add_dyn_var(argument.name, &argument.val);
+    if (!scalarBindings.empty()) {
+        for (const auto& argument : scalarBindings.back()) add_dyn_var(argument.name, &argument.val);
     }
     
     double val = s_tep.evaluate(preprocessed);
@@ -1999,7 +2003,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
     }
     
-    bool is_scalar_var = formulaArgument(trimmed).has_value();
+    bool is_scalar_var = scopedScalar(trimmed).has_value();
     for (const auto& ua : engineState().user_args) {
         if (ua.name == trimmed) { is_scalar_var = true; break; }
     }

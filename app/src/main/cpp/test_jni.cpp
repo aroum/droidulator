@@ -379,6 +379,18 @@ int main() {
         assert(evaluate("sum(loop_ast_index,1,3,ast_print_once(loop_ast_index))", signatureError) == 6 && signatureError.empty());
         assert(engineState().script_console_output.size() == 3);
         engineState().script_console_output.clear();
+        evaluateInput("scoped_reduction(x)=sum(x,1,3,x)+x", signatureError, signatureDefinition);
+        assert(evaluate("scoped_reduction(10)", signatureError) == 16 && signatureError.empty());
+        evaluateInput("inherited_reduction(x)=sum(local_idx,1,3,x*local_idx)", signatureError, signatureDefinition);
+        assert(evaluate("inherited_reduction(10)", signatureError) == 60 && signatureError.empty());
+        engineState().user_consts.push_back({"reduction_constant", 99});
+        assert(evaluate("sum(reduction_constant,1,3,reduction_constant)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
+        assert(evaluate("sum(reduction_constant,1,2,sum(reduction_constant,1,3,reduction_constant)+reduction_constant)", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
+        evaluate("sum(reduction_constant,1,3,1/(reduction_constant-2))", signatureError);
+        assert(!signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
         evaluate("ast_print_once(3)+unknown_ast_name", signatureError);
         assert(!signatureError.empty());
         assert(engineState().script_console_output.size() == 1);
