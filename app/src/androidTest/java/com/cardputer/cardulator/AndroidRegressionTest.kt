@@ -123,9 +123,20 @@ class AndroidRegressionTest {
     @Test fun precisionRoundTripAndRotationKeepFullResult() {
         submit("1/7")
         await("initial REPL result") { output().contains("0.142857") }
-        activity { it.findViewById<Spinner>(R.id.spinner_fmt_prec).setSelection(0) }
+        activity {
+            val spinnerMode = it.findViewById<Spinner>(R.id.spinner_fmt_mode)
+            val spinnerPrec = it.findViewById<Spinner>(R.id.spinner_fmt_prec)
+            spinnerMode.setSelection(2)
+            spinnerPrec.setSelection(0)
+            spinnerMode.onItemSelectedListener?.onItemSelected(spinnerMode, null, 2, 2L)
+            spinnerPrec.onItemSelectedListener?.onItemSelected(spinnerPrec, null, 0, 0L)
+        }
         await("zero precision") { output().contains("= 0\n") }
-        activity { it.findViewById<Spinner>(R.id.spinner_fmt_prec).setSelection(12) }
+        activity {
+            val spinnerPrec = it.findViewById<Spinner>(R.id.spinner_fmt_prec)
+            spinnerPrec.setSelection(12)
+            spinnerPrec.onItemSelectedListener?.onItemSelected(spinnerPrec, null, 12, 12L)
+        }
         await("restored precision") { output().contains("0.142857142857") }
         val previous = activity { session(it) }
         scenario.recreate()
@@ -134,10 +145,10 @@ class AndroidRegressionTest {
     }
 
     @Test fun scriptDraftRunSaveRenameAndDelete() {
-        activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(1)
-            it.findViewById<View>(R.id.btn_add_item).performClick()
-        }
+        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(1) }
+        await("switch to Scripts tab") { activity { it.findViewById<Spinner>(R.id.spinner_tabs).selectedItemPosition == 1 } }
+        activity { it.findViewById<View>(R.id.btn_add_item).performClick() }
+        await("script editor opened") { activity { it.findViewById<EditText>(R.id.et_script_name) != null } }
         onView(withId(R.id.et_script_name)).perform(replaceText("emulator_case"), closeSoftKeyboard())
         onView(withId(R.id.et_script_code)).perform(replaceText("print(42)"), closeSoftKeyboard())
         scenario.recreate()
