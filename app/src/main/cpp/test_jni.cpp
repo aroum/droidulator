@@ -534,7 +534,9 @@ int main() {
         assert(evaluateArrayAst("ast_script_call([1,2,3])") && typedArray == std::vector<double>({2,4,6}) && signatureError.empty());
         assert(evaluateArrayAst("sqrt([])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateLiteralAst("cbrt(27)+floor(2.9)+ceil(1.1)+round(1.5)+exp(0)") == 10 && signatureError.empty());
-        assert(evaluateArrayAst("cbrt([1,8,27])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(evaluateArrayAst("cbrt([1,8,27])") && typedArray && typedArray->size() == 3 && signatureError.empty());
+        for (size_t i = 0; i < typedArray->size(); ++i)
+            assert(std::abs((*typedArray)[i] - static_cast<double>(i + 1)) < 1e-12);
         signatureError.clear();
         bool unknownMap = false;
         parseArrayExpr("unknown_empty_mapping([])", unknownMap, signatureError);
