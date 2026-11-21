@@ -962,7 +962,41 @@ static std::optional<double> lookupScalar(std::string_view name) {
         if (it->name == name) return it->val;
     if (name == "pi") return std::acos(-1.0);
     if (name == "e") return std::exp(1.0);
+    if (state.user_arrays.contains(std::string(name)) || shadowsBuiltin(name)) return std::nullopt;
+    const auto& builtins = te_parser::builtin_functions();
+    const auto builtin = builtins.find(te_variable{std::string(name), 0.0});
+    if (builtin != builtins.end()) {
+        if (const auto function = std::get_if<te_fun0>(&builtin->m_value)) return (*function)();
+    }
     return std::nullopt;
+}
+
+static expression::ArithmeticExpression::CustomFunction lookupInheritedBuiltin(std::string_view name) {
+    if (unaryFunctions().contains(std::string(name)) || binaryFunctions().contains(std::string(name)) ||
+        variadicFunctions().contains(std::string(name))) return {};
+    const auto& functions = te_parser::builtin_functions();
+    const auto found = functions.find(te_variable{std::string(name), 0.0});
+    if (found == functions.end()) return {};
+    return std::visit([&](const auto function) -> expression::ArithmeticExpression::CustomFunction {
+        using Function = std::decay_t<decltype(function)>;
+        if constexpr (te_is_function_v<Function>) {
+            constexpr size_t arity = te_function_arity<Function>;
+            expression::ArithmeticExpression::CustomFunction result{arity,
+                [function](const std::vector<double>& values, std::string& error) {
+                    std::array<double, arity> arguments;
+                    arguments.fill(std::numeric_limits<double>::quiet_NaN());
+                    std::copy(values.begin(), values.end(), arguments.begin());
+                    try { return std::apply(function, arguments); }
+                    catch (const std::exception& failure) {
+                        error = failure.what();
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                }};
+            result.variadic = (found->m_type & TE_VARIADIC) != 0;
+            result.acceptsNonFinite = true;
+            return result;
+        } else return {};
+    }, found->m_value);
 }
 
 static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std::string_view name) {
@@ -1003,7 +1037,7 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
             return result;
         }};
     }
-    return {};
+    return lookupInheritedBuiltin(name);
 }
 
 static std::optional<double> evaluateAst(const std::string& source, std::string& error,

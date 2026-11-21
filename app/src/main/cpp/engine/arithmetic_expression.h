@@ -31,11 +31,14 @@ public:
         size_t arity = 0;
         std::function<double(const std::vector<double>&, std::string&)> invoke;
         std::function<double(const std::vector<double>&, std::string&, std::optional<std::vector<double>>&)> invokeTyped;
+        bool variadic = false;
+        bool acceptsNonFinite = false;
+        bool acceptsArity(size_t count) const { return variadic ? count >= 1 && count <= arity : count == arity; }
         explicit operator bool() const { return static_cast<bool>(invoke) || static_cast<bool>(invokeTyped); }
         double operator()(const std::vector<double>& values, std::string& error,
                           std::optional<std::vector<double>>* array = nullptr) const {
             if (array) array->reset();
-            if (values.size() != arity) {
+            if (!acceptsArity(values.size())) {
                 error = "Arg Count Mismatch";
                 return std::numeric_limits<double>::quiet_NaN();
             }
@@ -118,7 +121,7 @@ public:
             const auto& argument = parser.nodes[index];
             if (argument.scalarResult) return false;
             return argument.op == 'w' || argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'r' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
-                !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
+                arrays(argument.symbol) && !(lookup && lookup(argument.symbol)));
         };
         // Bind array consumers before scalar name lookup.
         for (auto& node : parser.nodes) {
@@ -175,7 +178,7 @@ public:
             }
             if (custom) {
                 node.customFunction = custom(node.symbol);
-                if (node.customFunction && node.customFunction.arity != args.size()) {
+                if (node.customFunction && !node.customFunction.acceptsArity(args.size())) {
                     node.op = 'e';
                     continue;
                 }
@@ -219,7 +222,7 @@ public:
                     if (unary || binary || variadic || custom) node.op = '?';
                     continue;
                 }
-                if (node.customFunction && node.customFunction.arity != 1) return std::nullopt;
+                if (node.customFunction && !node.customFunction.acceptsArity(1)) return std::nullopt;
                 node.op = 'u';
                 node.dynamicType = parser.nodes[args.front()].dynamicType;
                 node.arraySlot = parser.literalArrays.size();
@@ -304,9 +307,9 @@ public:
             }
             if (node.symbol.empty()) continue;
             if (node.op == 'l') {
-                if (!arrays || (lookup && lookup(node.symbol))) return std::nullopt;
+                if (!arrays) return std::nullopt;
                 const auto array = arrays(node.symbol);
-                if (!array) return std::nullopt;
+                if (!array || (lookup && lookup(node.symbol))) return std::nullopt;
                 continue;
             }
             if (node.op == '[') {
@@ -325,7 +328,7 @@ public:
                 if (arity == 2 && binary && (node.binaryFunction = binary(node.symbol))) continue;
                 if (variadic && (node.variadicFunction = variadic(node.symbol))) continue;
                 if (custom && (node.customFunction = custom(node.symbol))) {
-                    if (node.customFunction.arity != arity) node.op = 'e';
+                    if (!node.customFunction.acceptsArity(arity)) node.op = 'e';
                     continue;
                 }
                 return std::nullopt;
@@ -632,7 +635,7 @@ public:
                         values.reserve(args.size());
                         for (const auto argument : args) {
                             const double value = parser.nodes[argument].value;
-                            if (!std::isfinite(value)) {
+                            if (!std::isfinite(value) && !node.customFunction.acceptsNonFinite) {
                                 error = std::isnan(value) ? "Math Error" : "Overflow Error";
                                 return std::numeric_limits<double>::quiet_NaN();
                             }

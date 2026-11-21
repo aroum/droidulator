@@ -799,6 +799,23 @@ int main() {
         const auto unknownActiveCall = evaluateArrayAst("unknown_ast_call([ast_print_once(1)])");
         assert(unknownActiveCall && std::isnan(*unknownActiveCall) && signatureError == "Math Error");
         assert(engineState().script_console_output.empty());
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"pow(2,3)",8}, {"power(2,4)",16}, {"clamp(5,1,3)",3}, {"average(1,2,3)",2},
+                {"bitand(6,3)",2}, {"bitxor(6,3)",5}, {"combin(5,2)",10}, {"permut(5,2)",20},
+                {"isnan(nan)",1}, {"iserr(nan())",1}, {"iserror(2)",0},
+                {"even(3)",4}, {"odd(2)",3}, {"sign(-2)",-1}, {"sqr(3)",9}, {"true()",1}, {"false()",0}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && *result == expected && signatureError.empty());
+            te_parser legacyBuiltin;
+            assert(legacyBuiltin.evaluate(source) == expected);
+        }
+        assert(evaluateLiteralAst("true+false") == 1 && signatureError.empty());
+        const auto bareRandom = evaluateLiteralAst("rand");
+        assert(bareRandom && *bareRandom >= 0 && *bareRandom <= 1 && signatureError.empty());
+        assert(evaluateArrayAst("sqr([2,3])") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,41,pow(1/0,2))") == 41 && signatureError.empty());
+        const auto inheritedArityError = evaluateLiteralAst("clamp(1,2)");
+        assert(inheritedArityError && std::isnan(*inheritedArityError) && signatureError == "Arg Count Mismatch");
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
