@@ -199,6 +199,7 @@ public:
                 const bool builtin = (args.size() == 1 && unary && unary(node.symbol)) ||
                     (args.size() == 2 && binary && binary(node.symbol)) || (variadic && variadic(node.symbol));
                 if (builtin) node.customFunction = {};
+                else if (!node.customFunction && (unary || binary || variadic || custom)) node.op = '?';
                 if (node.customFunction && node.customFunction.invokeTyped) {
                     node.op = 'w';
                     node.dynamicType = true;
@@ -214,7 +215,10 @@ public:
             } else {
                 if (unary) node.function = unary(node.symbol);
                 if (node.function) node.customFunction = {};
-                if (!node.function && !node.customFunction) continue;
+                if (!node.function && !node.customFunction) {
+                    if (unary || binary || variadic || custom) node.op = '?';
+                    continue;
+                }
                 if (node.customFunction && node.customFunction.arity != 1) return std::nullopt;
                 node.op = 'u';
                 node.dynamicType = parser.nodes[args.front()].dynamicType;
@@ -224,8 +228,12 @@ public:
             node.left = args.front();
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
+        if (parser.nodes[root].op == 'e' || parser.nodes[root].op == '?') {
+            error = parser.nodes[root].op == 'e' ? "Arg Count Mismatch" : "Math Error";
+            return std::numeric_limits<double>::quiet_NaN();
+        }
         const auto visitScalarInputs = [&](const Node& node, const auto& visit) {
-            if (node.op == 'e' || node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
+            if (node.op == '?' || node.op == 'e' || node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
                 for (size_t argument : parser.callArguments[node.right]) visit(argument);
             } else if (node.op == 'q') {
                 const auto& args = parser.callArguments[node.right];
@@ -262,7 +270,7 @@ public:
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
             visitScalarInputs(node, [&](size_t argument) {
-                if (parser.nodes[argument].dynamicType) consumedArrays[argument] = true;
+                if (parser.nodes[argument].dynamicType || node.op == 'e' || node.op == '?') consumedArrays[argument] = true;
             });
             if (node.arrayConditional) {
                 const auto& args = parser.callArguments[node.right];
@@ -289,7 +297,7 @@ public:
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'R' || node.op == 'w' || node.op == 'e' || node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
+            if (node.op == '?' || node.op == 'R' || node.op == 'w' || node.op == 'e' || node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -309,7 +317,7 @@ public:
                 const auto& arguments = parser.callArguments[node.right];
                 const auto arity = arguments.size();
                 // Four-argument reductions can bind their first argument as a loop index.
-                if (arity == 4 && (parser.nodes[arguments.front()].op == 0 || parser.nodes[arguments.front()].op == 'v') &&
+                if (!reduction && arity == 4 && (parser.nodes[arguments.front()].op == 0 || parser.nodes[arguments.front()].op == 'v') &&
                     !parser.nodes[arguments.front()].symbol.empty() &&
                     (node.symbol == "sum" || node.symbol == "prod" ||
                      node.symbol == "min" || node.symbol == "max")) return std::nullopt;
@@ -327,8 +335,8 @@ public:
                 continue;
             }
             if (!lookup) return std::nullopt;
-            const auto value = lookup(node.symbol);
-            if (!value) return std::nullopt;
+            // Resolve values only when this node is selected. Unknown names in
+            // inactive conditional branches must not trigger the legacy parser.
             node.op = 'v';
         }
         // Evaluate only dependencies requested by the root. A conditional requests
@@ -343,8 +351,8 @@ public:
             const size_t index = frame.index;
             auto& node = parser.nodes[index];
             if (complete[index]) { work.pop_back(); continue; }
-            if (node.op == 'e') {
-                error = "Arg Count Mismatch";
+            if (node.op == 'e' || node.op == '?') {
+                error = node.op == 'e' ? "Arg Count Mismatch" : "Math Error";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             if (node.op == 'q') {

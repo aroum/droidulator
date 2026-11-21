@@ -758,6 +758,7 @@ std::string preprocessVectorStats(const std::string& s) {
 using UnaryFunction = double (*)(double);
 static const std::map<std::string, UnaryFunction>& unaryFunctions() {
     static const std::map<std::string, UnaryFunction> functions = {
+        {"print", +[](double value) { return value; }},
         {"sin", custom_sin},
         {"cos", custom_cos},
         {"tan", custom_tan},
@@ -1078,8 +1079,6 @@ double evaluate(const std::string& expr_str, std::string& err) {
         for (const auto& [name, function] : unaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
         for (const auto& [name, function] : binaryFunctions()) parserTemplate.add_variable_or_function(te_variable{name, function});
 
-        parserTemplate.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
-        
         for (const auto& [name, function] : variadicFunctions())
             parserTemplate.add_variable_or_function(te_variable{name, function.legacy,
                 static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
