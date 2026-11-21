@@ -111,6 +111,29 @@ jobs:
           RELEASE_KEY_ALIAS: ${{ secrets.KEY_ALIAS }}
           RELEASE_KEY_PASSWORD: ${{ secrets.KEY_PASSWORD }}
 
+      - name: Verify Kotlin unit test reports
+        run: |
+          python3 - <<'PYTEST'
+          from pathlib import Path
+          import os
+          import xml.etree.ElementTree as ET
+          reports = list(Path("app/build/test-results").glob("test*UnitTest/TEST-*.xml"))
+          assert reports, "No Kotlin unit test reports were produced"
+          suites = [ET.parse(report).getroot() for report in reports]
+          required = {"UnitsReferenceTest", "ConversionCompletionTest", "AutocompleteControllerTest",
+                      "ScriptLibraryControllerTest", "CompletionDeliveryTest"}
+          present = {suite.attrib["name"].rsplit(".", 1)[-1] for suite in suites}
+          assert required <= present, f"Required suites missing: {sorted(required - present)}"
+          tests = sum(int(suite.attrib.get("tests", 0)) for suite in suites)
+          failed = sum(int(suite.attrib.get("failures", 0)) + int(suite.attrib.get("errors", 0)) for suite in suites)
+          skipped = sum(int(suite.attrib.get("skipped", 0)) for suite in suites)
+          assert tests > 0 and failed == 0 and skipped == 0, f"Tests: {tests}, failures: {failed}, skipped: {skipped}"
+          message = f"Kotlin unit tests: {tests} passed across {len(suites)} suites."
+          print(message)
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a") as summary:
+              summary.write(message + "\n")
+          PYTEST
+
       - name: Prepare APK artifact names
         run: |
           cd "app/build/outputs/apk/${APK_VARIANT}"
