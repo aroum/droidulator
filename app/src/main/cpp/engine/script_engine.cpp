@@ -161,23 +161,23 @@ std::vector<double> evaluateScriptReturnValues(const std::string& text, bool& is
     }
     if (parts.size() > 1) {
         isArray = true;
+        if (std::any_of(parts.begin(), parts.end(), [](const auto& part) { return part.empty(); })) {
+            error = "Empty return value";
+            return {};
+        }
         std::vector<double> values;
         values.reserve(parts.size());
         for (const auto& part : parts) {
-            if (part.empty()) {
-                error = "Empty return value";
-                return {};
-            }
-            const double value = evaluate(part, error);
+            const double value = evaluateScalar(part, error, "Return tuple element");
             if (!error.empty()) return {};
             values.push_back(value);
         }
         return values;
     }
-    auto values = parseArrayExpr(expressionText, isArray, error);
-    if (!error.empty() || isArray || !values.empty()) return values;
     const double value = evaluate(expressionText, error);
-    return error.empty() ? std::vector<double>{value} : std::vector<double>{};
+    if (!error.empty()) return {};
+    isArray = engineState().g_last_eval_is_array;
+    return isArray ? engineState().g_last_eval_array : std::vector<double>{value};
 }
 
 static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) {

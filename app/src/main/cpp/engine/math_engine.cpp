@@ -1402,13 +1402,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             }
         } else {
             bool is_arr = false;
-            std::vector<double> arr;
-            if (const auto result = evaluateAst(rhs, err)) {
-                is_arr = engineState().g_last_eval_is_array;
-                arr = is_arr ? engineState().g_last_eval_array : std::vector<double>{*result};
-            } else {
-                arr = parseArrayExpr(rhs, is_arr, err);
-            }
+            auto arr = parseArrayExpr(rhs, is_arr, err);
             if (err.empty() && is_arr) {
                 engineState().user_arrays[lhs] = arr;
                 engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
@@ -1956,6 +1950,11 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
     
     if (trimmed.empty()) return {};
+    if (const auto result = evaluateAst(trimmed, err)) {
+        if (!err.empty()) return {};
+        is_array = engineState().g_last_eval_is_array;
+        return is_array ? engineState().g_last_eval_array : std::vector<double>{*result};
+    }
 
     while (trimmed.size() >= 2 && trimmed.front() == '(' && trimmed.back() == ')') {
         int nesting = 0;
