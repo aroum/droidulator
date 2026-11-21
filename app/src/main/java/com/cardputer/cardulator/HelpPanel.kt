@@ -58,12 +58,14 @@ internal class HelpPanel(
         }
     }
 
-    private fun loadTopics(engine: CardulatorEngine): List<Pair<String, String>> {
-        val topics = engine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }
-        return topics.map { topic ->
-            val detail = engine.nativeGetHelp("help($topic)").lineSequence()
-                .filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
-            topic to detail
-        }.toList()
+    private companion object {
+        private fun loadTopics(engine: CardulatorEngine): List<Pair<String, String>> {
+            val topics = engine.nativeGetHelp("help(index)").lineSequence().filter { it.isNotBlank() }
+            return topics.map { topic ->
+                val detail = engine.nativeGetHelp("help($topic)").lineSequence()
+                    .filter { it.isNotBlank() && !it.startsWith("===") }.joinToString("\n")
+                topic to detail
+            }.toList()
+        }
     }
 }

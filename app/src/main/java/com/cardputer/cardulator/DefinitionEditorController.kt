@@ -35,7 +35,7 @@ internal class DefinitionEditorController(
         }
 
         if (initialExpr.isNotEmpty()) {
-            et.post { highlighter.apply(et.editableText) }
+            highlighter.schedule(et)
         }
 
         val dialog = dialogs.show(title, et, positiveText = activity.getString(R.string.action_save), positiveValidator = {
@@ -56,6 +56,7 @@ internal class DefinitionEditorController(
             et.isEnabled = false
         }
         dialog.setOnDismissListener {
+            highlighter.cancel(et)
             untrack(dialog)
             if (editor?.dialog === dialog) editor = null
             if (activity.isChangingConfigurations) draft.cursor = et.selectionStart

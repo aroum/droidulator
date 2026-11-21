@@ -43,7 +43,28 @@ class MainActivity : AppCompatActivity() {
         return dialog
     }
 
+    private val pendingInputEdits = mutableSetOf<Runnable>()
+
+    private fun postInputEdit(action: () -> Unit) {
+        lateinit var task: Runnable
+        task = Runnable {
+            pendingInputEdits.remove(task)
+            if (!isDestroyed && !isFinishing && etInput.isAttachedToWindow) action()
+        }
+        pendingInputEdits.add(task)
+        etInput.post(task)
+    }
+
+    private var startupDelivery: CompletionDelivery<Throwable?>? = null
+    private var pendingPlot: java.util.concurrent.Future<*>? = null
+
     override fun onDestroy() {
+        startupDelivery?.cancel()
+        if (::etInput.isInitialized) pendingInputEdits.forEach { etInput.removeCallbacks(it) }
+        pendingInputEdits.clear()
+        pendingPlot?.cancel(false)
+        ++plotRefreshGeneration
+        highlighter.close()
         if (replOutputDelegate.isInitialized()) replOutput.close()
         if (helpPanelDelegate.isInitialized()) helpPanel.close()
         activeDialogs.toList().forEach { it.dismiss() }
@@ -185,7 +206,7 @@ class MainActivity : AppCompatActivity() {
         setContentView(R.layout.activity_main)
         // Bind the complete screen before its first visible frame.
         findViewById<View>(R.id.main_root).visibility = View.INVISIBLE
-        UnitsDatabase.initialize(applicationContext) { failure ->
+        startupDelivery = UnitsDatabase.initialize(applicationContext) { failure ->
             if (isFinishing || isDestroyed) return@initialize
             when (failure) {
                 null -> finishStartup()
@@ -525,8 +546,8 @@ class MainActivity : AppCompatActivity() {
                     (count == 2 && start + 1 < currentText.length && currentText.substring(start, start + 2) == "\r\n")
                 )
                 if (tabs[currentTabPosition] == "REPL" && isEnterSendMode && isSingleNewline) {
-                    etInput.post {
-                        if (isSubmitting) return@post
+                    postInputEdit {
+                        if (isSubmitting) return@postInputEdit
                         val text = etInput.editableText
                         val lenToDelete = if (count == 2) 2 else 1
                         if (start + lenToDelete <= text.length && text.subSequence(start, start + lenToDelete).any { it == '\n' || it == '\r' }) {
@@ -556,7 +577,7 @@ class MainActivity : AppCompatActivity() {
                         else -> null
                     }
                     if (next == typed && (typed == ')' || typed == ']' || typed == '}' || typed == '\"' || typed == '\'')) {
-                        etInput.post {
+                        postInputEdit {
                             val text = etInput.editableText
                             if (etInput.selectionStart == start + 1 && start + 1 < text.length && text[start] == typed && text[start + 1] == typed) {
                                 isHighlighting = true
@@ -566,7 +587,7 @@ class MainActivity : AppCompatActivity() {
                             }
                         }
                     } else if (closing != null) {
-                        etInput.post {
+                        postInputEdit {
                             val text = etInput.editableText
                             if (etInput.selectionStart == start + 1 && start < text.length && text[start] == typed && android.view.inputmethod.BaseInputConnection.getComposingSpanStart(text) < 0) {
                                 isHighlighting = true
@@ -919,6 +940,8 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun refreshTabContent(tabName: String) {
+        pendingPlot?.cancel(false)
+        pendingPlot = null
         if (helpPanelDelegate.isInitialized()) helpPanel.cancel()
         findViewById<View>(R.id.search_toggle).visibility = if (tabName in searchableTabs) View.VISIBLE else View.GONE
         dismissErrorOverlay()
@@ -949,7 +972,7 @@ class MainActivity : AppCompatActivity() {
                 toolbarKeyboard.visibility = View.GONE
 
                 val generation = ++plotRefreshGeneration
-                session.preparePlot { result ->
+                pendingPlot = session.preparePlot { result ->
                     if (isDestroyed || isFinishing || tabs[currentTabPosition] != "Plot" ||
                         generation != plotRefreshGeneration
                     ) return@preparePlot

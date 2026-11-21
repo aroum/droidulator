@@ -29,6 +29,15 @@ internal class CalculatorSyntaxHighlighter {
         editor.postDelayed(task, 120)
     }
 
+    fun cancel(editor: EditText) {
+        pendingHighlight.remove(editor)?.let { editor.removeCallbacks(it) }
+    }
+
+    fun close() {
+        pendingHighlight.toList().forEach { (editor, task) -> editor.removeCallbacks(task) }
+        pendingHighlight.clear()
+    }
+
     fun isApplying(editable: Editable): Boolean = highlightingEditables.contains(editable)
 
     private companion object {

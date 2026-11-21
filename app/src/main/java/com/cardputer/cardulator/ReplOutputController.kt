@@ -15,6 +15,7 @@ internal class ReplOutputController(
     private var generation = 0L
     private var pending: Future<*>? = null
     private var closed = false
+    private val scrollToEndTask = Runnable { if (!closed) scroll.fullScroll(ScrollView.FOCUS_DOWN) }
 
     fun rebuild() {
         if (closed) return
@@ -24,10 +25,11 @@ internal class ReplOutputController(
         val (message, showWelcome) = welcome()
         val (mode, precision, grouping) = formatSettings()
         val palette = ReplOutputRenderer.Palette.capture()
+        val snapshotRenderer = renderer
         pending = session.compute({
             nativeSetFormatSettings(mode, precision, grouping)
             val formatted = ReplOutputRenderer.formatResults(items) { nativeFormatNumbers(it) }
-            renderer.render(items, message, showWelcome, formatted, palette)
+            snapshotRenderer.render(items, message, showWelcome, formatted, palette)
         }) { result ->
             if (closed || version != generation) return@compute
             pending = null
@@ -55,6 +57,7 @@ internal class ReplOutputController(
 
     fun close() {
         closed = true
+        scroll.removeCallbacks(scrollToEndTask)
         invalidate()
     }
 
@@ -65,6 +68,6 @@ internal class ReplOutputController(
     }
 
     private fun scrollToEnd() {
-        scroll.post { if (!closed) scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+        scroll.post(scrollToEndTask)
     }
 }

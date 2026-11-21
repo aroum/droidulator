@@ -83,11 +83,34 @@ class CalculatorSession : ViewModel() {
         compute({ PlotView.preparePlotData(nativeGetPlotLines(), nativeGetPlotLimits()) }, completed)
 
 
-    fun <T> compute(operation: CardulatorEngine.() -> T, completed: (Result<T>) -> Unit): Future<*> =
-        engineQueue.submit {
+    @Volatile private var cleared = false
+    private val deliveries = java.util.concurrent.ConcurrentHashMap.newKeySet<CompletionDelivery<*>>()
+
+    fun <T> compute(operation: CardulatorEngine.() -> T, completed: (Result<T>) -> Unit): Future<*> {
+        val delivery = CompletionDelivery(completed)
+        deliveries.add(delivery)
+        val task = object : java.util.concurrent.FutureTask<Unit>(java.util.concurrent.Callable {
             val result = runCatching { engine.operation() }
-            if (!Thread.currentThread().isInterrupted) main.post { completed(result) }
+            if (cleared || Thread.currentThread().isInterrupted) {
+                delivery.cancel()
+                deliveries.remove(delivery)
+            } else main.post {
+                deliveries.remove(delivery)
+                delivery.deliver(result)
+            }
+            Unit
+        }) {
+            override fun cancel(mayInterruptIfRunning: Boolean): Boolean {
+                delivery.cancel()
+                deliveries.remove(delivery)
+                return super.cancel(mayInterruptIfRunning)
+            }
         }
+        if (cleared) task.cancel(false)
+        else try { engineQueue.execute(task) }
+        catch (_: java.util.concurrent.RejectedExecutionException) { task.cancel(false) }
+        return task
+    }
 
     data class CommandResult(
         val entry: ReplDisplayItem, val showPlot: Boolean, val scriptName: String?,
@@ -130,8 +153,12 @@ class CalculatorSession : ViewModel() {
     }
 
     override fun onCleared() {
+        cleared = true
+        deliveries.forEach { it.cancel() }
+        deliveries.clear()
         engineQueue.execute { if (engineDelegate.isInitialized()) engine.close() }
         engineQueue.shutdown()
+        super.onCleared()
     }
 
     var definitionDraft: DefinitionDraft? = null

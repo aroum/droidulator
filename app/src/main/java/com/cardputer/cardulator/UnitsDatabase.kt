@@ -11,15 +11,17 @@ internal object UnitsDatabase {
     @Volatile private var ready = false
 
     /** Called on the main thread. Completion is always delivered there. */
-    fun initialize(context: Context, complete: (Throwable?) -> Unit) {
+    fun initialize(context: Context, complete: (Throwable?) -> Unit): CompletionDelivery<Throwable?> {
+        val delivery = CompletionDelivery(complete)
+        val application = context.applicationContext
         if (ready) {
-            complete(null)
-            return
+            delivery.deliver(null)
+            return delivery
         }
         worker.execute {
             val failure = try {
                 if (!ready) {
-                    CardulatorEngine.nativeInitUnits(installUnitsData(context))
+                    CardulatorEngine.nativeInitUnits(installUnitsData(application))
                     ready = true
                 }
                 null
@@ -28,8 +30,9 @@ internal object UnitsDatabase {
             } catch (error: UnsatisfiedLinkError) {
                 error
             }
-            main.post { complete(failure) }
+            main.post { delivery.deliver(failure) }
         }
+        return delivery
     }
 
     private fun installUnitsData(context: Context): String {

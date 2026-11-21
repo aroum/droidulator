@@ -91,22 +91,14 @@ internal class ScriptEditor(
             background = rounded(bgSoft)
             setTextColor(fgColor)
             setHintTextColor(fgDim)
-            addTextChangedListener(object : TextWatcher {
-                private var pending: Runnable? = null
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (s != null && !(s is Editable && highlighter.isApplying(s))) {
-                        pending?.let { removeCallbacks(it) }
-                        pending = Runnable { if (dialog.isShowing) highlighter.apply(editableText) }
-                        postDelayed(pending!!, 150)
-                    }
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
+            val editor = this
+            doAfterTextChanged { text ->
+                if (text != null && !highlighter.isApplying(text)) highlighter.schedule(editor)
+            }
         }
 
         if (draft.code.isNotEmpty()) {
-            etCode.post { highlighter.apply(etCode.editableText) }
+            highlighter.schedule(etCode)
         }
 
         val btnFg = ThemePalette.btnText
@@ -254,6 +246,7 @@ internal class ScriptEditor(
         }
 
         dialog.setOnDismissListener {
+            highlighter.cancel(etCode)
             draft.nameCursor = etName.selectionStart
             draft.codeCursor = etCode.selectionStart
             onDismiss(dialog)
