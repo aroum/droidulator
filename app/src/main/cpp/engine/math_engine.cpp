@@ -547,6 +547,59 @@ static bool exprReferencesIdent(const std::string& expr, const std::string& iden
     });
 }
 
+static double evaluateIndexedReduction(std::string_view name, const std::string& index,
+        double start, double end, const std::string& body, std::string& err) {
+    const double int64Limit = std::ldexp(1.0, 63);
+    if (!std::isfinite(start) || !std::isfinite(end) || start < -int64Limit || start >= int64Limit || end < -int64Limit || end >= int64Limit) {
+        err = "Overflow Error: invalid loop bounds"; return std::numeric_limits<double>::quiet_NaN();
+    }
+    int64_t i_start = static_cast<int64_t>(std::llround(start));
+    int64_t i_end = static_cast<int64_t>(std::llround(end));
+    const long double count = i_end < i_start ? 0 : static_cast<long double>(i_end) - static_cast<long double>(i_start) + 1;
+    if (count > loopIterationsRemaining) {
+        err = "Overflow Error: loop limit exceeded";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    auto arguments = scalarBindings.empty() ? std::vector<UserArg>{} : scalarBindings.back();
+    size_t var_idx = 0;
+    while (var_idx < arguments.size() && arguments[var_idx].name != index) ++var_idx;
+    if (var_idx == arguments.size()) arguments.push_back({index, 0.0});
+    ScalarBindingScope scope(std::move(arguments));
+
+    double acc = 0.0;
+    if (name == "prod") acc = 1.0;
+    else if (name == "min") acc = std::numeric_limits<double>::infinity();
+    else if (name == "max") acc = -std::numeric_limits<double>::infinity();
+
+    for (int64_t idx = i_start; idx <= i_end;) {
+        if (loopIterationsRemaining == 0) { err = "Overflow Error: loop limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
+        --loopIterationsRemaining;
+        scalarBindings.back()[var_idx].val = static_cast<double>(idx);
+        double step_v = evaluateScalar(body, err, "Loop body");
+        if (!err.empty()) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        if (name == "sum") acc += step_v;
+        else if (name == "prod") acc *= step_v;
+        else if (name == "min") { if (step_v < acc) acc = step_v; }
+        else if (name == "max") { if (step_v > acc) acc = step_v; }
+        if (idx == i_end) break;
+        ++idx;
+    }
+    if (i_start > i_end && (name == "min" || name == "max")) acc = 0.0;
+    return acc;
+}
+
+static const expression::ArithmeticExpression::IndexedReduction indexedReduction{
+    [](std::string_view index, std::string_view body) {
+        const std::string name(index);
+        return isValidLoopIdent(name) && (!isDefinedScalarName(name) || exprReferencesIdent(std::string(body), name));
+    },
+    [](std::string_view name, std::string_view index, double start, double end, std::string_view body, std::string& error) {
+        return evaluateIndexedReduction(name, std::string(index), start, end, std::string(body), error);
+    }
+};
+
 static std::string preprocessInlineConditionalsAndLoops(const std::string& s, std::string& err) {
     std::string res = s;
 
@@ -620,44 +673,8 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 if (!err.empty()) return res;
                 double end_d = evaluateScalar(args[2], err, "Loop bounds");
                 if (!err.empty()) return res;
-                const double int64Limit = std::ldexp(1.0, 63);
-                if (!std::isfinite(start_d) || !std::isfinite(end_d) || start_d < -int64Limit || start_d >= int64Limit || end_d < -int64Limit || end_d >= int64Limit) {
-                    err = "Overflow Error: invalid loop bounds"; return res;
-                }
-                int64_t i_start = static_cast<int64_t>(std::llround(start_d));
-                int64_t i_end = static_cast<int64_t>(std::llround(end_d));
-                const long double count = i_end < i_start ? 0 : static_cast<long double>(i_end) - static_cast<long double>(i_start) + 1;
-                if (count > loopIterationsRemaining) {
-                    err = "Overflow Error: loop limit exceeded";
-                    return res;
-                }
-                auto arguments = scalarBindings.empty() ? std::vector<UserArg>{} : scalarBindings.back();
-                size_t var_idx = 0;
-                while (var_idx < arguments.size() && arguments[var_idx].name != args[0]) ++var_idx;
-                if (var_idx == arguments.size()) arguments.push_back({args[0], 0.0});
-                ScalarBindingScope scope(std::move(arguments));
-
-                double acc = 0.0;
-                if (fname == "prod") acc = 1.0;
-                else if (fname == "min") acc = std::numeric_limits<double>::infinity();
-                else if (fname == "max") acc = -std::numeric_limits<double>::infinity();
-
-                for (int64_t idx = i_start; idx <= i_end;) {
-                    if (loopIterationsRemaining == 0) { err = "Overflow Error: loop limit exceeded"; return res; }
-                    --loopIterationsRemaining;
-                    scalarBindings.back()[var_idx].val = static_cast<double>(idx);
-                    double step_v = evaluate(args[3], err);
-                    if (!err.empty()) {
-                        return res;
-                    }
-                    if (fname == "sum") acc += step_v;
-                    else if (fname == "prod") acc *= step_v;
-                    else if (fname == "min") { if (step_v < acc) acc = step_v; }
-                    else if (fname == "max") { if (step_v > acc) acc = step_v; }
-                    if (idx == i_end) break;
-                    ++idx;
-                }
-                if (i_start > i_end && (fname == "min" || fname == "max")) acc = 0.0;
+                const double acc = evaluateIndexedReduction(fname, args[0], start_d, end_d, args[3], err);
+                if (!err.empty()) return res;
                 std::string rep = fmtInternal(acc);
                 res.replace(pos, close - pos + 1, rep);
                 pos += rep.size();
@@ -989,7 +1006,7 @@ static std::optional<double> evaluateAst(const std::string& source, std::string&
     state.g_last_eval_is_array = false;
     std::optional<std::vector<double>> array;
     const auto result = expression::ArithmeticExpression::evaluate(source, error, lookupScalar,
-        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array);
+        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array, &indexedReduction);
     if (!result) return std::nullopt;
     if (!state.g_math_domain_err.empty()) error = state.g_math_domain_err;
     state.g_last_eval_is_array = array.has_value();

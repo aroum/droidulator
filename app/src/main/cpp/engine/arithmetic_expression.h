@@ -51,14 +51,20 @@ public:
         }
     };
     using CustomLookup = CustomFunction (*)(std::string_view);
+    struct IndexedReduction {
+        bool (*accepts)(std::string_view index, std::string_view body);
+        double (*invoke)(std::string_view name, std::string_view index, double start, double end,
+                         std::string_view body, std::string& error);
+    };
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
                                           ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
                                           ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr,
                                           VariadicLookup variadic = nullptr, CustomLookup custom = nullptr,
-                                          std::optional<std::vector<double>>* arrayResult = nullptr) {
+                                          std::optional<std::vector<double>>* arrayResult = nullptr,
+                                          const IndexedReduction* reduction = nullptr) {
         if (arrayResult) arrayResult->reset();
-        ArithmeticExpression parser(tokenize(source));
+        ArithmeticExpression parser(source, tokenize(source), reduction);
         if (!arrayResult && !parser.tokens.empty() && parser.tokens.front().text == "[" &&
             matchingGroupEnd(source, parser.tokens.front().start) == parser.tokens.back().start)
             return std::nullopt; // Array-valued roots still use the existing array evaluator.
@@ -182,7 +188,7 @@ public:
                 for (size_t i = 0; i + 1 < args.size(); i += 2) visit(args[i]);
             } else if (node.op == 'n' || node.op == 'f' || node.op == '[') {
                 visit(node.left);
-            } else if (node.op == '^' || node.op == '%' || (node.op >= 'A' && node.op <= 'I')) {
+            } else if (node.op == 'R' || node.op == '^' || node.op == '%' || (node.op >= 'A' && node.op <= 'I')) {
                 visit(node.left);
                 visit(node.right);
             }
@@ -239,7 +245,7 @@ public:
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'w' || node.op == 'e' || node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
+            if (node.op == 'R' || node.op == 'w' || node.op == 'e' || node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -373,6 +379,12 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'R') {
+                node.value = reduction->invoke(node.symbol, node.reductionIndex, parser.nodes[node.left].value,
+                    parser.nodes[node.right].value, node.reductionBody, error);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
             if (node.op == 'w') {
                 std::vector<double> arguments;
                 for (size_t argument : parser.callArguments[node.right]) {
@@ -666,12 +678,17 @@ private:
         bool dynamicType = false;
         bool scalarResult = false;
         bool grouped = false;
+        std::string_view reductionIndex;
+        std::string_view reductionBody;
     };
 
-    explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
+    ArithmeticExpression(std::string_view text, std::vector<Token> input, const IndexedReduction* reducer)
+        : source(text), tokens(std::move(input)), reduction(reducer) {}
 
     static constexpr size_t invalid = std::string_view::npos;
+    std::string_view source;
     std::vector<Token> tokens;
+    const IndexedReduction* reduction;
     std::vector<Node> nodes;
     std::vector<std::vector<size_t>> callArguments;
     std::vector<std::vector<double>> literalArrays;
@@ -705,6 +722,41 @@ private:
         if (op == "./") return {'K', 11};
         if (op == "^") return {'^', 12};
         return {0, -1};
+    }
+
+    std::optional<size_t> parseReduction(std::string_view name, unsigned depth) {
+        if (!reduction || (name != "sum" && name != "prod" && name != "min" && name != "max") ||
+            next == tokens.size() || tokens[next].text != "(") return std::nullopt;
+        const size_t first = next + 1;
+        size_t close = first;
+        unsigned nesting = 0;
+        std::vector<size_t> commas;
+        for (; close < tokens.size(); ++close) {
+            const auto& token = tokens[close];
+            if (token.kind == Kind::Open) ++nesting;
+            else if (token.kind == Kind::Close) {
+                if (nesting == 0) break;
+                --nesting;
+            } else if (nesting == 0 && token.kind == Kind::Comma) commas.push_back(close);
+        }
+        if (close == tokens.size() || tokens[close].text != ")" || commas.size() != 3 ||
+            commas.front() != first + 1 || tokens[first].kind != Kind::Word || commas.back() + 1 == close)
+            return std::nullopt;
+        const auto index = tokens[first].text;
+        const size_t bodyStart = tokens[commas.back() + 1].start;
+        const auto body = source.substr(bodyStart, tokens[close].start - bodyStart);
+        if (!reduction->accepts(index, body)) return std::nullopt;
+        next = commas[0] + 1;
+        const size_t lower = parse(0, depth + 1);
+        if (lower == invalid || next != commas[1]) return invalid;
+        ++next;
+        const size_t upper = parse(0, depth + 1);
+        if (upper == invalid || next != commas[2]) return invalid;
+        next = close + 1;
+        Node node{0, 'R', lower, upper, name};
+        node.reductionIndex = index;
+        node.reductionBody = body;
+        return add(std::move(node));
     }
 
     size_t parse(int minimum, unsigned depth) {
@@ -758,7 +810,11 @@ private:
             left = add({value});
         } else {
             if (token.kind == Kind::Word) {
-                if (token.text == "len" && next + 2 < tokens.size() && tokens[next].text == "(" &&
+                const auto indexedReduction = parseReduction(token.text, depth);
+                if (indexedReduction) {
+                    if (*indexedReduction == invalid) return invalid;
+                    left = *indexedReduction;
+                } else if (token.text == "len" && next + 2 < tokens.size() && tokens[next].text == "(" &&
                     tokens[next + 1].kind == Kind::Word && tokens[next + 2].text == ")") {
                     left = add({0, 'l', 0, 0, tokens[next + 1].text});
                     next += 3;

@@ -717,6 +717,36 @@ int main() {
         assert(std::abs((*typedArray)[0] - 110) < 1e-12 && std::abs((*typedArray)[1] - 111.1) < 1e-12);
         assert(evaluateLiteralAst("sum([100,200]+10%)") == 330 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[100,200],1/0)+10%") && typedArray == std::vector<double>({110,220}) && signatureError.empty());
+        assert(evaluate("sum(typed_reduction_index,1,3,typed_reduction_index^2)", signatureError) == 14 && signatureError.empty());
+        assert(evaluate("prod(typed_reduction_index,1,4,typed_reduction_index)", signatureError) == 24 && signatureError.empty());
+        assert(evaluate("min(typed_reduction_index,3,1,typed_reduction_index)", signatureError) == 0 && signatureError.empty());
+        evaluate("sum(typed_reduction_index,1,3,[typed_reduction_index])", signatureError);
+        assert(signatureError == "Loop body must be scalar");
+        assert(engineState().user_args.end() == std::find_if(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& value) { return value.name == "typed_reduction_index"; }));
+        assert(evaluate("2+2", signatureError) == 4 && signatureError.empty());
+        const auto reductionAst = [&](const std::string& source) {
+            signatureError.clear();
+            loopIterationsRemaining = 100000;
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray, &indexedReduction);
+        };
+        assert(reductionAst("sum(ast_loop_i,1,3,ast_loop_i^2)") == 14 && signatureError.empty());
+        assert(reductionAst("prod(ast_loop_i,1,4,ast_loop_i)") == 24 && signatureError.empty());
+        assert(reductionAst("sum(ast_loop_i,1,2,sum(ast_loop_i,1,2,ast_loop_i)+ast_loop_i)") == 9 && signatureError.empty());
+        assert(reductionAst("max(ast_loop_i,3,1,1/0)") == 0 && signatureError.empty());
+        assert(reductionAst("len([sum(ast_loop_i,1,3,ast_loop_i),4])") == 2 && signatureError.empty());
+        assert(reductionAst("sum(ast_loop_i,if(1,1,[2]),3,ast_loop_i)") == 6 && signatureError.empty());
+        assert(std::abs(*reductionAst("sum(ast_loop_i,1,3,ast_loop_i)+10%") - 6.6) < 1e-12 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(reductionAst("if(0,sum(ast_loop_i,1,3,ast_print_once(ast_loop_i)),7)") == 7 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        const auto excessiveReduction = reductionAst("sum(ast_loop_i,1,100001,ast_print_once(ast_loop_i))");
+        assert(excessiveReduction && std::isnan(*excessiveReduction) && signatureError.find("loop limit") != std::string::npos);
+        assert(engineState().script_console_output.empty());
+        evaluateInput("ast_reduction_formula(x)=sum(ast_loop_i,1,3,x*ast_loop_i)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("ast_reduction_formula(4)", signatureError) == 24 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
