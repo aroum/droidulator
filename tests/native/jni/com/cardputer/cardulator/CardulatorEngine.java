@@ -64,6 +64,15 @@ public class CardulatorEngine {
     if (!e.nativeEvaluateDetailed("jni_syntax(x)=x+")[0].equals("error")) throw new AssertionError("invalid definition accepted");
     e.nativeEvaluate("jni_syntax(3)");
     if (e.nativeGetLastNumericVal() != 4) throw new AssertionError("definition rollback");
+    e.nativeEvaluate("jni_index_shadow(a,b)=sum(a,1,3,a*b)+len(a)");
+    e.nativeEvaluate("jni_index_shadow([5,6],2)");
+    if (e.nativeGetLastNumericVal() != 14) throw new AssertionError("array parameter shadows reduction index");
+    e.nativeRestoreScalar("jni_parameter_constant", 100, true);
+    e.nativeEvaluate("fn jni_constant_shadow(jni_parameter_constant,b) { jni_parameter_constant[1]=b; return jni_parameter_constant }");
+    e.nativeEvaluate("jni_constant_shadow([1,2],5)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{5,2})) throw new AssertionError("constant shadows array parameter");
+    e.nativeEvaluate("jni_parameter_constant");
+    if (e.nativeGetLastNumericVal() != 100) throw new AssertionError("shadowed constant was not restored");
     e.nativeEvaluate("jni_factorial(x)=if(x<=1,1,x*jni_factorial(x-1))");
     e.nativeEvaluate("jni_factorial(5)");
     if (e.nativeGetLastNumericVal() != 120) throw new AssertionError("recursive AST formula");

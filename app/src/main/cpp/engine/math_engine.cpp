@@ -119,7 +119,9 @@ static double evaluateIndexedReduction(std::string_view name, const std::string&
     size_t var_idx = 0;
     while (var_idx < arguments.size() && arguments[var_idx].name != index) ++var_idx;
     if (var_idx == arguments.size()) arguments.push_back({index, 0.0});
-    ScalarBindingScope scope(std::move(arguments), arrayBindings.empty() ? std::map<std::string, std::vector<double>>{} : arrayBindings.back());
+    auto arrays = arrayBindings.empty() ? std::map<std::string, std::vector<double>>{} : arrayBindings.back();
+    arrays.erase(index);
+    ScalarBindingScope scope(std::move(arguments), std::move(arrays));
 
     double acc = 0.0;
     if (name == "prod") acc = 1.0;

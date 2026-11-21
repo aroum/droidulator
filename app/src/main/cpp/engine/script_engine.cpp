@@ -390,6 +390,16 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
 
     auto orig_args = engineState().user_args;
     auto orig_arrays = engineState().user_arrays;
+    std::vector<std::pair<size_t, UserConst>> parameterConstants;
+    for (size_t i = 0; i < engineState().user_consts.size(); ++i) {
+        const auto& constant = engineState().user_consts[i];
+        if (std::find(func.params.begin(), func.params.end(), constant.name) != func.params.end())
+            parameterConstants.emplace_back(i, constant);
+    }
+    engineState().user_consts.erase(std::remove_if(engineState().user_consts.begin(), engineState().user_consts.end(),
+        [&](const UserConst& constant) {
+            return std::find(func.params.begin(), func.params.end(), constant.name) != func.params.end();
+        }), engineState().user_consts.end());
 
     for (size_t i = 0; i < func.params.size(); ++i) {
         engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
@@ -553,6 +563,13 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     if (step_count >= max_steps && !has_returned && err.empty()) err = "Function statement limit reached";
     engineState().user_args = std::move(orig_args);
     engineState().user_arrays = std::move(orig_arrays);
+    for (const auto& [position, constant] : parameterConstants) {
+        auto& constants = engineState().user_consts;
+        constants.erase(std::remove_if(constants.begin(), constants.end(), [&](const UserConst& value) {
+            return value.name == constant.name;
+        }), constants.end());
+        constants.insert(constants.begin() + std::min(position, constants.size()), constant);
+    }
 
     if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
     return ret_val;
