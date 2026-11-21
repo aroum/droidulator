@@ -27,14 +27,19 @@ public:
     using UnaryLookup = UnaryFunction (*)(std::string_view);
     using ArrayLookup = const std::vector<double>* (*)(std::string_view);
     using ScalarLookup = std::optional<double> (*)(std::string_view);
+    struct Argument {
+        double scalar = 0;
+        std::optional<std::vector<double>> array;
+    };
     struct CustomFunction {
         size_t arity = 0;
         std::function<double(const std::vector<double>&, std::string&)> invoke;
         std::function<double(const std::vector<double>&, std::string&, std::optional<std::vector<double>>&)> invokeTyped;
         bool variadic = false;
         bool acceptsNonFinite = false;
+        std::function<double(const std::vector<Argument>&, std::string&, std::optional<std::vector<double>>&)> invokeArguments;
         bool acceptsArity(size_t count) const { return variadic ? count >= 1 && count <= arity : count == arity; }
-        explicit operator bool() const { return static_cast<bool>(invoke) || static_cast<bool>(invokeTyped); }
+        explicit operator bool() const { return static_cast<bool>(invoke) || static_cast<bool>(invokeTyped) || static_cast<bool>(invokeArguments); }
         double operator()(const std::vector<double>& values, std::string& error,
                           std::optional<std::vector<double>>* array = nullptr) const {
             if (array) array->reset();
@@ -43,7 +48,12 @@ public:
                 return std::numeric_limits<double>::quiet_NaN();
             }
             std::optional<std::vector<double>> returnedArray;
-            const double result = invokeTyped ? invokeTyped(values, error, returnedArray) : invoke(values, error);
+            double result;
+            if (invokeArguments) {
+                std::vector<Argument> arguments;
+                for (double value : values) arguments.push_back({value, std::nullopt});
+                result = invokeArguments(arguments, error, returnedArray);
+            } else result = invokeTyped ? invokeTyped(values, error, returnedArray) : invoke(values, error);
             if (error.empty()) {
                 if (returnedArray) {
                     if (array) *array = std::move(returnedArray);
@@ -203,7 +213,7 @@ public:
                     (args.size() == 2 && binary && binary(node.symbol)) || (variadic && variadic(node.symbol));
                 if (builtin) node.customFunction = {};
                 else if (!node.customFunction && (unary || binary || variadic || custom)) node.op = '?';
-                if (node.customFunction && node.customFunction.invokeTyped) {
+                if (node.customFunction && (node.customFunction.invokeTyped || node.customFunction.invokeArguments)) {
                     node.op = 'w';
                     node.dynamicType = true;
                     node.arraySlot = parser.literalArrays.size();
@@ -236,6 +246,7 @@ public:
             return std::numeric_limits<double>::quiet_NaN();
         }
         const auto visitScalarInputs = [&](const Node& node, const auto& visit) {
+            if (node.op == 'w' && node.customFunction.invokeArguments) return;
             if (node.op == '?' || node.op == 'e' || node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
                 for (size_t argument : parser.callArguments[node.right]) visit(argument);
             } else if (node.op == 'q') {
@@ -253,6 +264,8 @@ public:
         // before any branch or user callback executes.
         std::vector<bool> typedConsumers(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            if (node.op == 'w' && node.customFunction.invokeArguments)
+                for (size_t argument : parser.callArguments[node.right]) typedConsumers[argument] = true;
             visitScalarInputs(node, [&](size_t argument) {
                 if (parser.nodes[argument].dynamicType) typedConsumers[argument] = true;
             });
@@ -272,6 +285,12 @@ public:
             if (parser.nodes[i].dynamicType && i != root && !typedConsumers[i]) return std::nullopt;
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            if (node.op == 'w' && node.customFunction.invokeArguments) {
+                for (size_t argument : parser.callArguments[node.right]) {
+                    consumedArrays[argument] = true;
+                    if (isArrayNode(argument) && !parser.nodes[argument].op) parser.nodes[argument].op = 'a';
+                }
+            }
             visitScalarInputs(node, [&](size_t argument) {
                 if (parser.nodes[argument].dynamicType || node.op == 'e' || node.op == '?') consumedArrays[argument] = true;
             });
@@ -441,17 +460,27 @@ public:
                 continue;
             }
             if (node.op == 'w') {
-                std::vector<double> arguments;
+                std::vector<double> scalarArguments;
+                std::vector<Argument> arguments;
                 for (size_t argument : parser.callArguments[node.right]) {
                     const double value = parser.nodes[argument].value;
-                    if (!std::isfinite(value)) {
-                        error = std::isnan(value) ? "Math Error" : "Overflow Error";
-                        return std::numeric_limits<double>::quiet_NaN();
+                    if (isArrayNode(argument)) {
+                        const auto values = arrayValue(argument);
+                        if (!values) { error = "Array not defined"; return std::numeric_limits<double>::quiet_NaN(); }
+                        arguments.push_back({0, *values});
+                    } else {
+                        if (!std::isfinite(value)) {
+                            error = std::isnan(value) ? "Math Error" : "Overflow Error";
+                            return std::numeric_limits<double>::quiet_NaN();
+                        }
+                        arguments.push_back({value, std::nullopt});
                     }
-                    arguments.push_back(value);
+                    scalarArguments.push_back(value);
                 }
                 std::optional<std::vector<double>> returnedArray;
-                node.value = node.customFunction(arguments, error, &returnedArray);
+                node.value = node.customFunction.invokeArguments ?
+                    node.customFunction.invokeArguments(arguments, error, returnedArray) :
+                    node.customFunction(scalarArguments, error, &returnedArray);
                 if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
                 if (returnedArray) parser.literalArrays[node.arraySlot] = std::move(*returnedArray);
                 else node.scalarResult = true;

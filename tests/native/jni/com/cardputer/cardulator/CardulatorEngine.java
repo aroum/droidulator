@@ -49,6 +49,12 @@ public class CardulatorEngine {
     if (!java.util.Arrays.equals(e.nativeLastArray(), new double[0])) throw new AssertionError("empty AST array output");
     e.nativeEvaluate("sum([1,2])");
     if (e.nativeLastArray() != null || e.nativeGetLastNumericVal() != 3) throw new AssertionError("scalar after array output");
+    e.nativeEvaluate("jni_typed_mix(a,b)=a+b");
+    e.nativeEvaluate("jni_typed_mix([1,2],3)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{4,5})) throw new AssertionError("typed formula arguments");
+    e.nativeEvaluate("fn jni_typed_mutate(a,b) { a[1]=a[1]+b; return a }");
+    e.nativeEvaluate("jni_typed_mutate([1,2],5)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{6,2})) throw new AssertionError("typed script arguments");
     e.nativeInit();
     if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
     String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);

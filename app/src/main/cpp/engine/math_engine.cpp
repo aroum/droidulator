@@ -17,14 +17,24 @@ static thread_local size_t loopIterationsRemaining = 100000;
 static constexpr size_t MAX_ARRAY_ELEMENTS = 100000;
 // Formula parameters and reduction indices are local to the active evaluation.
 static thread_local std::vector<std::vector<UserArg>> scalarBindings;
+static thread_local std::vector<std::map<std::string, std::vector<double>>> arrayBindings;
 
 class ScalarBindingScope {
 public:
-    explicit ScalarBindingScope(std::vector<UserArg> values) { scalarBindings.push_back(std::move(values)); }
-    ~ScalarBindingScope() { scalarBindings.pop_back(); }
+    explicit ScalarBindingScope(std::vector<UserArg> values, std::map<std::string, std::vector<double>> arrays = {}) {
+        scalarBindings.push_back(std::move(values));
+        arrayBindings.push_back(std::move(arrays));
+    }
+    ~ScalarBindingScope() { arrayBindings.pop_back(); scalarBindings.pop_back(); }
     ScalarBindingScope(const ScalarBindingScope&) = delete;
     ScalarBindingScope& operator=(const ScalarBindingScope&) = delete;
 };
+
+static const std::vector<double>* scopedArray(std::string_view name) {
+    if (arrayBindings.empty()) return nullptr;
+    const auto found = arrayBindings.back().find(std::string(name));
+    return found == arrayBindings.back().end() ? nullptr : &found->second;
+}
 
 static std::optional<double> scopedScalar(std::string_view name) {
     if (!scalarBindings.empty()) {
@@ -567,7 +577,7 @@ static double evaluateIndexedReduction(std::string_view name, const std::string&
     size_t var_idx = 0;
     while (var_idx < arguments.size() && arguments[var_idx].name != index) ++var_idx;
     if (var_idx == arguments.size()) arguments.push_back({index, 0.0});
-    ScalarBindingScope scope(std::move(arguments));
+    ScalarBindingScope scope(std::move(arguments), arrayBindings.empty() ? std::map<std::string, std::vector<double>>{} : arrayBindings.back());
 
     double acc = 0.0;
     if (name == "prod") acc = 1.0;
@@ -935,6 +945,7 @@ static expression::ArithmeticExpression::VariadicFunction lookupVariadic(std::st
 }
 
 static const std::vector<double>* lookupArray(std::string_view name) {
+    if (const auto array = scopedArray(name)) return array;
     if (scopedScalar(name)) return nullptr;
     const auto& arrays = engineState().user_arrays;
     const auto found = arrays.find(std::string(name));
@@ -942,6 +953,7 @@ static const std::vector<double>* lookupArray(std::string_view name) {
 }
 
 static std::optional<double> lookupScalar(std::string_view name) {
+    if (scopedArray(name)) return std::nullopt;
     if (const auto argument = scopedScalar(name)) return argument;
     const auto& state = engineState();
     if (name.size() > 1 && name.front() == 'e') {
@@ -1000,23 +1012,31 @@ static expression::ArithmeticExpression::CustomFunction lookupInheritedBuiltin(s
 }
 
 static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std::string_view name) {
-    if (scopedScalar(name)) return {};
+    if (scopedScalar(name) || scopedArray(name)) return {};
     for (const auto& function : engineState().user_script_funcs) {
         if (function.name != name) continue;
-        return {function.params.size(), {}, [name = std::string(name)](const std::vector<double>& values, std::string& error,
-                std::optional<std::vector<double>>& array) {
+        expression::ArithmeticExpression::CustomFunction result;
+        result.arity = function.params.size();
+        result.invokeArguments = [name = std::string(name)](const std::vector<expression::ArithmeticExpression::Argument>& arguments,
+                std::string& error, std::optional<std::vector<double>>& array) {
+            std::vector<double> values;
+            std::vector<std::optional<std::vector<double>>> arrays;
+            for (const auto& argument : arguments) { values.push_back(argument.scalar); arrays.push_back(argument.array); }
             // Script functions use their own parameters and session variables.
             ScalarBindingScope scope(std::vector<UserArg>{});
-            return executeScriptFunc(name, values, error, nullptr, &array);
-        }};
+            return executeScriptFunc(name, values, error, nullptr, &array, &arrays);
+        };
+        return result;
     }
     for (const auto& definition : engineState().user_funcs) {
         const auto source = std::string_view(definition);
         if (expression::trim(source.substr(0, source.find('('))) != name) continue;
         auto parsed = parseUserFunctionDefinition(source);
         if (!parsed) continue;
-        return {parsed->params.size(), {}, [function = std::move(*parsed)](const std::vector<double>& values, std::string& error,
-                std::optional<std::vector<double>>& array) {
+        expression::ArithmeticExpression::CustomFunction result;
+        result.arity = parsed->params.size();
+        result.invokeArguments = [function = std::move(*parsed)](const std::vector<expression::ArithmeticExpression::Argument>& values,
+                std::string& error, std::optional<std::vector<double>>& array) {
             static thread_local unsigned depth = 0;
             if (depth >= 64) {
                 error = "Function recursion limit exceeded";
@@ -1028,14 +1048,17 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
                 ~CallDepth() { --value; }
             } callDepth(depth);
             std::vector<UserArg> arguments;
-            arguments.reserve(values.size());
-            for (size_t i = 0; i < values.size(); ++i)
-                arguments.push_back({function.params[i], values[i]});
-            ScalarBindingScope scope(std::move(arguments));
+            std::map<std::string, std::vector<double>> arrays;
+            for (size_t i = 0; i < values.size(); ++i) {
+                if (values[i].array) arrays.emplace(function.params[i], *values[i].array);
+                else arguments.push_back({function.params[i], values[i].scalar});
+            }
+            ScalarBindingScope scope(std::move(arguments), std::move(arrays));
             const double result = evaluate(function.body, error);
             if (error.empty() && engineState().g_last_eval_is_array) array = engineState().g_last_eval_array;
             return result;
-        }};
+        };
+        return result;
     }
     return lookupInheritedBuiltin(name);
 }

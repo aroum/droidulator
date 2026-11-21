@@ -377,7 +377,7 @@ bool executeScriptAssignments(const std::string& step, std::string& err) {
     return true;
 }
 
-double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues, std::optional<std::vector<double>>* arrayResult) {
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues, std::optional<std::vector<double>>* arrayResult, const std::vector<std::optional<std::vector<double>>>* arrayArguments) {
     if (arrayResult) arrayResult->reset();
     static thread_local unsigned depth = 0;
     if (depth >= 64) { err = "Function recursion limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
@@ -391,7 +391,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
     }
 
     const auto func = *it;
-    if (arg_vals.size() != func.params.size()) {
+    if (arg_vals.size() != func.params.size() || (arrayArguments && arrayArguments->size() != arg_vals.size())) {
         err = "Arg Count Mismatch";
         return std::numeric_limits<double>::quiet_NaN();
     }
@@ -403,7 +403,11 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
         engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
             return a.name == func.params[i];
         }), engineState().user_args.end());
-        engineState().user_args.push_back({func.params[i], arg_vals[i]});
+        if (arrayArguments && (*arrayArguments)[i]) engineState().user_arrays[func.params[i]] = *(*arrayArguments)[i];
+        else {
+            engineState().user_arrays.erase(func.params[i]);
+            engineState().user_args.push_back({func.params[i], arg_vals[i]});
+        }
     }
 
     double ret_val = 0.0;

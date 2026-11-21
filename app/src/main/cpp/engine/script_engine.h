@@ -204,4 +204,4 @@ void runScript(const std::string& code);
 bool executeScriptAssignments(const std::string& statements, std::string& error);
 std::vector<double> evaluateScriptReturnValues(const std::string& expression, bool& isArray, std::string& error);
 
-double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues = nullptr, std::optional<std::vector<double>>* arrayResult = nullptr);
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues = nullptr, std::optional<std::vector<double>>* arrayResult = nullptr, const std::vector<std::optional<std::vector<double>>>* arrayArguments = nullptr);
