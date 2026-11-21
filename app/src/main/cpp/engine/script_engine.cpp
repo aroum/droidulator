@@ -377,7 +377,8 @@ bool executeScriptAssignments(const std::string& step, std::string& err) {
     return true;
 }
 
-double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues) {
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues, std::optional<std::vector<double>>* arrayResult) {
+    if (arrayResult) arrayResult->reset();
     static thread_local unsigned depth = 0;
     if (depth >= 64) { err = "Function recursion limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
     struct DepthGuard { unsigned& value; explicit DepthGuard(unsigned& d) : value(d) { ++value; } ~DepthGuard() { --value; } } guard(depth);
@@ -447,6 +448,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             auto values = evaluateScriptReturnValues(line.substr(6), array, err);
             if (!err.empty()) break;
             ret_val = values.empty() ? 0.0 : values.front();
+            if (arrayResult && array) *arrayResult = values;
             if (returnValues) *returnValues = std::move(values);
             has_returned = true;
             break;

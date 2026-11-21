@@ -945,10 +945,11 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
     if (scopedScalar(name)) return {};
     for (const auto& function : engineState().user_script_funcs) {
         if (function.name != name) continue;
-        return {function.params.size(), [name = std::string(name)](const std::vector<double>& values, std::string& error) {
+        return {function.params.size(), {}, [name = std::string(name)](const std::vector<double>& values, std::string& error,
+                std::optional<std::vector<double>>& array) {
             // Script functions use their own parameters and session variables.
             ScalarBindingScope scope(std::vector<UserArg>{});
-            return executeScriptFunc(name, values, error);
+            return executeScriptFunc(name, values, error, nullptr, &array);
         }};
     }
     for (const auto& definition : engineState().user_funcs) {
@@ -956,7 +957,8 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
         if (expression::trim(source.substr(0, source.find('('))) != name) continue;
         auto parsed = parseUserFunctionDefinition(source);
         if (!parsed) continue;
-        return {parsed->params.size(), [function = std::move(*parsed)](const std::vector<double>& values, std::string& error) {
+        return {parsed->params.size(), {}, [function = std::move(*parsed)](const std::vector<double>& values, std::string& error,
+                std::optional<std::vector<double>>& array) {
             static thread_local unsigned depth = 0;
             if (depth >= 64) {
                 error = "Function recursion limit exceeded";
@@ -972,10 +974,9 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
             for (size_t i = 0; i < values.size(); ++i)
                 arguments.push_back({function.params[i], values[i]});
             ScalarBindingScope scope(std::move(arguments));
-            return evaluate(function.body, error);
-        }, []() -> std::optional<std::vector<double>> {
-            if (!engineState().g_last_eval_is_array) return std::nullopt;
-            return engineState().g_last_eval_array;
+            const double result = evaluate(function.body, error);
+            if (error.empty() && engineState().g_last_eval_is_array) array = engineState().g_last_eval_array;
+            return result;
         }};
     }
     return {};

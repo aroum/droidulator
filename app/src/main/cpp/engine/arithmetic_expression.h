@@ -27,17 +27,18 @@ public:
     struct CustomFunction {
         size_t arity = 0;
         std::function<double(const std::vector<double>&, std::string&)> invoke;
-        std::function<std::optional<std::vector<double>>()> resultArray;
-        explicit operator bool() const { return static_cast<bool>(invoke); }
+        std::function<double(const std::vector<double>&, std::string&, std::optional<std::vector<double>>&)> invokeTyped;
+        explicit operator bool() const { return static_cast<bool>(invoke) || static_cast<bool>(invokeTyped); }
         double operator()(const std::vector<double>& values, std::string& error,
                           std::optional<std::vector<double>>* array = nullptr) const {
+            if (array) array->reset();
             if (values.size() != arity) {
                 error = "Arg Count Mismatch";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            const double result = invoke(values, error);
-            if (error.empty() && resultArray) {
-                auto returnedArray = resultArray();
+            std::optional<std::vector<double>> returnedArray;
+            const double result = invokeTyped ? invokeTyped(values, error, returnedArray) : invoke(values, error);
+            if (error.empty()) {
                 if (returnedArray) {
                     if (array) *array = std::move(returnedArray);
                     else {
@@ -122,6 +123,13 @@ public:
                 }
                 continue;
             }
+            if (custom) {
+                node.customFunction = custom(node.symbol);
+                if (node.customFunction && node.customFunction.arity != args.size()) {
+                    node.op = 'e';
+                    continue;
+                }
+            }
             if (node.symbol == "dot" && args.size() == 2 && binary && binary("dot") &&
                 isArrayNode(args[0]) && isArrayNode(args[1])) {
                 node.op = 'd';
@@ -140,15 +148,12 @@ public:
             if (args.size() != 1 || !isArrayNode(args.front())) {
                 const bool builtin = (args.size() == 1 && unary && unary(node.symbol)) ||
                     (args.size() == 2 && binary && binary(node.symbol)) || (variadic && variadic(node.symbol));
-                if (!builtin && custom) node.customFunction = custom(node.symbol);
-                if (node.customFunction && node.customFunction.resultArray) {
-                    if (node.customFunction.arity != args.size()) node.op = 'e';
-                    else {
-                        node.op = 'w';
-                        node.dynamicType = true;
-                        node.arraySlot = parser.literalArrays.size();
-                        parser.literalArrays.emplace_back();
-                    }
+                if (builtin) node.customFunction = {};
+                if (node.customFunction && node.customFunction.invokeTyped) {
+                    node.op = 'w';
+                    node.dynamicType = true;
+                    node.arraySlot = parser.literalArrays.size();
+                    parser.literalArrays.emplace_back();
                 }
                 continue;
             }
@@ -158,7 +163,7 @@ public:
                 node.statistic = *statistic;
             } else {
                 if (unary) node.function = unary(node.symbol);
-                if (!node.function && custom) node.customFunction = custom(node.symbol);
+                if (node.function) node.customFunction = {};
                 if (!node.function && !node.customFunction) continue;
                 if (node.customFunction && node.customFunction.arity != 1) return std::nullopt;
                 node.op = 'u';
@@ -170,7 +175,7 @@ public:
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
         const auto visitScalarInputs = [&](const Node& node, const auto& visit) {
-            if (node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
+            if (node.op == 'e' || node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
                 for (size_t argument : parser.callArguments[node.right]) visit(argument);
             } else if (node.op == 'q') {
                 const auto& args = parser.callArguments[node.right];
