@@ -73,6 +73,21 @@ public:
                          std::string_view body, std::string& error);
     };
 
+    static bool validateSyntax(std::string_view source, const IndexedReduction* reduction = nullptr) {
+        std::vector<std::pair<std::string_view, unsigned>> pending{{source, 0}};
+        while (!pending.empty()) {
+            const auto [body, depth] = pending.back();
+            pending.pop_back();
+            if (depth >= 128) return false;
+            ArithmeticExpression parser(body, tokenize(body), reduction);
+            const auto root = parser.parse(0, 0);
+            if (root == invalid || parser.next != parser.tokens.size()) return false;
+            for (const auto& node : parser.nodes)
+                if (node.op == 'R') pending.emplace_back(node.reductionBody, depth + 1);
+        }
+        return true;
+    }
+
     static std::optional<double> evaluate(std::string_view source, std::string& error,
                                           ScalarLookup lookup = nullptr, UnaryLookup unary = nullptr,
                                           ArrayLookup arrays = nullptr, BinaryLookup binary = nullptr,

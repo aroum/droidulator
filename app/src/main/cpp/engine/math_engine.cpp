@@ -1429,25 +1429,19 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 if (isReservedName(parameter)) { err = "Reserved parameter: " + parameter; return std::numeric_limits<double>::quiet_NaN(); }
             }
 
-            auto previousFunctions = engineState().user_funcs;
-            // Replace the definition provisionally while checking substitution.
-            engineState().user_funcs.erase(std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(), [&](const std::string& fn) {
-                size_t open = fn.find('(');
-                std::string fname = (open != std::string::npos) ? fn.substr(0, open) : fn;
-                fname.erase(0, fname.find_first_not_of(" \t"));
-                fname.erase(fname.find_last_not_of(" \t") + 1);
-                return fname == target_fname;
-            }), engineState().user_funcs.end());
-
-            engineState().user_funcs.push_back(expr_str);
-            std::string test_err = "";
-            substituteUserFuncs(lhs, test_err);
-            if (!test_err.empty()) {
-                engineState().user_funcs = std::move(previousFunctions);
-                err = "Func Def Error";
+            // Validate grammar before changing the catalogue. Definitions may
+            // reference forward or recursive calls; no value is evaluated here.
+            if (!expression::ArithmeticExpression::validateSyntax(rhs, &indexedReduction)) {
+                err = "Func Def Error: invalid expression syntax";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            
+            engineState().user_funcs.erase(std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(),
+                [&](const std::string& definition) {
+                    const auto parsed = parseUserFunctionDefinition(definition);
+                    return parsed && parsed->name == target_fname;
+                }), engineState().user_funcs.end());
+            engineState().user_funcs.push_back(expr_str);
+
             std::string fname_auto = target_fname + "(";
             if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), fname_auto) == engineState().autocomplete_words.end()) {
                 engineState().autocomplete_words.push_back(fname_auto);

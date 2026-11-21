@@ -836,6 +836,26 @@ int main() {
         assert(evaluateArrayAst("typed_mix([1,2],[3])") && !signatureError.empty());
         assert(evaluateLiteralAst("typed_mix(2,3)") == 5 && signatureError.empty());
         assert(evaluateArrayAst("script_map_formula([2,3])") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        engineState().script_console_output.clear();
+        evaluateInput("syntax_only(x)=ast_print_once(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty() && engineState().script_console_output.empty());
+        evaluateInput("syntax_later(x)=not_yet_defined(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("syntax_preserved(x)=x+1", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        for (const auto& body : {"x+", "sin(,x)", "[x,]", "sum(i,1,3,i+)"}) {
+            evaluateInput(std::string("syntax_preserved(x)=") + body, signatureError, signatureDefinition);
+            assert(!signatureError.empty());
+            assert(evaluate("syntax_preserved(3)", signatureError) == 4 && signatureError.empty());
+        }
+        evaluateInput("syntax_recursive(x)=if(x<=1,1,x*syntax_recursive(x-1))", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("syntax_recursive(5)", signatureError) == 120 && signatureError.empty());
+        evaluateInput("syntax_infinite(x)=syntax_infinite(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluate("syntax_infinite(1)", signatureError);
+        assert(signatureError == "Function recursion limit exceeded");
+        assert(evaluate("2+2", signatureError) == 4 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
