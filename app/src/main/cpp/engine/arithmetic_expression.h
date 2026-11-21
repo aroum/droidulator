@@ -7,6 +7,7 @@
 #include <cstdlib>
 #include <functional>
 #include <limits>
+#include <memory>
 
 namespace expression {
 
@@ -64,12 +65,58 @@ public:
                                           std::optional<std::vector<double>>* arrayResult = nullptr,
                                           const IndexedReduction* reduction = nullptr) {
         if (arrayResult) arrayResult->reset();
-        ArithmeticExpression parser(source, tokenize(source), reduction);
+        // Cache only syntax. Names, function descriptors, array types and values
+        // are bound afresh, so scopes and edits cannot leak through a cached tree.
+        struct ParsedSyntax {
+            std::shared_ptr<const std::string> source;
+            const IndexedReduction* reduction;
+            std::vector<Token> tokens;
+            std::vector<Node> nodes;
+            std::vector<std::vector<size_t>> arguments;
+            std::vector<std::vector<double>> arrays;
+            std::vector<ReductionDecision> decisions;
+            size_t root;
+            size_t bytes;
+        };
+        static thread_local std::vector<ParsedSyntax> syntaxCache;
+        static thread_local size_t cachedBytes = 0;
+        auto cached = std::find_if(syntaxCache.begin(), syntaxCache.end(), [&](const auto& entry) {
+            if (entry.reduction != reduction || *entry.source != source) return false;
+            // Four-argument numeric statistics can become indexed reductions
+            // when a formerly defined scalar disappears, and vice versa.
+            return std::all_of(entry.decisions.begin(), entry.decisions.end(), [&](const auto& decision) {
+                return reduction->accepts(decision.index, decision.body) == decision.accepted;
+            });
+        });
+        auto ownedSource = cached == syntaxCache.end() ? std::make_shared<const std::string>(source) : cached->source;
+        ArithmeticExpression parser(*ownedSource, cached == syntaxCache.end() ? tokenize(*ownedSource) : cached->tokens, reduction);
         if (!arrayResult && !parser.tokens.empty() && parser.tokens.front().text == "[" &&
             matchingGroupEnd(source, parser.tokens.front().start) == parser.tokens.back().start)
-            return std::nullopt; // Array-valued roots still use the existing array evaluator.
-        const auto root = parser.parse(0, 0);
-        if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
+            return std::nullopt;
+        size_t root;
+        if (cached != syntaxCache.end()) {
+            parser.nodes = cached->nodes;
+            parser.callArguments = cached->arguments;
+            parser.literalArrays = cached->arrays;
+            root = cached->root;
+        } else {
+            root = parser.parse(0, 0);
+            if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
+            size_t bytes = source.size() + parser.tokens.size() * sizeof(Token) + parser.nodes.size() * sizeof(Node);
+            for (const auto& args : parser.callArguments) bytes += sizeof(args) + args.size() * sizeof(size_t);
+            bytes += parser.literalArrays.size() * sizeof(std::vector<double>);
+            bytes += parser.reductionDecisions.size() * sizeof(ReductionDecision);
+            constexpr size_t cacheBudget = 2 * 1024 * 1024;
+            if (bytes <= cacheBudget) {
+                while (!syntaxCache.empty() && (syntaxCache.size() >= 16 || cachedBytes + bytes > cacheBudget)) {
+                    cachedBytes -= syntaxCache.front().bytes;
+                    syntaxCache.erase(syntaxCache.begin());
+                }
+                syntaxCache.push_back({ownedSource, reduction, parser.tokens, parser.nodes, parser.callArguments,
+                    parser.literalArrays, parser.reductionDecisions, root, bytes});
+                cachedBytes += bytes;
+            }
+        }
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
             if (argument.scalarResult) return false;
@@ -686,6 +733,12 @@ private:
         : source(text), tokens(std::move(input)), reduction(reducer) {}
 
     static constexpr size_t invalid = std::string_view::npos;
+    struct ReductionDecision {
+        std::string_view index;
+        std::string_view body;
+        bool accepted;
+    };
+    std::vector<ReductionDecision> reductionDecisions;
     std::string_view source;
     std::vector<Token> tokens;
     const IndexedReduction* reduction;
@@ -745,7 +798,9 @@ private:
         const auto index = tokens[first].text;
         const size_t bodyStart = tokens[commas.back() + 1].start;
         const auto body = source.substr(bodyStart, tokens[close].start - bodyStart);
-        if (!reduction->accepts(index, body)) return std::nullopt;
+        const bool accepted = reduction->accepts(index, body);
+        reductionDecisions.push_back({index, body, accepted});
+        if (!accepted) return std::nullopt;
         next = commas[0] + 1;
         const size_t lower = parse(0, depth + 1);
         if (lower == invalid || next != commas[1]) return invalid;

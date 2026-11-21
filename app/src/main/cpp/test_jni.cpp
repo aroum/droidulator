@@ -747,6 +747,27 @@ int main() {
         evaluateInput("ast_reduction_formula(x)=sum(ast_loop_i,1,3,x*ast_loop_i)", signatureError, signatureDefinition);
         assert(signatureDefinition && signatureError.empty());
         assert(evaluate("ast_reduction_formula(4)", signatureError) == 24 && signatureError.empty());
+        evaluateInput("cache_reduction_index=5", signatureError, signatureDefinition);
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 11 && signatureError.empty());
+        engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& value) { return value.name == "cache_reduction_index"; }), engineState().user_args.end());
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 6 && signatureError.empty());
+        evaluateInput("cache_reduction_index=5", signatureError, signatureDefinition);
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 11 && signatureError.empty());
+        evaluateInput("cache_formula(x)=x+1", signatureError, signatureDefinition);
+        assert(evaluate("cache_formula(3)+1", signatureError) == 5 && signatureError.empty());
+        evaluateInput("cache_formula(x)=x+2", signatureError, signatureDefinition);
+        assert(evaluate("cache_formula(3)+1", signatureError) == 6 && signatureError.empty());
+        engineState().user_arrays["cache_type_value"] = {1,2};
+        assert(evaluateArrayAst("cache_type_value+1") && typedArray == std::vector<double>({2,3}) && signatureError.empty());
+        evaluateInput("cache_type_value=4", signatureError, signatureDefinition);
+        assert(evaluateArrayAst("cache_type_value+1") == 5 && !typedArray && signatureError.empty());
+        std::string cacheEvictionFunction = "fn cache_evict(x) { ";
+        for (size_t i = 0; i < 40; ++i) cacheEvictionFunction += "x=x+" + std::to_string(i) + ";";
+        cacheEvictionFunction += "return x }";
+        runScript(cacheEvictionFunction);
+        for (size_t i = 0; i < 2; ++i)
+            assert(evaluate("cache_evict(1)+cache_evict(2)", signatureError) == 1563 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
