@@ -127,9 +127,7 @@ class MainActivity : AppCompatActivity() {
 
     private val session by lazy { ViewModelProvider(this)[CalculatorSession::class.java] }
     private val userScripts get() = session.userScripts
-    private val scriptLibrary by lazy {
-        ScriptLibraryController(userScripts, session.engine::nativeRegisterScript, session.engine::nativeUnregisterScript)
-    }
+    private val scriptLibrary get() = session.scriptLibrary
 
     // Theme Mode: 0 = Auto (System), 1 = Dark, 2 = Light
     private val themeSettings by lazy { CalculatorThemeSettings(applicationContext) }
@@ -154,24 +152,13 @@ class MainActivity : AppCompatActivity() {
 
     private fun selectAutocompleteEditor(editor: EditText) {
         if (autocompleteEditor !== editor) {
-            session.engine.nativeResetAutocomplete()
+            session.resetAutocomplete()
             autocomplete.reset()
             autocompleteEditor = editor
         }
     }
 
-    private val autocomplete by lazy {
-        AutocompleteController(
-            { source, prefix -> session.engine.nativeGetConvUnits(source, prefix).split("\n").filter(String::isNotEmpty) },
-            { userScripts.map { it.first } },
-            { text, caret ->
-                val cursor = intArrayOf(caret)
-                session.engine.nativeAutocomplete(text, caret, cursor).takeIf { it.isNotEmpty() }?.let {
-                    AutocompleteController.Edit(it, cursor[0].coerceIn(0, it.length))
-                }
-            }
-        )
-    }
+    private val autocomplete by lazy { session.newAutocompleteController() }
 
     private val welcomeMessage get() = getString(R.string.ui_text_026)
 
@@ -229,11 +216,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
         if (!session.initialized) {
-            val isNewEngine = session.engine.initializeOnce()
-            loadUserDataFromStorage(isNewEngine)
-            if (isNewEngine) PlotStateStorage(this).restore(session.engine)
-            userScripts.forEach { (name, code) -> session.engine.nativeRegisterScript(name, code) }
-            session.initialized = true
+            if (!session.initialize(applicationContext))
+                Toast.makeText(this, R.string.ui_text_019, Toast.LENGTH_LONG).show()
         }
 
         // Bind Views
@@ -301,7 +285,7 @@ class MainActivity : AppCompatActivity() {
         cbDigitGrouping.isChecked = isDigitGroupingActive
         cbHideWelcome.isChecked = hideWelcomeMessage
         cbAutoPair.isChecked = isAutoPairEnabled
-        session.engine.nativeSetDegRad(savedDegMode)
+        session.setAngleMode(savedDegMode)
         tvMode.text = if (savedDegMode) "DEG" else "RAD"
         tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         updateEnterActionButtonText()
@@ -377,9 +361,7 @@ class MainActivity : AppCompatActivity() {
     private val searchField get() = findViewById<EditText>(R.id.search_query)
     private val definitionController by lazy {
         DefinitionEditorController(this, session, dialogs, highlighter, { expression, draft ->
-            val repository = calculatorRepository
-            val scripts = userScripts.toList()
-            session.runCommand(expression, definition = draft) { repository.save(scripts) }
+            session.runCommand(expression, definition = draft)
         }, { activeDialogs.remove(it) })
     }
 
@@ -655,21 +637,8 @@ class MainActivity : AppCompatActivity() {
                 typeface = android.graphics.Typeface.MONOSPACE
             }
             dialogs.show(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
-                when (activeTab) {
-                    "Variables" -> session.engine.nativeValues(false)
-                        .filterNot { it.name.matches(Regex("e[0-9]+")) }
-                        .forEach { session.engine.nativeDeleteVariable(it.name) }
-                    "Formulas" -> session.engine.nativeFormulas().forEach {
-                        session.engine.nativeDeleteFormula(it.name)
-                    }
-                    "Constants" -> session.engine.nativeValues(true)
-                        .filterNot { it.name == "pi" || it.name == "e" }
-                        .forEach { session.engine.nativeDeleteConstant(it.name) }
-                    "Scripts" -> {
-                        scriptLibrary.clear()
-                    }
-                }
-                saveUserDataToStorage()
+                session.clearLibrary(activeTab)
+                session.saveUserData()
                 refreshTabContent(activeTab)
                 Toast.makeText(this, getString(R.string.deleted_all, tabTitle(activeTab)), Toast.LENGTH_SHORT).show()
             }
@@ -860,9 +829,9 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun toggleDegRad() {
-        val isDeg = session.engine.nativeGetDegRad()
+        val isDeg = session.angleMode()
         val nextDeg = !isDeg
-        session.engine.nativeSetDegRad(nextDeg)
+        session.setAngleMode(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
         tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
@@ -873,7 +842,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun clearSessionAndHistory() {
         replOutput.invalidate()
-        session.engine.nativeClearHistory()
+        session.clearHistory()
         replHistory.clear()
         replDisplayItems.clear()
         replHistoryIndex = -1
@@ -882,7 +851,7 @@ class MainActivity : AppCompatActivity() {
         tvOutput.text = if (hideWelcomeMessage) getString(R.string.history_cleared) else getString(R.string.history_cleared) + welcomeMessage
         etInput.setText("")
         dismissErrorOverlay()
-        saveUserDataToStorage()
+        session.saveUserData()
         Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_004), Toast.LENGTH_SHORT).show()
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Variables" || activeTab == "Formulas" || activeTab == "Constants") {
@@ -909,16 +878,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun queueCommand(input: String, scriptName: String? = null): Boolean {
-        val repo = calculatorRepository
-        val scripts = userScripts.toList()
-        val plotStorage = PlotStateStorage(applicationContext)
-        val accepted = session.runCommand(input, scriptName) {
-            repo.save(scripts)
-            if (scriptName != null || input.startsWith("plot(") ||
-                input.startsWith("plot.") || input.startsWith("run(")) {
-                plotStorage.save(nativeGetPlotLines(), nativeGetPlotLimits())
-            }
-        }
+        val accepted = session.runCommand(input, scriptName)
         if (accepted && (scriptName != null || tabs[currentTabPosition] != "REPL")) hideSoftKeyboard()
         return accepted
     }
@@ -989,10 +949,10 @@ class MainActivity : AppCompatActivity() {
                 toolbarKeyboard.visibility = View.GONE
 
                 val generation = ++plotRefreshGeneration
-                session.compute({ PlotView.preparePlotData(nativeGetPlotLines(), nativeGetPlotLimits()) }) { result ->
+                session.preparePlot { result ->
                     if (isDestroyed || isFinishing || tabs[currentTabPosition] != "Plot" ||
                         generation != plotRefreshGeneration
-                    ) return@compute
+                    ) return@preparePlot
                     result.onSuccess { plotView.updatePlotData(it) }
                 }
             }
@@ -1041,7 +1001,7 @@ class MainActivity : AppCompatActivity() {
             "Variables", "Constants" -> {
                 val constants = tabName == "Constants"
                 libraryPanel.renderValues(
-                    values = session.engine.nativeValues(constants),
+                    values = session.libraryValues(constants),
                     constants = constants,
                     showHistory = showEVars,
                     onEdit = { name, expression ->
@@ -1050,24 +1010,23 @@ class MainActivity : AppCompatActivity() {
                     },
                     onDelete = { name ->
                         dialogs.confirmDelete(name) {
-                            if (constants) session.engine.nativeDeleteConstant(name)
-                            else session.engine.nativeDeleteVariable(name)
-                            saveUserDataToStorage()
+                            session.deleteValue(name, constants)
+                            session.saveUserData()
                             refreshTabContent(tabName)
                         }
                     }
                 )
             }
             "Formulas" -> libraryPanel.renderFormulas(
-                formulas = session.engine.nativeFormulas(),
+                formulas = session.libraryFormulas(),
                 onRun = { formulaRunner.show(it) },
                 onEdit = { formula ->
                     definitionController.show(getString(R.string.edit_formula, formula.signature), formula.expression, formula.expression, tabName)
                 },
                 onDelete = { formula ->
                     dialogs.confirmDelete(formula.signature) {
-                        session.engine.nativeDeleteFormula(formula.name)
-                        saveUserDataToStorage()
+                        session.deleteFormula(formula.name)
+                        session.saveUserData()
                         refreshTabContent(tabName)
                     }
                 }
@@ -1079,7 +1038,7 @@ class MainActivity : AppCompatActivity() {
                 onDelete = { name ->
                     dialogs.confirmDelete(name) {
                         scriptLibrary.remove(name)
-                        saveUserDataToStorage()
+                        session.saveUserData()
                         refreshTabContent(tabName)
                     }
                 }
@@ -1107,7 +1066,7 @@ class MainActivity : AppCompatActivity() {
                 Toast.makeText(this, R.string.ui_text_008, Toast.LENGTH_LONG).show()
                 return@show false
             }
-            saveUserDataToStorage()
+            session.saveUserData()
             if (tabs[currentTabPosition] == "Scripts") refreshTabContent("Scripts")
             true
         }
@@ -1128,20 +1087,6 @@ class MainActivity : AppCompatActivity() {
         }
 
         definitionController.show(title, "", hintText, activeTab)
-    }
-
-    private val calculatorRepository by lazy { CalculatorRepository(applicationContext, session) }
-
-    private fun saveUserDataToStorage() {
-        val repository = calculatorRepository
-        val scripts = userScripts.toList()
-        session.compute({ repository.save(scripts) }) {}
-    }
-
-    private fun loadUserDataFromStorage(restoreEngine: Boolean) {
-        calculatorRepository.load(restoreEngine) {
-            Toast.makeText(this, R.string.ui_text_019, Toast.LENGTH_LONG).show()
-        }
     }
 
     private val customThemeLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->

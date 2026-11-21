@@ -1,5 +1,6 @@
 package com.cardputer.cardulator
 
+import android.content.Context
 import android.os.Handler
 import android.os.Looper
 import androidx.lifecycle.ViewModel
@@ -24,6 +25,63 @@ class CalculatorSession : ViewModel() {
     val engine by engineDelegate
     private val engineQueue = Executors.newSingleThreadExecutor()
     private val main = Handler(Looper.getMainLooper())
+    private lateinit var repository: CalculatorRepository
+    internal val scriptLibrary by lazy {
+        ScriptLibraryController(userScripts, engine::nativeRegisterScript, engine::nativeUnregisterScript)
+    }
+
+    fun initialize(context: Context): Boolean {
+        if (initialized) return !storageLoadFailed
+        repository = CalculatorRepository(context.applicationContext, this)
+        val fresh = engine.initializeOnce()
+        repository.load(fresh) { }
+        if (fresh) repository.restorePlot()
+        userScripts.forEach { (name, code) -> engine.nativeRegisterScript(name, code) }
+        initialized = true
+        return !storageLoadFailed
+    }
+
+    fun saveUserData() {
+        val scripts = userScripts.toList()
+        compute({ repository.save(scripts) }) { }
+    }
+
+    internal fun newAutocompleteController() = AutocompleteController(
+        { source, prefix -> engine.nativeGetConvUnits(source, prefix).split("\n").filter(String::isNotEmpty) },
+        { userScripts.map { it.first } },
+        { text, caret ->
+            val cursor = intArrayOf(caret)
+            engine.nativeAutocomplete(text, caret, cursor).takeIf { it.isNotEmpty() }?.let {
+                AutocompleteController.Edit(it, cursor[0].coerceIn(0, it.length))
+            }
+        }
+    )
+
+    fun resetAutocomplete() = engine.nativeResetAutocomplete()
+    fun angleMode() = engine.nativeGetDegRad()
+    fun setAngleMode(degrees: Boolean) = engine.nativeSetDegRad(degrees)
+    fun clearHistory() = engine.nativeClearHistory()
+    fun libraryValues(constants: Boolean) = engine.nativeValues(constants)
+    fun libraryFormulas() = engine.nativeFormulas()
+    fun deleteValue(name: String, constant: Boolean) {
+        if (constant) engine.nativeDeleteConstant(name) else engine.nativeDeleteVariable(name)
+    }
+    fun deleteFormula(name: String) = engine.nativeDeleteFormula(name)
+
+    fun clearLibrary(tab: String) {
+        when (tab) {
+            "Variables" -> libraryValues(false).filterNot { it.name.matches(Regex("e[0-9]+")) }
+                .forEach { deleteValue(it.name, false) }
+            "Constants" -> libraryValues(true).filterNot { it.name == "pi" || it.name == "e" }
+                .forEach { deleteValue(it.name, true) }
+            "Formulas" -> libraryFormulas().forEach { deleteFormula(it.name) }
+            "Scripts" -> scriptLibrary.clear()
+        }
+    }
+
+    internal fun preparePlot(completed: (Result<PlotView.PlotData>) -> Unit) =
+        compute({ PlotView.preparePlotData(nativeGetPlotLines(), nativeGetPlotLimits()) }, completed)
+
 
     fun <T> compute(operation: CardulatorEngine.() -> T, completed: (Result<T>) -> Unit): Future<*> =
         engineQueue.submit {
@@ -40,15 +98,19 @@ class CalculatorSession : ViewModel() {
         private set
 
     fun runCommand(
-        input: String, scriptName: String? = null, definition: DefinitionDraft? = null,
-        persist: CardulatorEngine.() -> Unit
+        input: String, scriptName: String? = null, definition: DefinitionDraft? = null
     ): Boolean {
         if (commandRunning) return false
         commandRunning = true
+        val scripts = userScripts.toList()
         compute({
             val entry = if (scriptName == null) evaluateEntry(input) else
                 ReplDisplayItem("", nativeRunScript(input), false, isRawText = true)
-            if (!entry.isError) persist()
+            if (!entry.isError) {
+                repository.save(scripts)
+                if (scriptName != null || input.startsWith("plot(") || input.startsWith("plot.") || input.startsWith("run("))
+                    repository.savePlot()
+            }
             entry
         }) { result ->
             commandRunning = false
@@ -76,6 +138,7 @@ class CalculatorSession : ViewModel() {
     var formulaRunDraft: FormulaRunDraft? = null
     var scriptDraft: ScriptDraft? = null
     var initialized = false
+        private set
     var storageLoadFailed = false
     internal var helpTopics: List<Pair<String, String>>? = null
     val userScripts = mutableListOf(

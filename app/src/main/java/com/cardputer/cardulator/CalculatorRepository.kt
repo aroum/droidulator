@@ -4,6 +4,10 @@ import android.content.Context
 
 internal class CalculatorRepository(context: Context, private val session: CalculatorSession) {
     private val storage = UserDataStorage(context)
+    private val plotStorage = PlotStateStorage(context)
+
+    fun savePlot() = plotStorage.save(session.engine.nativeGetPlotLines(), session.engine.nativeGetPlotLimits())
+    fun restorePlot() = plotStorage.restore(session.engine)
     private val userScripts get() = session.userScripts
 
     fun save(scripts: List<Pair<String, String>>) {
