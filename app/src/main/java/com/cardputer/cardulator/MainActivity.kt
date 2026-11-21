@@ -127,6 +127,9 @@ class MainActivity : AppCompatActivity() {
 
     private val session by lazy { ViewModelProvider(this)[CalculatorSession::class.java] }
     private val userScripts get() = session.userScripts
+    private val scriptLibrary by lazy {
+        ScriptLibraryController(userScripts, session.engine::nativeRegisterScript, session.engine::nativeUnregisterScript)
+    }
 
     // Theme Mode: 0 = Auto (System), 1 = Dark, 2 = Light
     private val themeSettings by lazy { CalculatorThemeSettings(applicationContext) }
@@ -152,16 +155,23 @@ class MainActivity : AppCompatActivity() {
     private fun selectAutocompleteEditor(editor: EditText) {
         if (autocompleteEditor !== editor) {
             session.engine.nativeResetAutocomplete()
+            autocomplete.reset()
             autocompleteEditor = editor
         }
     }
 
-    // Cycling Tab Autocomplete state for conv and plot contexts
-    private var convTabOrigPrefix: String? = null
-    private var convTabSplitPos: Int = -1
-    private var convTabMatchIdx: Int = 0
-    private var convTabCachedMatches: List<String>? = null
-
+    private val autocomplete by lazy {
+        AutocompleteController(
+            { source, prefix -> session.engine.nativeGetConvUnits(source, prefix).split("\n").filter(String::isNotEmpty) },
+            { userScripts.map { it.first } },
+            { text, caret ->
+                val cursor = intArrayOf(caret)
+                session.engine.nativeAutocomplete(text, caret, cursor).takeIf { it.isNotEmpty() }?.let {
+                    AutocompleteController.Edit(it, cursor[0].coerceIn(0, it.length))
+                }
+            }
+        )
+    }
 
     private val welcomeMessage get() = getString(R.string.ui_text_026)
 
@@ -595,127 +605,11 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun setupControlButtons() {
-        // Tab Autocomplete button & cursor insertion inside brackets
         btnTab.setOnClickListener {
             selectAutocompleteEditor(etInput)
-            val fullText = etInput.text.toString()
-            val caret = etInput.selectionStart.coerceAtLeast(0)
-
-            // Detect conv( context: suggest units/resistor codes inside conv(...)
-            val convContext = ConversionCompletion.contextBeforeCaret(fullText, caret)
-            if (convContext != null) {
-                val (splitPos, parts) = convContext
-
-                val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos && convTabCachedMatches != null)
-                if (isContinuation) {
-                    val cached = convTabCachedMatches!!
-                    if (cached.isNotEmpty()) {
-                        convTabMatchIdx++
-                        val match = cached[convTabMatchIdx % cached.size]
-
-                        insertConvCompletion(fullText, caret, splitPos, match)
-                        return@setOnClickListener
-                    }
-                }
-
-                val lastPartRaw = parts.last().trim()
-                val lastPart = lastPartRaw.trim('"', '\'')
-
-                // Detect source unit (fromUnit) if present in preceding arguments
-                val fromUnit: String? = when {
-                    parts.size >= 3 -> {
-                        val prevArg = parts[parts.size - 2].trim().trim('"', '\'')
-                        if (prevArg.isNotEmpty()) prevArg else null
-                    }
-                    parts.size == 2 -> {
-                        val firstArg = parts[0].trim().trim('"', '\'')
-                        // Check if first arg contains a number followed by a unit (e.g. "10 mm", "10mm", "100 ohm")
-                        val m = Regex("""^[\d.\s\+\-\*\/\^eE]+\s*([a-zA-Z][a-zA-Z\^\d_]*)$""").find(firstArg)
-                        m?.groupValues?.get(1)?.trim()
-                    }
-                    else -> null
-                }
-
-                convTabOrigPrefix = lastPart
-                convTabSplitPos = splitPos
-                convTabMatchIdx = 0
-
-                val matches = session.engine.nativeGetConvUnits(fromUnit ?: "", lastPart)
-                    .split("\n").filter { it.isNotEmpty() }
-
-                if (matches.isNotEmpty()) {
-                    convTabCachedMatches = matches
-                    val match = matches[0]
-
-                    insertConvCompletion(fullText, caret, splitPos, match)
-                    return@setOnClickListener
-                } else {
-                    convTabOrigPrefix = null
-                    convTabSplitPos = -1
-                    convTabMatchIdx = 0
-                    convTabCachedMatches = null
-                }
-            } else {
-                convTabOrigPrefix = null
-                convTabSplitPos = -1
-                convTabMatchIdx = 0
-                convTabCachedMatches = null
-            }
-
-            // Detect plot( context: suggest plot parameters/functions inside plot(...)
-            val plotMatch = Regex("""plot\(([^)]*)$""").find(fullText.substring(0, caret))
-            if (plotMatch != null) {
-                val argsContent = plotMatch.groupValues[1]
-                val parts = argsContent.split(",")
-                val lastPart = parts.last().trim().trim('"', '\'')
-                val plotCandidates = listOf(
-                    "sin(x)", "cos(x)", "tan(x)", "exp(x)", "log(x)", "sqrt(x)",
-                    "x^2", "x^3", "abs(x)", "xlim", "ylim"
-                )
-                val match = if (lastPart.isEmpty()) {
-                    "sin(x)"
-                } else {
-                    plotCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) && !it.equals(lastPart, ignoreCase = true) }
-                        ?: plotCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) }
-                }
-                if (match != null) {
-                    val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
-                    val lastParenPos = fullText.lastIndexOf('(', caret - 1)
-                    val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
-                    val prefix = fullText.substring(0, splitPos)
-                    val suffix = fullText.substring(caret)
-                    val newText = prefix + match + suffix
-                    etInput.setText(newText)
-                    etInput.setSelection(prefix.length + match.length)
-                    return@setOnClickListener
-                }
-            }
-
-            // Detect run( context: complete script name from userScripts
-            val runMatch = Regex("""run\("?([\w]*)"?\)?$""").find(fullText.substring(0, caret))
-            if (runMatch != null) {
-                val partial = runMatch.groupValues[1]
-                val match = userScripts.map { it.first }.firstOrNull { it.startsWith(partial, ignoreCase = true) }
-                if (match != null) {
-                    val runCallStart = fullText.lastIndexOf("run(", caret - 1)
-                    if (runCallStart != -1) {
-                        val baseText = fullText.substring(0, runCallStart)
-                        val replacement = "run(\"$match\")"
-                        val newText = baseText + replacement + fullText.substring(caret)
-                        etInput.setText(newText)
-                        etInput.setSelection(baseText.length + replacement.length)
-                        return@setOnClickListener
-                    }
-                }
-            }
-
-            // General autocomplete at caret position (preserves any text after caret e.g. closing bracket ')')
-            val outCursor = intArrayOf(caret)
-            val completedFull = session.engine.nativeAutocomplete(fullText, caret, outCursor)
-            if (completedFull.isNotEmpty() && completedFull != fullText) {
-                etInput.setText(completedFull)
-                val newCursorPos = outCursor[0].coerceIn(0, completedFull.length)
-                etInput.setSelection(newCursorPos.coerceIn(0, etInput.text.length))
+            autocomplete.complete(etInput.text.toString(), etInput.selectionStart.coerceAtLeast(0))?.let { edit ->
+                etInput.setText(edit.text)
+                etInput.setSelection(edit.caret.coerceIn(0, edit.text.length))
             }
         }
 
@@ -772,8 +666,7 @@ class MainActivity : AppCompatActivity() {
                         .filterNot { it.name == "pi" || it.name == "e" }
                         .forEach { session.engine.nativeDeleteConstant(it.name) }
                     "Scripts" -> {
-                        userScripts.forEach { session.engine.nativeUnregisterScript(it.first) }
-                        userScripts.clear()
+                        scriptLibrary.clear()
                     }
                 }
                 saveUserDataToStorage()
@@ -791,15 +684,6 @@ class MainActivity : AppCompatActivity() {
                 .apply()
             refreshTabContent("Variables")
         }
-    }
-
-    private fun insertConvCompletion(text: String, caret: Int, splitPos: Int, match: String) {
-        val prefix = text.substring(0, splitPos).trimEnd()
-        val end = text.indexOfAny(charArrayOf(',', ')'), caret).let { if (it < 0) text.length else it }
-        val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
-        val newArg = "\"$match\""
-        etInput.setText(formattedPrefix + newArg + text.substring(end))
-        etInput.setSelection(formattedPrefix.length + newArg.length)
     }
 
     private fun setupNavigationButtons() {
@@ -994,7 +878,7 @@ class MainActivity : AppCompatActivity() {
         replDisplayItems.clear()
         replHistoryIndex = -1
         tempReplInput = ""
-        convTabCachedMatches = null
+        autocomplete.reset()
         tvOutput.text = if (hideWelcomeMessage) getString(R.string.history_cleared) else getString(R.string.history_cleared) + welcomeMessage
         etInput.setText("")
         dismissErrorOverlay()
@@ -1194,9 +1078,7 @@ class MainActivity : AppCompatActivity() {
                 onEdit = { openScriptEditor(it) },
                 onDelete = { name ->
                     dialogs.confirmDelete(name) {
-                        session.engine.nativeUnregisterScript(name)
-                        val index = userScripts.indexOfFirst { it.first == name }
-                        if (index >= 0) userScripts.removeAt(index)
+                        scriptLibrary.remove(name)
                         saveUserDataToStorage()
                         refreshTabContent(tabName)
                     }
@@ -1221,16 +1103,10 @@ class MainActivity : AppCompatActivity() {
             }
         )
         editor.show(draft) { name, code ->
-            val index = userScripts.indexOfFirst { it.first == draft.originalName }
-            if (userScripts.withIndex().any { it.index != index && it.value.first == name }) {
+            if (!scriptLibrary.save(draft.originalName, name, code)) {
                 Toast.makeText(this, R.string.ui_text_008, Toast.LENGTH_LONG).show()
                 return@show false
             }
-            if (index >= 0) {
-                if (draft.originalName != name) session.engine.nativeUnregisterScript(userScripts[index].first)
-                userScripts[index] = name to code
-            } else userScripts.add(name to code)
-            session.engine.nativeRegisterScript(name, code)
             saveUserDataToStorage()
             if (tabs[currentTabPosition] == "Scripts") refreshTabContent("Scripts")
             true
