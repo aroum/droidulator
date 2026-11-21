@@ -70,7 +70,7 @@ static std::string reservedAssignment(const std::string& code) {
 static bool evaluateScriptCondition(const std::string& condition, std::string& error) {
     const auto expression = preprocessArrayLookups(condition, error);
     if (!error.empty()) return false;
-    const double value = evaluate(expression, error);
+    const double value = evaluateScalar(expression, error, "Condition");
     return error.empty() && !std::isnan(value) && value != 0.0;
 }
 
@@ -255,8 +255,7 @@ static bool assignScriptTuple(const std::string& lhs, const std::string& rhs, st
                     error = "Empty function argument";
                     return false;
                 }
-                arguments.push_back(evaluate(argument, error));
-                if (error.empty() && engineState().g_last_eval_is_array) error = "Function argument must be scalar";
+                arguments.push_back(evaluateScalar(argument, error, "Function argument"));
                 if (!error.empty()) return false;
             }
             executeScriptFunc(name, arguments, error, &values);
@@ -476,7 +475,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
                 condition = header[1];
                 if (!active && !executeScriptAssignments(header[0], err)) break;
             }
-            const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluate(condition, err);
+            const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluateScalar(condition, err, "Condition");
             if (!err.empty()) break;
             if (value != 0.0) {
                 if (++loopIterations > 10000) { err = "Function loop iteration limit reached"; break; }
@@ -495,7 +494,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             size_t end_ip = findMatchingBlockEnd(lines, ip);
             if (open_p != std::string::npos && close_p != std::string::npos && end_ip != std::string::npos) {
                 std::string cond_str = line.substr(open_p + 1, close_p - open_p - 1);
-                double cv = evaluate(cond_str, err);
+                double cv = evaluateScalar(cond_str, err, "Condition");
                 if (!err.empty()) break;
                 bool cond_ok = (!std::isnan(cv) && cv != 0.0);
                 if (cond_ok) {
@@ -516,7 +515,7 @@ double executeScriptFunc(const std::string& name, const std::vector<double>& arg
             const size_t open = line.find('(');
             const size_t close = findScriptHeaderClose(line, open);
             if (open == std::string::npos || close == std::string::npos || close <= open) { err = "Invalid else if"; break; }
-            const double value = evaluate(line.substr(open + 1, close - open - 1), err);
+            const double value = evaluateScalar(line.substr(open + 1, close - open - 1), err, "Condition");
             if (!err.empty()) break;
             if (value != 0.0) { blocks.back().condition_met = true; ++ip; }
             else { const size_t next = findMatchingBlockEnd(lines, ip, true); ip = next == std::string::npos ? blocks.back().end_ip : next; }

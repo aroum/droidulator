@@ -7,6 +7,7 @@
 bool preprocessHelp(const std::string& s, std::string& help_out);
 std::vector<UserFunc> getParsedUserFuncs();
 double evaluate(const std::string& expr_str, std::string& err);
+double evaluateScalar(const std::string& source, std::string& error, const char* context);
 double evaluateWithoutHistory(const std::string& expr_str, std::string& err);
 double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
 size_t findAssignmentOperator(const std::string& input);

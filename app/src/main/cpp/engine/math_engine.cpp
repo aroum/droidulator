@@ -88,8 +88,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                         return expr;
                     }
                     std::string eval_err;
-                    double val = evaluate(a_str, eval_err);
-                    if (eval_err.empty() && engineState().g_last_eval_is_array) eval_err = "Function argument must be scalar";
+                    double val = evaluateScalar(a_str, eval_err, "Function argument");
                     if (!eval_err.empty() || std::isnan(val)) {
                         err = eval_err.empty() ? "Arg Eval Error" : eval_err;
                         return expr;
@@ -568,7 +567,7 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                     err = "if() requires 3 arguments";
                     return res;
                 }
-                double cond_v = evaluate(args[0], err);
+                double cond_v = evaluateScalar(args[0], err, "Condition");
                 if (!err.empty()) return res;
                 const std::string& branch = (std::abs(cond_v) > 1e-12) ? args[1] : args[2];
                 double val = evaluate(branch, err);
@@ -584,7 +583,7 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
                 double val = 0.0;
                 bool matched = false;
                 for (size_t k = 0; k + 1 < args.size(); k += 2) {
-                    double cond_v = evaluate(args[k], err);
+                    double cond_v = evaluateScalar(args[k], err, "Condition");
                     if (!err.empty()) return res;
                     if (std::abs(cond_v) > 1e-12) {
                         val = evaluate(args[k + 1], err);
@@ -617,11 +616,9 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
             std::string inside = res.substr(call->openOffset + 1, close - call->openOffset - 1);
             auto args = expression::splitArguments(inside);
             if (args.size() == 4 && isValidLoopIdent(args[0]) && (!isDefinedScalarName(args[0]) || exprReferencesIdent(args[3], args[0]))) {
-                double start_d = evaluate(args[1], err);
-                if (err.empty() && engineState().g_last_eval_is_array) err = "Loop bounds must be scalar";
+                double start_d = evaluateScalar(args[1], err, "Loop bounds");
                 if (!err.empty()) return res;
-                double end_d = evaluate(args[2], err);
-                if (err.empty() && engineState().g_last_eval_is_array) err = "Loop bounds must be scalar";
+                double end_d = evaluateScalar(args[2], err, "Loop bounds");
                 if (!err.empty()) return res;
                 const double int64Limit = std::ldexp(1.0, 63);
                 if (!std::isfinite(start_d) || !std::isfinite(end_d) || start_d < -int64Limit || start_d >= int64Limit || end_d < -int64Limit || end_d >= int64Limit) {
@@ -1198,8 +1195,7 @@ double assignArrayElement(const std::string& name, const std::string& index,
         return failure;
     }
 
-    const auto position = evaluate(index, error);
-    if (error.empty() && engineState().g_last_eval_is_array) error = "Array index must be scalar";
+    const auto position = evaluateScalar(index, error, "Array index");
     if (!error.empty()) return failure;
     auto validate = [&]() {
         const auto target = arrays.find(name);
@@ -1214,8 +1210,7 @@ double assignArrayElement(const std::string& name, const std::string& index,
     };
     validate();
     if (!error.empty()) return failure;
-    const auto result = evaluate(value, error);
-    if (error.empty() && engineState().g_last_eval_is_array) error = "Array element must be scalar";
+    const auto result = evaluateScalar(value, error, "Array element");
     if (!error.empty()) return failure;
 
     // Evaluation may call a script that replaces the target array.
@@ -1223,6 +1218,15 @@ double assignArrayElement(const std::string& name, const std::string& index,
     if (!error.empty()) return failure;
     target->second[static_cast<size_t>(position) - 1] = result;
     return result;
+}
+
+double evaluateScalar(const std::string& source, std::string& error, const char* context) {
+    const double value = evaluate(source, error);
+    if (error.empty() && engineState().g_last_eval_is_array) {
+        error = std::string(context) + " must be scalar";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return value;
 }
 
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
@@ -1915,8 +1919,7 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
                 disp_name = inline_arr_expr;
             }
 
-            double idx_val = evaluate(index_expr, err);
-            if (err.empty() && engineState().g_last_eval_is_array) err = "Array index must be scalar";
+            double idx_val = evaluateScalar(index_expr, err, "Array index");
             if (!err.empty()) {
                 return expr;
             }
@@ -2098,9 +2101,8 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
             for (const auto& element : elements) {
                 const auto expanded = preprocessArrayLookups(element, err);
                 if (!err.empty()) return {};
-                const double value = evaluate(expanded, err);
+                const double value = evaluateScalar(expanded, err, "Array element");
                 if (!err.empty()) return {};
-                if (engineState().g_last_eval_is_array) { err = "Array element must be scalar"; return {}; }
                 values.push_back(value);
             }
             return values;
@@ -2119,9 +2121,8 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         for (size_t i = 0; i < expressions.size(); ++i) {
             const auto expanded = preprocessArrayLookups(expressions[i], err);
             if (!err.empty()) return {};
-            bounds[i] = evaluate(expanded, err);
+            bounds[i] = evaluateScalar(expanded, err, "Range bounds");
             if (!err.empty()) return {};
-            if (engineState().g_last_eval_is_array) { err = "Range bounds must be scalar"; return {}; }
         }
         return expression::vectorRange(bounds[0], bounds[1], bounds[2], MAX_ARRAY_ELEMENTS, err);
     }

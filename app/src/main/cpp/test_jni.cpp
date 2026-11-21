@@ -598,6 +598,12 @@ int main() {
         }
         runScript("scalar_element_guard=[7,8]; scalar_element_guard[[1,2]]=9; scalar_element_guard[1]=[9,10]");
         assert(engineState().user_arrays.at("scalar_element_guard") == std::vector<double>({7,8}));
+        for (const auto& source : {"if([1],2,3)", "iff([1],2,3)"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Condition must be scalar");
+        }
+        runScript("condition_guard=0; if([1]) { condition_guard=1 }; while([1]) { condition_guard=2 }");
+        assert(evaluate("condition_guard", signatureError) == 0 && signatureError.empty());
         assert(evaluateLiteralAst("mean([1e308,1e308])") == 1e308 && signatureError.empty());
         assert(evaluateLiteralAst("median([1e308,1e308])") == 1e308 && signatureError.empty());
         const auto largeDeviation = evaluateLiteralAst("std([-1e200,1e200])");
