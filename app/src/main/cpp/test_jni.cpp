@@ -700,6 +700,23 @@ int main() {
         assert(explicitScriptArray == std::vector<double>({5,6}));
         assert(executeScriptFunc("ast_script_call", {5}, signatureError, nullptr, &explicitScriptArray) == 10 && signatureError.empty());
         assert(!explicitScriptArray);
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"200+10%",220}, {"200-10%",180}, {"200+10%+10%",242}, {"200+10*2%",240},
+                {"2*50%",1}, {"17%-5",-4.83}, {"(200+10)%",2.1}, {"200+(10%)",200.1},
+                {"200+(-10)%",180}, {"2+50%*2",6}, {"200+10%%",2.2}, {"2%%",0.0002},
+                {"max(200+10%,100)",220}, {"200+10%>200",1}, {"17%5",2}, {"2%3%",0.02}, {"1e-3%",0.00001}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateArrayAst("[100,200]+10%") && typedArray == std::vector<double>({110,220}) && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("ast_print_once(200)+10%") == 220 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluateLiteralAst("if(1,200+10%,1/0)") == 220 && signatureError.empty());
+        assert(evaluateArrayAst("ast_script_pair(100)+10%") && typedArray && typedArray->size() == 2 && signatureError.empty());
+        assert(std::abs((*typedArray)[0] - 110) < 1e-12 && std::abs((*typedArray)[1] - 111.1) < 1e-12);
+        assert(evaluateLiteralAst("sum([100,200]+10%)") == 330 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[100,200],1/0)+10%") && typedArray == std::vector<double>({110,220}) && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

@@ -665,6 +665,7 @@ private:
         bool arrayConditional = false;
         bool dynamicType = false;
         bool scalarResult = false;
+        bool grouped = false;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
@@ -793,6 +794,7 @@ private:
             } else if (token.text == "(") {
                 left = parse(0, depth + 1);
                 if (left == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
+                nodes[left].grouped = true;
             } else {
                 return invalid;
             }
@@ -815,15 +817,35 @@ private:
             }
         }
         while (next < tokens.size()) {
+            const bool postfixPercent = tokens[next].text == "%" && (next + 1 == tokens.size() ||
+                (tokens[next + 1].kind != Kind::Number && tokens[next + 1].kind != Kind::ScaledNumber &&
+                 tokens[next + 1].kind != Kind::Word && tokens[next + 1].text != "(" && tokens[next + 1].text != "["));
+            if (postfixPercent) {
+                // A percentage includes the current additive term. Defer it to
+                // that parser frame so 200+10% uses 200 as its relative base,
+                // while 2*50% scales the complete product by one hundredth.
+                if (minimum > 10) break;
+                ++next;
+                const auto expression = nodes[left];
+                const bool relative = !expression.grouped && (expression.op == '+' || expression.op == '-');
+                if (relative) {
+                    // Replace the unfinished additive root rather than leaving an
+                    // unused array consumer in the typed dependency graph.
+                    if (left + 1 != nodes.size()) return invalid;
+                    nodes.pop_back();
+                }
+                const auto hundredth = add({0.01});
+                if (relative) {
+                    const auto adjustment = add({0, '*', expression.left, expression.right});
+                    const auto percentage = add({0, '*', adjustment, hundredth});
+                    left = add({0, expression.op, expression.left, percentage});
+                } else left = add({0, '*', left, hundredth});
+                nodes[left].grouped = true;
+                continue;
+            }
             const auto op = binaryOperator(tokens[next].text);
             if (op.precedence < minimum) break;
             ++next;
-            if (op.opcode == '%' && (next == tokens.size() ||
-                (tokens[next].kind != Kind::Number && tokens[next].kind != Kind::ScaledNumber &&
-                 tokens[next].kind != Kind::Word && tokens[next].text != "(" && tokens[next].text != "["))) {
-                // A sign after % starts a new term following a postfix percentage.
-                return invalid;
-            }
             const auto right = parse(op.precedence + (op.rightAssociative ? 0 : 1), depth + 1);
             if (right == invalid) return invalid;
             left = add({0, op.opcode, left, right});
