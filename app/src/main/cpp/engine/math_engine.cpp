@@ -60,10 +60,10 @@ std::vector<UserFunc> getParsedUserFuncs() {
 
 inline std::string substituteUserFuncs(std::string expr, std::string& err) {
     if (!engineState().user_script_funcs.empty()) {
-        std::vector<std::string> scriptFunctions;
+        std::vector<std::pair<std::string, size_t>> scriptFunctions;
         scriptFunctions.reserve(engineState().user_script_funcs.size());
-        for (const auto& function : engineState().user_script_funcs) scriptFunctions.push_back(function.name);
-        for (const auto& name : scriptFunctions) {
+        for (const auto& function : engineState().user_script_funcs) scriptFunctions.emplace_back(function.name, function.params.size());
+        for (const auto& [name, arity] : scriptFunctions) {
             size_t pos = 0;
             while (const auto call = expression::findCall(expr, name, pos)) {
                 pos = call->nameOffset;
@@ -78,6 +78,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                     return expr;
                 }
 
+                if (args.size() != arity) { err = "Arg Count Mismatch"; return expr; }
                 std::vector<double> arg_vals;
                 for (auto& a_str : args) {
                     a_str.erase(0, a_str.find_first_not_of(" \t"));
@@ -944,22 +945,18 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
     if (scopedScalar(name)) return {};
     for (const auto& function : engineState().user_script_funcs) {
         if (function.name != name) continue;
-        return [name = std::string(name)](const std::vector<double>& values, std::string& error) {
+        return {function.params.size(), [name = std::string(name)](const std::vector<double>& values, std::string& error) {
             // Script functions use their own parameters and session variables.
             ScalarBindingScope scope(std::vector<UserArg>{});
             return executeScriptFunc(name, values, error);
-        };
+        }};
     }
     for (const auto& definition : engineState().user_funcs) {
         const auto source = std::string_view(definition);
         if (expression::trim(source.substr(0, source.find('('))) != name) continue;
         auto parsed = parseUserFunctionDefinition(source);
         if (!parsed) continue;
-        return [function = std::move(*parsed)](const std::vector<double>& values, std::string& error) {
-            if (values.size() != function.params.size()) {
-                error = "Arg Count Mismatch";
-                return std::numeric_limits<double>::quiet_NaN();
-            }
+        return {parsed->params.size(), [function = std::move(*parsed)](const std::vector<double>& values, std::string& error) {
             static thread_local unsigned depth = 0;
             if (depth >= 64) {
                 error = "Function recursion limit exceeded";
@@ -976,7 +973,7 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
                 arguments.push_back({function.params[i], values[i]});
             ScalarBindingScope scope(std::move(arguments));
             return evaluate(function.body, error);
-        };
+        }};
     }
     return {};
 }
@@ -2045,6 +2042,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                 const auto function = lookupUnary(func_name);
                 const auto custom = function ? expression::ArithmeticExpression::CustomFunction{} : lookupCustomFunction(func_name);
                 if (!function && !custom) { err = "Math Error"; return {}; }
+                if (custom && custom.arity != 1) { err = "Arg Count Mismatch"; return {}; }
                 std::vector<double> res(arg_vec.size());
                 std::vector<double> argument(1);
                 for (size_t i = 0; i < arg_vec.size(); ++i) {

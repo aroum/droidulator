@@ -235,12 +235,17 @@ static bool assignScriptTuple(const std::string& lhs, const std::string& rhs, st
     if (open != std::string::npos && expression::matchingGroupEnd(rhs, open) == rhs.size() - 1) {
         const std::string name(expression::trim(std::string_view(rhs).substr(0, open)));
         const auto& functions = engineState().user_script_funcs;
-        if (std::any_of(functions.begin(), functions.end(), [&](const auto& function) { return function.name == name; })) {
+        const auto function = std::find_if(functions.begin(), functions.end(), [&](const auto& candidate) { return candidate.name == name; });
+        if (function != functions.end()) {
             calledFunction = true;
             const auto text = std::string_view(rhs).substr(open + 1, rhs.size() - open - 2);
             const auto expressions = expression::splitArguments(text);
             if (!expression::trim(text).empty() && expressions.empty()) {
                 error = "Invalid function arguments";
+                return false;
+            }
+            if (expressions.size() != function->params.size()) {
+                error = "Arg Count Mismatch";
                 return false;
             }
             std::vector<double> arguments;

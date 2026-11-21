@@ -543,6 +543,21 @@ int main() {
         bool fallbackMap = false;
         assert(parseArrayExpr("script_map_formula([2,3])", fallbackMap, signatureError) == std::vector<double>({4,9}));
         assert(fallbackMap && signatureError.empty());
+        evaluateInput("two_map_arguments(x,y)=x+y", signatureError, signatureDefinition);
+        runScript("fn two_script_arguments(x,y) { print(x); return x+y }");
+        for (const auto& source : {"two_map_arguments([])", "two_map_arguments([1])", "two_script_arguments([])", "two_script_arguments([1])"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Arg Count Mismatch");
+        }
+        assert(engineState().script_console_output.empty());
+        for (const auto& source : {"two_script_arguments(ast_print_once(1))", "two_map_arguments(ast_print_once(1))"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Arg Count Mismatch");
+            assert(engineState().script_console_output.empty());
+        }
+        assert(evaluateLiteralAst("if(0,two_map_arguments(ast_print_once(1)),7)") == 7 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+
         assert(evaluateArrayAst("1:3") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
         assert(evaluateArrayAst("[3:-1:1]") && typedArray == std::vector<double>({3,2,1}) && signatureError.empty());
         assert(evaluateArrayAst("[1:2:5].*[1:2:5]") && typedArray == std::vector<double>({1,9,25}) && signatureError.empty());

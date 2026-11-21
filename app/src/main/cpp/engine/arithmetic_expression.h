@@ -24,7 +24,18 @@ public:
     using UnaryLookup = UnaryFunction (*)(std::string_view);
     using ArrayLookup = const std::vector<double>* (*)(std::string_view);
     using ScalarLookup = std::optional<double> (*)(std::string_view);
-    using CustomFunction = std::function<double(const std::vector<double>&, std::string&)>;
+    struct CustomFunction {
+        size_t arity = 0;
+        std::function<double(const std::vector<double>&, std::string&)> invoke;
+        explicit operator bool() const { return static_cast<bool>(invoke); }
+        double operator()(const std::vector<double>& values, std::string& error) const {
+            if (values.size() != arity) {
+                error = "Arg Count Mismatch";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            return invoke(values, error);
+        }
+    };
     using CustomLookup = CustomFunction (*)(std::string_view);
 
     static std::optional<double> evaluate(std::string_view source, std::string& error,
@@ -112,6 +123,7 @@ public:
                 if (unary) node.function = unary(node.symbol);
                 if (!node.function && custom) node.customFunction = custom(node.symbol);
                 if (!node.function && !node.customFunction) continue;
+                if (node.customFunction && node.customFunction.arity != 1) return std::nullopt;
                 node.op = 'u';
                 node.arraySlot = parser.literalArrays.size();
                 parser.literalArrays.emplace_back();
@@ -173,7 +185,10 @@ public:
                 if (arity == 1 && unary && (node.function = unary(node.symbol))) continue;
                 if (arity == 2 && binary && (node.binaryFunction = binary(node.symbol))) continue;
                 if (variadic && (node.variadicFunction = variadic(node.symbol))) continue;
-                if (custom && (node.customFunction = custom(node.symbol))) continue;
+                if (custom && (node.customFunction = custom(node.symbol))) {
+                    if (node.customFunction.arity != arity) node.op = 'e';
+                    continue;
+                }
                 return std::nullopt;
             }
             if (node.op == 'f') {
@@ -197,6 +212,10 @@ public:
             const size_t index = frame.index;
             auto& node = parser.nodes[index];
             if (complete[index]) { work.pop_back(); continue; }
+            if (node.op == 'e') {
+                error = "Arg Count Mismatch";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             if (node.op == 'q') {
                 const auto& args = parser.callArguments[node.right];
                 size_t selected = args.back();
