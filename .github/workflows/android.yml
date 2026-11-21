@@ -10,6 +10,11 @@ on:
       - 'v*'
   pull_request:
   workflow_dispatch:
+    inputs:
+      regression_only:
+        description: Run the complete regression package without publishing APKs
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -19,7 +24,14 @@ env:
   ACTIONS_ALLOW_USE_UNSECURE_NODE_VERSION: 'true'
 
 jobs:
+  regression:
+    if: ${{ inputs.regression_only == true }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/regression.yml
+
   apk:
+    if: ${{ inputs.regression_only != true }}
     name: Generate APK
     runs-on: ubuntu-latest
     permissions:

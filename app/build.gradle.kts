@@ -3,14 +3,18 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val testAbi = providers.gradleProperty("testAbi").orNull
+
 android {
     namespace = "com.cardputer.cardulator"
     compileSdk = 36
+    testBuildType = if (testAbi != null) "ci" else "debug"
 
     defaultConfig {
         applicationId = "com.cardputer.cardulator"
         minSdk = 24
         targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = (System.getenv("VERSION_CODE") ?: project.findProperty("versionCode")?.toString() ?: "1").toInt()
         val appVersionName = System.getenv("VERSION_NAME") ?: (project.findProperty("versionName") as? String ?: "26.10.25")
         versionName = appVersionName
@@ -27,7 +31,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            include(*(testAbi?.let { arrayOf(it) } ?: arrayOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")))
             isUniversalApk = true
         }
     }
@@ -87,6 +91,10 @@ dependencies {
     implementation("com.google.android.material:material:1.11.0")
     implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
 }
 
 // Validate only release artifacts; debug and CI builds do not need release secrets.
