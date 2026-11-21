@@ -256,6 +256,7 @@ static bool assignScriptTuple(const std::string& lhs, const std::string& rhs, st
                     return false;
                 }
                 arguments.push_back(evaluate(argument, error));
+                if (error.empty() && engineState().g_last_eval_is_array) error = "Function argument must be scalar";
                 if (!error.empty()) return false;
             }
             executeScriptFunc(name, arguments, error, &values);

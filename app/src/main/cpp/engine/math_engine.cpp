@@ -89,6 +89,7 @@ inline std::string substituteUserFuncs(std::string expr, std::string& err) {
                     }
                     std::string eval_err;
                     double val = evaluate(a_str, eval_err);
+                    if (eval_err.empty() && engineState().g_last_eval_is_array) eval_err = "Function argument must be scalar";
                     if (!eval_err.empty() || std::isnan(val)) {
                         err = eval_err.empty() ? "Arg Eval Error" : eval_err;
                         return expr;
@@ -617,8 +618,10 @@ static std::string preprocessInlineConditionalsAndLoops(const std::string& s, st
             auto args = expression::splitArguments(inside);
             if (args.size() == 4 && isValidLoopIdent(args[0]) && (!isDefinedScalarName(args[0]) || exprReferencesIdent(args[3], args[0]))) {
                 double start_d = evaluate(args[1], err);
+                if (err.empty() && engineState().g_last_eval_is_array) err = "Loop bounds must be scalar";
                 if (!err.empty()) return res;
                 double end_d = evaluate(args[2], err);
+                if (err.empty() && engineState().g_last_eval_is_array) err = "Loop bounds must be scalar";
                 if (!err.empty()) return res;
                 const double int64Limit = std::ldexp(1.0, 63);
                 if (!std::isfinite(start_d) || !std::isfinite(end_d) || start_d < -int64Limit || start_d >= int64Limit || end_d < -int64Limit || end_d >= int64Limit) {
@@ -1196,6 +1199,7 @@ double assignArrayElement(const std::string& name, const std::string& index,
     }
 
     const auto position = evaluate(index, error);
+    if (error.empty() && engineState().g_last_eval_is_array) error = "Array index must be scalar";
     if (!error.empty()) return failure;
     auto validate = [&]() {
         const auto target = arrays.find(name);
@@ -1211,6 +1215,7 @@ double assignArrayElement(const std::string& name, const std::string& index,
     validate();
     if (!error.empty()) return failure;
     const auto result = evaluate(value, error);
+    if (error.empty() && engineState().g_last_eval_is_array) error = "Array element must be scalar";
     if (!error.empty()) return failure;
 
     // Evaluation may call a script that replaces the target array.
@@ -1911,6 +1916,7 @@ std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
             }
 
             double idx_val = evaluate(index_expr, err);
+            if (err.empty() && engineState().g_last_eval_is_array) err = "Array index must be scalar";
             if (!err.empty()) {
                 return expr;
             }
@@ -2094,6 +2100,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                 if (!err.empty()) return {};
                 const double value = evaluate(expanded, err);
                 if (!err.empty()) return {};
+                if (engineState().g_last_eval_is_array) { err = "Array element must be scalar"; return {}; }
                 values.push_back(value);
             }
             return values;

@@ -592,6 +592,12 @@ int main() {
         oversizedLiteral += ']';
         parseArrayExpr(oversizedLiteral, invalidLiteral, signatureError);
         assert(signatureError == "Overflow Error: array literal limit exceeded");
+        for (const auto& source : {"[[1,2]]", "[1,[2,3]]", "ast_statistics[[1,2]]", "sum(coercion_index,[1,2],3,coercion_index)"}) {
+            evaluate(source, signatureError);
+            assert(!signatureError.empty());
+        }
+        runScript("scalar_element_guard=[7,8]; scalar_element_guard[[1,2]]=9; scalar_element_guard[1]=[9,10]");
+        assert(engineState().user_arrays.at("scalar_element_guard") == std::vector<double>({7,8}));
         assert(evaluateLiteralAst("mean([1e308,1e308])") == 1e308 && signatureError.empty());
         assert(evaluateLiteralAst("median([1e308,1e308])") == 1e308 && signatureError.empty());
         const auto largeDeviation = evaluateLiteralAst("std([-1e200,1e200])");
