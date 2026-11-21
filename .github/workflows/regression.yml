@@ -107,7 +107,7 @@ jobs:
             echo 'Unsigned release validation unexpectedly succeeded'
             exit 1
           fi
-          rg -F 'Release signing requires' test-artifacts/release-validation.txt
+          grep -F 'Release signing requires' test-artifacts/release-validation.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:

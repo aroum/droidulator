@@ -22,6 +22,7 @@ import androidx.test.espresso.assertion.ViewAssertions.matches
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
+import androidx.test.espresso.matcher.ViewMatchers.isDisplayed
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import java.io.File
@@ -82,6 +83,17 @@ class AndroidRegressionTest {
             SystemClock.sleep(50)
         }
         fail("Timed out waiting for $description")
+    }
+
+    private fun awaitView(description: String, action: () -> Unit) {
+        await(description) {
+            try {
+                action()
+                true
+            } catch (_: Throwable) {
+                false
+            }
+        }
     }
 
     private fun selectTab(position: Int) {
@@ -155,22 +167,23 @@ class AndroidRegressionTest {
     @Test fun scriptDraftRunSaveRenameAndDelete() {
         selectTab(1)
         activity { it.findViewById<View>(R.id.btn_add_item).performClick() }
-        await("script editor opened") { activity { session(it).scriptDraft != null } }
+        awaitView("script editor opened") { onView(withId(R.id.et_script_name)).check(matches(isDisplayed())) }
         onView(withId(R.id.et_script_name)).perform(replaceText("emulator_case"), closeSoftKeyboard())
         onView(withId(R.id.et_script_code)).perform(replaceText("print(42)"), closeSoftKeyboard())
         scenario.recreate()
-        await("script editor restored") { activity { session(it).scriptDraft != null } }
+        awaitView("script editor restored") { onView(withId(R.id.et_script_name)).check(matches(isDisplayed())) }
         onView(withId(R.id.et_script_name)).check(matches(withText("emulator_case")))
         onView(withId(R.id.et_script_code)).check(matches(withText("print(42)")))
         onView(withId(R.id.btn_script_run)).perform(click())
         engine { Unit }
         assertFalse(activity { session(it).userScripts.any { script -> script.first == "emulator_case" } })
+        awaitView("script output dialog visible") { onView(withText(R.string.ui_text_015)).check(matches(isDisplayed())) }
         onView(withText(R.string.ui_text_015)).perform(click())
         onView(withId(R.id.btn_script_save)).perform(click())
         await("saved script") { activity { session(it).userScripts.any { script -> script.first == "emulator_case" } } }
         assertTrue(engine { nativeEvaluate("run(\"emulator_case\")") }.contains("42"))
         cardAction("emulator_case", R.string.ui_text_009)
-        await("script editor opened for rename") { activity { session(it).scriptDraft != null } }
+        awaitView("script editor opened for rename") { onView(withId(R.id.et_script_name)).check(matches(isDisplayed())) }
         onView(withId(R.id.et_script_name)).perform(replaceText("fibonacci"), closeSoftKeyboard())
         onView(withId(R.id.btn_script_save)).perform(click())
         assertTrue(activity { session(it).userScripts.any { script -> script.first == "emulator_case" } })
@@ -178,6 +191,7 @@ class AndroidRegressionTest {
         onView(withId(R.id.btn_script_save)).perform(click())
         await("renamed script saved") { activity { session(it).userScripts.any { script -> script.first == "emulator_renamed" } } }
         cardAction("emulator_renamed", R.string.ui_text_010)
+        awaitView("delete action confirmation visible") { onView(withText(R.string.action_delete)).check(matches(isDisplayed())) }
         onView(withText(R.string.action_delete)).perform(click())
         assertFalse(activity { session(it).userScripts.any { script -> script.first == "emulator_renamed" } })
     }
