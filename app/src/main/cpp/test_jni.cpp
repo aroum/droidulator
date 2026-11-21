@@ -567,6 +567,12 @@ int main() {
         oversizedLiteral += ']';
         parseArrayExpr(oversizedLiteral, invalidLiteral, signatureError);
         assert(signatureError == "Overflow Error: array literal limit exceeded");
+        assert(evaluateLiteralAst("mean([1e308,1e308])") == 1e308 && signatureError.empty());
+        assert(evaluateLiteralAst("median([1e308,1e308])") == 1e308 && signatureError.empty());
+        const auto largeDeviation = evaluateLiteralAst("std([-1e200,1e200])");
+        assert(largeDeviation && std::abs(*largeDeviation / 1e200 - std::sqrt(2.0)) < 1e-12 && signatureError.empty());
+        const auto offsetVariance = evaluateLiteralAst("var([1e12+1,1e12+2,1e12+3])");
+        assert(offsetVariance && std::abs(*offsetVariance - 1) < 1e-12 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

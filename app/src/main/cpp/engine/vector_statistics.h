@@ -44,7 +44,7 @@ inline double evaluateStatistic(VectorStatistic operation, const std::vector<dou
             auto sorted = values;
             std::sort(sorted.begin(), sorted.end());
             const auto middle = sorted.size() / 2;
-            return sorted.size() % 2 ? sorted[middle] : (sorted[middle - 1] + sorted[middle]) / 2.0;
+            return sorted.size() % 2 ? sorted[middle] : std::midpoint(sorted[middle - 1], sorted[middle]);
         }
         case VectorStatistic::Mode: {
             std::map<double, size_t> counts;
@@ -57,13 +57,18 @@ inline double evaluateStatistic(VectorStatistic operation, const std::vector<dou
             return result;
         }
         default: {
-            const double mean = std::accumulate(values.begin(), values.end(), 0.0) / values.size();
-            if (operation == VectorStatistic::Mean) return mean;
+            long double mean = 0.0L;
+            for (double value : values) mean += static_cast<long double>(value) / values.size();
+            if (operation == VectorStatistic::Mean) return static_cast<double>(mean);
             if (values.size() == 1) return 0.0;
-            double squares = 0.0;
-            for (double value : values) squares += (value - mean) * (value - mean);
-            const double variance = squares / (values.size() - 1);
-            return operation == VectorStatistic::Deviation ? std::sqrt(variance) : variance;
+            long double deviation = 0.0L;
+            const long double scale = std::sqrt(static_cast<long double>(values.size() - 1));
+            for (double value : values) {
+                const long double centered = static_cast<long double>(value) - mean;
+                const long double difference = std::isfinite(centered) ? centered / scale : static_cast<long double>(value) / scale - mean / scale;
+                deviation = std::hypot(deviation, difference);
+            }
+            return static_cast<double>(operation == VectorStatistic::Deviation ? deviation : deviation * deviation);
         }
     }
 }
