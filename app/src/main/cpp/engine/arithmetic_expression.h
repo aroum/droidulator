@@ -89,7 +89,7 @@ public:
                 bool allArrays = isArrayNode(args.back());
                 bool anyArrays = allArrays;
                 for (size_t i = 0; i + 1 < args.size(); i += 2) {
-                    if (isArrayNode(args[i])) return std::nullopt;
+                    if (isArrayNode(args[i]) && !parser.nodes[args[i]].dynamicType) return std::nullopt;
                     const bool branchArray = isArrayNode(args[i + 1]);
                     allArrays = allArrays && branchArray;
                     anyArrays = anyArrays || branchArray;
@@ -142,10 +142,27 @@ public:
             node.left = args.front();
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
+        const auto visitScalarInputs = [&](const Node& node, const auto& visit) {
+            if (node.op == 'c' || node.op == 'b' || node.op == 'r') {
+                for (size_t argument : parser.callArguments[node.right]) visit(argument);
+            } else if (node.op == 'q') {
+                const auto& args = parser.callArguments[node.right];
+                for (size_t i = 0; i + 1 < args.size(); i += 2) visit(args[i]);
+            } else if (node.op == 'n' || node.op == 'f' || node.op == '[') {
+                visit(node.left);
+            } else if (node.op == '^' || node.op == '%' || (node.op >= 'A' && node.op <= 'I')) {
+                visit(node.left);
+                visit(node.right);
+            }
+            if (node.op == 'i') visit(node.right);
+        };
         // Reject consumers that cannot yet preserve a dynamically selected type
         // before any branch or user callback executes.
         std::vector<bool> typedConsumers(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            visitScalarInputs(node, [&](size_t argument) {
+                if (parser.nodes[argument].dynamicType) typedConsumers[argument] = true;
+            });
             if (node.op == 's' || node.op == 'z' || node.op == 'u' || node.op == 'i' || node.op == 'd')
                 typedConsumers[node.left] = true;
             if (node.op == 'd') typedConsumers[node.right] = true;
@@ -162,6 +179,9 @@ public:
             if (parser.nodes[i].dynamicType && i != root && !typedConsumers[i]) return std::nullopt;
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            visitScalarInputs(node, [&](size_t argument) {
+                if (parser.nodes[argument].dynamicType) consumedArrays[argument] = true;
+            });
             if (node.arrayConditional) {
                 const auto& args = parser.callArguments[node.right];
                 for (size_t i = 1; i < args.size(); i += 2) consumedArrays[args[i]] = true;
@@ -256,6 +276,10 @@ public:
                         waiting = true;
                         break;
                     }
+                    if (isArrayNode(condition)) {
+                        error = "Condition must be scalar";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
                     const double value = parser.nodes[condition].value;
                     if (!std::isfinite(value)) {
                         error = std::isnan(value) ? "Math Error" : "Overflow Error";
@@ -305,6 +329,14 @@ public:
                 }
                 // Re-enter after the dependencies, including leaf nodes.
                 continue;
+            }
+            bool invalidScalar = false;
+            visitScalarInputs(node, [&](size_t argument) {
+                invalidScalar = invalidScalar || isArrayNode(argument);
+            });
+            if (invalidScalar) {
+                error = "Expression argument must be scalar";
+                return std::numeric_limits<double>::quiet_NaN();
             }
             complete[index] = true;
             work.pop_back();

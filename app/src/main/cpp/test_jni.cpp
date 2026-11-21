@@ -640,6 +640,26 @@ int main() {
             const auto result = evaluateArrayAst(source);
             assert(result && std::isnan(*result) && !signatureError.empty());
         }
+        assert(evaluateLiteralAst("mod(if(1,7,[3]),3)") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("max(1,if(1,7,[3]),4)") == 7 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("if(1,19,if(if(1,[ast_print_once(1)],2),3,4))") == 19 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluateLiteralAst("if(1,2,[3])^3") == 8 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,7,[3])%3") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,7,[3])>=2") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("not if(1,0,[3])") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,3,[2])!") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("if(if(1,1,[2]),3,1/0)") == 3 && signatureError.empty());
+        assert(evaluateArrayAst("[if(1,2,[3]),4]") && typedArray == std::vector<double>({2,4}) && signatureError.empty());
+        assert(evaluateArrayAst("[1:if(1,2,[3]):5]") && typedArray == std::vector<double>({1,3,5}) && signatureError.empty());
+        assert(evaluateLiteralAst("[4,9][if(1,2,[3])]") == 9 && signatureError.empty());
+        for (const auto& source : {"if(0,2,[3])^3", "not if(0,0,[3])", "[if(0,2,[3]),4]",
+                "if(if(0,1,[2]),3,4)", "[4,9][if(0,2,[3])]", "mod(if(0,7,[3]),3)",
+                "max(1,if(0,7,[3]),4)"}) {
+            const auto result = evaluateArrayAst(source);
+            assert(result && std::isnan(*result) && !signatureError.empty());
+        }
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
