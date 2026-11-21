@@ -2069,6 +2069,15 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         const auto elements = expression::splitArguments(inner);
         if (bracketed || elements.size() > 1) {
             is_array = true;
+            if (expression::trim(inner).empty()) return {};
+            if (elements.size() > MAX_ARRAY_ELEMENTS) {
+                err = "Overflow Error: array literal limit exceeded";
+                return {};
+            }
+            if (std::any_of(elements.begin(), elements.end(), [](const auto& element) { return element.empty(); })) {
+                err = "Empty array element";
+                return {};
+            }
             if (elements.empty() && !expression::trim(inner).empty()) {
                 err = "Math Error";
                 return {};
@@ -2084,7 +2093,6 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
             std::vector<double> values;
             values.reserve(elements.size());
             for (const auto& element : elements) {
-                if (element.empty()) continue;
                 const auto expanded = preprocessArrayLookups(element, err);
                 if (!err.empty()) return {};
                 const double value = evaluate(expanded, err);

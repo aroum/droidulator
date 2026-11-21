@@ -548,6 +548,25 @@ int main() {
         bool malformedRange = false;
         parseArrayExpr("1:2:3:4", malformedRange, signatureError);
         assert(signatureError == "Invalid range syntax");
+        for (const auto& malformed : {"[1,,2]", "[,1]", "[1,]"}) {
+            signatureError.clear();
+            bool array = false;
+            parseArrayExpr(malformed, array, signatureError);
+            assert(array && signatureError == "Empty array element");
+        }
+        engineState().script_console_output.clear();
+        signatureError.clear();
+        bool invalidLiteral = false;
+        parseArrayExpr("[ast_print_once(1),]", invalidLiteral, signatureError);
+        assert(signatureError == "Empty array element" && engineState().script_console_output.empty());
+        signatureError.clear();
+        bool emptyLiteral = false;
+        assert(parseArrayExpr("[ ]", emptyLiteral, signatureError).empty() && emptyLiteral && signatureError.empty());
+        std::string oversizedLiteral = "[0";
+        for (size_t i = 0; i < 100000; ++i) oversizedLiteral += ",0";
+        oversizedLiteral += ']';
+        parseArrayExpr(oversizedLiteral, invalidLiteral, signatureError);
+        assert(signatureError == "Overflow Error: array literal limit exceeded");
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
