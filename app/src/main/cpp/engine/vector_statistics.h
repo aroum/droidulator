@@ -101,4 +101,22 @@ inline std::vector<double> vectorElementwise(std::string_view operation,
     }
     return result;
 }
+
+inline std::vector<double> vectorRange(double start, double step, double end, size_t limit, std::string& error) {
+    if (!std::isfinite(start) || !std::isfinite(step) || !std::isfinite(end) || step == 0.0) {
+        error = "Invalid range bounds or step";
+        return {};
+    }
+    const long double span = (static_cast<long double>(end) - start) / step;
+    if (span < 0) return {};
+    if (!std::isfinite(span) || span >= limit) {
+        error = "Overflow Error: array range limit exceeded";
+        return {};
+    }
+    const size_t count = static_cast<size_t>(std::floor(span + 1e-12L)) + 1;
+    std::vector<double> result;
+    result.reserve(count);
+    for (size_t i = 0; i < count; ++i) result.push_back(start + step * static_cast<double>(i));
+    return result;
+}
 }

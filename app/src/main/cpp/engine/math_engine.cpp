@@ -2095,59 +2095,25 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
         }
     }
 
-    if (trimmed.find(':') != std::string::npos) {
-        size_t first_col = std::string::npos;
-        size_t second_col = std::string::npos;
-        std::vector<char> groups;
-        for (const auto& token : expression::tokenize(trimmed)) {
-            if (token.kind == expression::Kind::Open) groups.push_back(token.text.front());
-            else if (token.kind == expression::Kind::Close && !expression::closeGroup(groups, token.text.front())) break;
-            else if (groups.empty() && token.text == ":") {
-                if (first_col == std::string::npos) first_col = token.start;
-                else { second_col = token.start; break; }
-            }
+    const auto rangeParts = expression::splitArguments(trimmed, ':');
+    if (rangeParts.size() > 1) {
+        is_array = true;
+        if (rangeParts.size() > 3 || std::any_of(rangeParts.begin(), rangeParts.end(), [](const auto& part) { return part.empty(); })) {
+            err = "Invalid range syntax";
+            return {};
         }
-
-        if (first_col != std::string::npos) {
-            is_array = true;
-            std::string start_str = trimmed.substr(0, first_col);
-            std::string step_str = "1";
-            std::string end_str = "";
-            if (second_col != std::string::npos) {
-                step_str = trimmed.substr(first_col + 1, second_col - first_col - 1);
-                end_str = trimmed.substr(second_col + 1);
-            } else {
-                end_str = trimmed.substr(first_col + 1);
-            }
-        
-        std::string prep_err;
-        std::string s_start = preprocessArrayLookups(start_str, prep_err);
-        double start_val = evaluate(s_start, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        prep_err.clear();
-        std::string s_step = preprocessArrayLookups(step_str, prep_err);
-        double step_val = evaluate(s_step, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        prep_err.clear();
-        std::string s_end = preprocessArrayLookups(end_str, prep_err);
-        double end_val = evaluate(s_end, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        
-        std::vector<double> res;
-        if (!std::isfinite(start_val) || !std::isfinite(step_val) || !std::isfinite(end_val) || step_val == 0) {
-            err = "Invalid range bounds or step"; return {};
+        const std::array<std::string, 3> expressions = {rangeParts[0], rangeParts.size() == 3 ? rangeParts[1] : "1", rangeParts.back()};
+        std::array<double, 3> bounds{};
+        for (size_t i = 0; i < expressions.size(); ++i) {
+            const auto expanded = preprocessArrayLookups(expressions[i], err);
+            if (!err.empty()) return {};
+            bounds[i] = evaluate(expanded, err);
+            if (!err.empty()) return {};
+            if (engineState().g_last_eval_is_array) { err = "Range bounds must be scalar"; return {}; }
         }
-        long double span = (static_cast<long double>(end_val) - start_val) / step_val;
-        if (span >= 0) {
-            if (!std::isfinite(span) || span >= MAX_ARRAY_ELEMENTS) { err = "Overflow Error: array range limit exceeded"; return {}; }
-            const size_t count = static_cast<size_t>(std::floor(span + 1e-12L)) + 1;
-            res.reserve(count);
-            for (size_t i = 0; i < count; ++i) res.push_back(start_val + step_val * static_cast<double>(i));
-        }
-        return res;
-        }
+        return expression::vectorRange(bounds[0], bounds[1], bounds[2], MAX_ARRAY_ELEMENTS, err);
     }
-    
+
     return {};
 }
 

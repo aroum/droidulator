@@ -41,7 +41,7 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
-            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
+            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'r' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
         // Bind array consumers before scalar name lookup.
@@ -136,17 +136,17 @@ public:
             consumedArrays[root] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u' || parser.nodes[i].arrayConditional) && !consumedArrays[i]) return std::nullopt;
+            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u' || parser.nodes[i].op == 'r' || parser.nodes[i].arrayConditional) && !consumedArrays[i]) return std::nullopt;
         const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
             const auto& node = parser.nodes[index];
             if (node.op == 'b') return &parser.literalArrays[node.left];
-            if (node.op == 't' || node.op == 'u' || node.arrayConditional) return &parser.literalArrays[node.arraySlot];
+            if (node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) return &parser.literalArrays[node.arraySlot];
             return arrays ? arrays(node.symbol) : nullptr;
         };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'q') continue;
+            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -233,7 +233,7 @@ public:
                     }
                     auto& target = parser.literalArrays[node.arraySlot];
                     if (source.op == 'b') target = std::move(parser.literalArrays[source.left]);
-                    else if (source.op == 't' || source.op == 'u' || source.arrayConditional)
+                    else if (source.op == 't' || source.op == 'u' || source.op == 'r' || source.arrayConditional)
                         target = std::move(parser.literalArrays[source.arraySlot]);
                     else target = *values;
                 }
@@ -244,7 +244,7 @@ public:
             }
             if (frame.stage == 0) {
                 frame.stage = 1;
-                if (node.op == 'c' || node.op == 'b') {
+                if (node.op == 'c' || node.op == 'b' || node.op == 'r') {
                     const auto& args = parser.callArguments[node.right];
                     for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
                         if (!complete[*argument]) work.push_back({*argument});
@@ -260,6 +260,13 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'r') {
+                const auto& args = parser.callArguments[node.right];
+                parser.literalArrays[node.arraySlot] = vectorRange(parser.nodes[args[0]].value,
+                    parser.nodes[args[1]].value, parser.nodes[args[2]].value, 100000, error);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                continue;
+            }
             if (node.op == 'u') {
                 const auto* source = arrayValue(node.left);
                 if (!source) {
@@ -439,7 +446,7 @@ public:
             const double first = values->empty() ? 0.0 : values->front();
             const auto& node = parser.nodes[root];
             if (node.op == 'b') *arrayResult = std::move(parser.literalArrays[node.left]);
-            else if (node.op == 't' || node.op == 'u' || node.arrayConditional) *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
+            else if (node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
             else *arrayResult = *values;
             return first;
         }
@@ -543,9 +550,12 @@ private:
                 }
             }
             if (next == tokens.size() || tokens[next++].text != "]") return invalid;
-            left = add({0, 'b', literalArrays.size(), callArguments.size()});
-            literalArrays.emplace_back();
-            callArguments.push_back(std::move(elements));
+            if (elements.size() == 1 && nodes[elements.front()].op == 'r') left = elements.front();
+            else {
+                left = add({0, 'b', literalArrays.size(), callArguments.size()});
+                literalArrays.emplace_back();
+                callArguments.push_back(std::move(elements));
+            }
         } else if (token.kind == Kind::Number || token.kind == Kind::ScaledNumber) {
             std::string literal(token.text);
             if (token.kind == Kind::ScaledNumber) {
@@ -636,6 +646,27 @@ private:
             const auto right = parse(op.precedence + (op.rightAssociative ? 0 : 1), depth + 1);
             if (right == invalid) return invalid;
             left = add({0, op.opcode, left, right});
+        }
+        if (minimum == 0 && next < tokens.size() && tokens[next].text == ":") {
+            ++next;
+            const auto bound = parse(1, depth + 1);
+            if (bound == invalid) return invalid;
+            size_t step;
+            size_t end;
+            if (next < tokens.size() && tokens[next].text == ":") {
+                ++next;
+                step = bound;
+                end = parse(1, depth + 1);
+                if (end == invalid) return invalid;
+            } else {
+                step = add({1.0});
+                end = bound;
+            }
+            Node range{0, 'r', 0, callArguments.size()};
+            range.arraySlot = literalArrays.size();
+            literalArrays.emplace_back();
+            callArguments.push_back({left, step, end});
+            left = add(std::move(range));
         }
         return left;
     }
