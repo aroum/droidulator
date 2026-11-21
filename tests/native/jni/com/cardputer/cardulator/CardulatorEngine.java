@@ -55,6 +55,29 @@ public class CardulatorEngine {
     e.nativeEvaluate("fn jni_typed_mutate(a,b) { a[1]=a[1]+b; return a }");
     e.nativeEvaluate("jni_typed_mutate([1,2],5)");
     if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{6,2})) throw new AssertionError("typed script arguments");
+    for (String invalid : new String[]{"[1,]", "1:0:3", "if([1],2,3)", "unknown_call(1)", "jni_typed_mix([1,2],[3])"}) {
+      if (!e.nativeEvaluateDetailed(invalid)[0].equals("error")) throw new AssertionError("accepted invalid AST: " + invalid);
+      e.nativeEvaluate("2+2");
+      if (e.nativeGetLastNumericVal() != 4 || e.nativeLastArray() != null) throw new AssertionError("AST recovery after " + invalid);
+    }
+    e.nativeEvaluate("jni_syntax(x)=x+1");
+    if (!e.nativeEvaluateDetailed("jni_syntax(x)=x+")[0].equals("error")) throw new AssertionError("invalid definition accepted");
+    e.nativeEvaluate("jni_syntax(3)");
+    if (e.nativeGetLastNumericVal() != 4) throw new AssertionError("definition rollback");
+    e.nativeEvaluate("jni_factorial(x)=if(x<=1,1,x*jni_factorial(x-1))");
+    e.nativeEvaluate("jni_factorial(5)");
+    if (e.nativeGetLastNumericVal() != 120) throw new AssertionError("recursive AST formula");
+    CardulatorEngine isolatedAst = new CardulatorEngine();
+    isolatedAst.nativeInit();
+    e.nativeEvaluate("jni_shared_source=[1,2]");
+    isolatedAst.nativeEvaluate("jni_shared_source=7");
+    for (int i=0; i<3; i++) {
+      e.nativeEvaluate("jni_shared_source+1");
+      isolatedAst.nativeEvaluate("jni_shared_source+1");
+      if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{2,3}) || isolatedAst.nativeGetLastNumericVal() != 8 || isolatedAst.nativeLastArray() != null)
+        throw new AssertionError("cached AST types crossed JNI sessions");
+    }
+    isolatedAst.nativeDestroy(isolatedAst.nativeHandle);
     e.nativeInit();
     if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
     String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);

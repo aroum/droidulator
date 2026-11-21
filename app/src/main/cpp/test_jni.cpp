@@ -906,6 +906,8 @@ int main() {
         evaluateInput("syntax_bare(x)=sqrt x+1", signatureError, signatureDefinition);
         assert(signatureDefinition && signatureError.empty());
         assert(evaluate("syntax_bare(9)", signatureError) == 4 && signatureError.empty());
+        assert(formatPrintString("typed_mix([1,2],3)", signatureError) == "[" + fmtNum(4) + ", " + fmtNum(5) + "]" && signatureError.empty());
+        assert(formatPrintString("\"result={typed_mix([1,2],3)}\"", signatureError) == "result=[" + fmtNum(4) + ", " + fmtNum(5) + "]" && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
