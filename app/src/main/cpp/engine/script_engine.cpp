@@ -8,11 +8,9 @@
 
 extern double evaluate(const std::string& expr_str, std::string& err);
 extern double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
-extern std::string preprocessArrayLookups(const std::string& expr, std::string& err);
 extern std::string formatPrintString(const std::string& str, std::string& err);
 extern bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr);
 extern std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-extern std::string preprocessLen(const std::string& s);
 
 
 // History values are read-only in every script assignment, including for headers.
@@ -68,9 +66,7 @@ static std::string reservedAssignment(const std::string& code) {
 }
 
 static bool evaluateScriptCondition(const std::string& condition, std::string& error) {
-    const auto expression = preprocessArrayLookups(condition, error);
-    if (!error.empty()) return false;
-    const double value = evaluateScalar(expression, error, "Condition");
+    const double value = evaluateScalar(condition, error, "Condition");
     return error.empty() && !std::isnan(value) && value != 0.0;
 }
 
@@ -350,9 +346,7 @@ bool executeScriptAssignments(const std::string& step, std::string& err) {
                 err = "Const Error";
                 return false;
             }
-            const auto expanded = preprocessArrayLookups(rhs, err);
-            if (!err.empty()) return false;
-            double val = evaluate(preprocessLen(expanded), err);
+            double val = evaluateScalar(rhs, err, "Assignment");
             if (err.empty()) {
                 engineState().user_arrays.erase(lhs);
                 bool found = false;
@@ -368,9 +362,7 @@ bool executeScriptAssignments(const std::string& step, std::string& err) {
                 }
             }
         } else {
-            const auto expanded = preprocessArrayLookups(st, err);
-            if (!err.empty()) return false;
-            evaluateInput(preprocessLen(expanded), err, isDef);
+            evaluateInput(st, err, isDef);
         }
         if (!err.empty()) return false;
     }

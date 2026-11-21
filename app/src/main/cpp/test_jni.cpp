@@ -949,11 +949,9 @@ int main() {
         assert(parseArrayExpr("ast_script_pair(4)", astArrayBridge, signatureError) == std::vector<double>({4,5}));
         assert(astArrayBridge && signatureError.empty());
         assert(parseArrayExpr("ast_script_empty()", astArrayBridge, signatureError).empty() && astArrayBridge && signatureError.empty());
-        bool bridgeScalar = false;
-        double bridgeScalarValue = 0;
         engineState().script_console_output.clear();
-        assert(evaluateArrayBinaryOp("ast_print_once(3)", "*", "[2,4]", bridgeScalar, bridgeScalarValue, signatureError) == std::vector<double>({6,12}));
-        assert(!bridgeScalar && signatureError.empty() && engineState().script_console_output.size() == 1);
+        assert(evaluateArrayAst("ast_print_once(3)*[2,4]") && typedArray == std::vector<double>({6,12}));
+        assert(signatureError.empty() && engineState().script_console_output.size() == 1);
         bool typedReturnArray = false;
         engineState().script_console_output.clear();
         auto typedReturnValues = evaluateScriptReturnValues("ast_print_once(3)", typedReturnArray, signatureError);
@@ -1002,17 +1000,11 @@ int main() {
         std::string emptyArgumentError;
         evaluate("empty_argument_test(,1)", emptyArgumentError);
         assert(!emptyArgumentError.empty());
-        assert(preprocessFactorial("\"3!\"") == "\"3!\"");
-        assert(preprocessPercentage("\"50%\"") == "\"50%\"");
-        assert(preprocessLen("\"len(missing_array)\"") == "\"len(missing_array)\"");
         assert(expression::callOffset("\"f(1)\" + f(2)", "f") == 9);
         const std::string spacedCall = "\"f (1)\" + f \t(2)";
         const auto callSite = expression::findCall(spacedCall, "f");
         assert(callSite && callSite->nameOffset == spacedCall.find("f \t") && callSite->openOffset == spacedCall.rfind('('));
         assert(!expression::findCall("different_f (2)", "f"));
-        assert(preprocessLen("len ([1,2,3])") == "3");
-        assert(preprocessVectorStats("dot ([1,2], [3,4])") == "11");
-        assert(preprocessLen("\"len (x)\"") == "\"len (x)\"");
         assert(expression::matchingGroupEnd("f(\")\", [1,2])", 1) == 12);
         runScript("return 1, unknown_return_value");
         assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),

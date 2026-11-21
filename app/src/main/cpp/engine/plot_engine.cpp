@@ -1,12 +1,6 @@
 #include "plot_engine.h"
-#include "math_funcs.h"
+#include "math_engine.h"
 
-extern std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-extern double evaluate(const std::string& expr_str, std::string& err);
-extern bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2);
-extern std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err);
-extern std::string preprocessArrayLookups(const std::string& expr, std::string& err);
-extern std::string preprocessLen(const std::string& s);
 
 bool handlePlotCommands(const std::string& line, std::string& err, double& result) {
     std::string trimmed = line;
@@ -144,16 +138,9 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             bool is_arr = false;
             std::string parse_err;
             x_vec = parseArrayExpr(x_str, is_arr, parse_err);
-            if (!is_arr || !parse_err.empty() || x_vec.empty()) {
-                parse_err.clear();
-                std::string prep_x = preprocessArrayLookups(x_str, parse_err);
-                double val = evaluate(prep_x, parse_err);
-                if (parse_err.empty() && !std::isnan(val)) {
-                    x_vec = { val };
-                } else {
-                    err = "X vector parse error";
-                    return true;
-                }
+            if (!parse_err.empty() || x_vec.empty()) {
+                err = "X vector parse error";
+                return true;
             }
         }
         
@@ -168,20 +155,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             bool is_arr = false;
             std::string parse_err;
             std::vector<double> candidate = parseArrayExpr(y_str, is_arr, parse_err);
-            std::string prep_y = preprocessArrayLookups(y_str, parse_err);
-            std::string op1, op, op2;
-            bool is_bin_op = parseBinaryOp(prep_y, op1, op, op2);
-            if (is_arr && parse_err.empty()) {
-                y_vec = candidate;
-            } else if (is_bin_op) {
-                bool is_scalar = false;
-                double scalar_res = 0;
-                std::string bin_err;
-                std::vector<double> bin_res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, bin_err);
-                if (bin_err.empty() && !is_scalar) {
-                    y_vec = bin_res;
-                }
-            }
+            if (is_arr && parse_err.empty()) y_vec = std::move(candidate);
             if (y_vec.empty()) {
                 y_vec.clear();
                 y_vec.reserve(x_vec.size());
@@ -218,7 +192,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                     if (current == engineState().user_args.end()) { engineState().user_args.push_back({x_var_name, xv}); }
                     else current->val = xv;
                     std::string eval_err;
-                    double yv = evaluate(preprocessLen(prep_y), eval_err);
+                    double yv = evaluateScalar(y_str, eval_err, "Plot value");
                     if (eval_err.empty() && !std::isnan(yv)) {
                         y_vec.push_back(yv);
                     } else {

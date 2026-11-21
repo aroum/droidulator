@@ -127,7 +127,11 @@ public:
             root = syntax->root;
         } else {
             root = parser.parseList(0);
-            if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
+            if (root == invalid || parser.next != parser.tokens.size()) {
+                if (parser.syntaxError.empty()) return std::nullopt;
+                error = parser.syntaxError;
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             size_t bytes = source.size() + parser.tokens.size() * sizeof(Token) + parser.nodes.size() * sizeof(Node);
             for (const auto& args : parser.callArguments) bytes += sizeof(args) + args.size() * sizeof(size_t);
             bytes += parser.literalArrays.size() * sizeof(std::vector<double>);
@@ -185,7 +189,7 @@ public:
                 bool allArrays = isArrayNode(args.back());
                 bool anyArrays = allArrays;
                 for (size_t i = 0; i + 1 < args.size(); i += 2) {
-                    if (isArrayNode(args[i]) && !parser.nodes[args[i]].dynamicType) return std::nullopt;
+                    if (isArrayNode(args[i]) && !parser.nodes[args[i]].op) parser.nodes[args[i]].op = 'a';
                     const bool branchArray = isArrayNode(args[i + 1]);
                     allArrays = allArrays && branchArray;
                     anyArrays = anyArrays || branchArray;
@@ -311,7 +315,7 @@ public:
                 }
             }
             visitScalarInputs(node, [&](size_t argument) {
-                if (parser.nodes[argument].dynamicType || node.op == 'e' || node.op == '?') consumedArrays[argument] = true;
+                if (parser.nodes[argument].dynamicType || node.op == 'q' || node.op == 'e' || node.op == '?') consumedArrays[argument] = true;
             });
             if (node.arrayConditional) {
                 const auto& args = parser.callArguments[node.right];
@@ -816,6 +820,7 @@ private:
     std::vector<std::vector<size_t>> callArguments;
     std::vector<std::vector<double>> literalArrays;
     size_t next = 0;
+    std::string syntaxError;
 
     size_t add(Node node) {
         nodes.push_back(node);
@@ -919,7 +924,14 @@ private:
             std::vector<size_t> elements;
             if (next < tokens.size() && tokens[next].text != "]") {
                 while (true) {
-                    if (elements.size() >= 100000) return invalid;
+                    if (elements.size() >= 100000) {
+                        syntaxError = "Overflow Error: array literal limit exceeded";
+                        return invalid;
+                    }
+                    if (next < tokens.size() && (tokens[next].text == "]" || tokens[next].kind == Kind::Comma)) {
+                        syntaxError = "Empty array element";
+                        return invalid;
+                    }
                     const auto element = parse(0, depth + 1);
                     if (element == invalid) return invalid;
                     elements.push_back(element);
@@ -1062,17 +1074,21 @@ private:
         if (minimum == 0 && next < tokens.size() && tokens[next].text == ":") {
             ++next;
             const auto bound = parse(1, depth + 1);
-            if (bound == invalid) return invalid;
+            if (bound == invalid) { syntaxError = "Invalid range syntax"; return invalid; }
             size_t step;
             size_t end;
             if (next < tokens.size() && tokens[next].text == ":") {
                 ++next;
                 step = bound;
                 end = parse(1, depth + 1);
-                if (end == invalid) return invalid;
+                if (end == invalid) { syntaxError = "Invalid range syntax"; return invalid; }
             } else {
                 step = add({1.0});
                 end = bound;
+            }
+            if (next < tokens.size() && tokens[next].text == ":") {
+                syntaxError = "Invalid range syntax";
+                return invalid;
             }
             Node range{0, 'r', 0, callArguments.size()};
             range.arraySlot = literalArrays.size();

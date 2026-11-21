@@ -91,7 +91,6 @@ struct EngineContext {
     bool script_has_returned = false;
     std::vector<double> script_return_vec{};
     bool script_return_is_vec = false;
-    bool s_in_array_fallback = false;
     std::string g_tab_orig_prefix = "";
     size_t g_tab_comp_start = 0;
     int g_tab_match_idx = -1;

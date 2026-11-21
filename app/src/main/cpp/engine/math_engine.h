@@ -11,16 +11,11 @@ double evaluateScalar(const std::string& source, std::string& error, const char*
 double evaluateWithoutHistory(const std::string& expr_str, std::string& err);
 double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
 size_t findAssignmentOperator(const std::string& input);
-std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err);
 std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-std::string preprocessArrayLookups(const std::string& expr, std::string& err);
-std::string preprocessLen(const std::string& s);
-std::string preprocessVectorStats(const std::string& s);
 std::string formatPrintString(const std::string& str, std::string& err);
 double assignArrayElement(const std::string& name, const std::string& index,
                           const std::string& value, std::string& error);
 bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr);
-bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2);
 void handleTabCompletion(std::string& expression, int& cursor_pos);
 void resetTabState();
 std::vector<std::string> getConvUnitMatches(const std::string& from_unit, const std::string& prefix);
