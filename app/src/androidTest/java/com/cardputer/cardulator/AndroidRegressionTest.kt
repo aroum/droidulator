@@ -84,9 +84,17 @@ class AndroidRegressionTest {
         fail("Timed out waiting for $description")
     }
 
-    private fun submit(expression: String) {
+    private fun selectTab(position: Int) {
         activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(0)
+            val spinner = it.findViewById<Spinner>(R.id.spinner_tabs)
+            spinner.setSelection(position)
+            spinner.onItemSelectedListener?.onItemSelected(spinner, null, position, position.toLong())
+        }
+    }
+
+    private fun submit(expression: String) {
+        selectTab(0)
+        activity {
             it.findViewById<EditText>(R.id.et_input).apply {
                 setText(expression)
                 onEditorAction(EditorInfo.IME_ACTION_SEND)
@@ -145,13 +153,13 @@ class AndroidRegressionTest {
     }
 
     @Test fun scriptDraftRunSaveRenameAndDelete() {
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(1) }
-        await("switch to Scripts tab") { activity { it.findViewById<Spinner>(R.id.spinner_tabs).selectedItemPosition == 1 } }
+        selectTab(1)
         activity { it.findViewById<View>(R.id.btn_add_item).performClick() }
-        await("script editor opened") { activity { it.findViewById<EditText>(R.id.et_script_name) != null } }
+        await("script editor opened") { activity { session(it).scriptDraft != null } }
         onView(withId(R.id.et_script_name)).perform(replaceText("emulator_case"), closeSoftKeyboard())
         onView(withId(R.id.et_script_code)).perform(replaceText("print(42)"), closeSoftKeyboard())
         scenario.recreate()
+        await("script editor restored") { activity { session(it).scriptDraft != null } }
         onView(withId(R.id.et_script_name)).check(matches(withText("emulator_case")))
         onView(withId(R.id.et_script_code)).check(matches(withText("print(42)")))
         onView(withId(R.id.btn_script_run)).perform(click())
@@ -162,11 +170,13 @@ class AndroidRegressionTest {
         await("saved script") { activity { session(it).userScripts.any { script -> script.first == "emulator_case" } } }
         assertTrue(engine { nativeEvaluate("run(\"emulator_case\")") }.contains("42"))
         cardAction("emulator_case", R.string.ui_text_009)
+        await("script editor opened for rename") { activity { session(it).scriptDraft != null } }
         onView(withId(R.id.et_script_name)).perform(replaceText("fibonacci"), closeSoftKeyboard())
         onView(withId(R.id.btn_script_save)).perform(click())
         assertTrue(activity { session(it).userScripts.any { script -> script.first == "emulator_case" } })
         onView(withId(R.id.et_script_name)).perform(replaceText("emulator_renamed"), closeSoftKeyboard())
         onView(withId(R.id.btn_script_save)).perform(click())
+        await("renamed script saved") { activity { session(it).userScripts.any { script -> script.first == "emulator_renamed" } } }
         cardAction("emulator_renamed", R.string.ui_text_010)
         onView(withText(R.string.action_delete)).perform(click())
         assertFalse(activity { session(it).userScripts.any { script -> script.first == "emulator_renamed" } })
@@ -183,7 +193,7 @@ class AndroidRegressionTest {
     }
 
     @Test fun helpUnitsSearchAndBack() {
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(7) }
+        selectTab(7)
         await("Help catalogue") { activity { it.findViewById<ViewGroup>(R.id.items_container).childCount > 0 } }
         activity {
             it.findViewById<View>(R.id.search_toggle).performClick()
@@ -201,7 +211,7 @@ class AndroidRegressionTest {
         onView(withText(android.R.string.ok)).check(matches(isCompletelyDisplayed())).perform(click())
         pressBack()
         await("exit search") { activity { it.findViewById<View>(R.id.search_query).visibility != View.VISIBLE } }
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(8) }
+        selectTab(8)
         for (query in listOf("mm", "millimeter", "milimeter")) {
             activity {
                 val search = it.findViewById<EditText>(R.id.search_query)
@@ -247,8 +257,8 @@ class AndroidRegressionTest {
 
     @Test fun settingsAndHiddenWelcomeSurviveRecreation() {
         assertTrue(output().isEmpty())
+        selectTab(6)
         activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(6)
             it.findViewById<CheckBox>(R.id.btn_settings_enter_action).performClick()
         }
         scenario.recreate()
@@ -277,8 +287,8 @@ class AndroidRegressionTest {
     }
 
     @Test fun toolbarButtonsClearAndNavigationAndTab() {
+        selectTab(0)
         activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(0)
             it.findViewById<EditText>(R.id.et_input).apply {
                 setText("p")
                 setSelection(1)
@@ -304,17 +314,15 @@ class AndroidRegressionTest {
     }
 
     @Test fun enterToolbarButtonInNewLineModeAndPlotNavigation() {
+        selectTab(6)
         activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(6)
             it.findViewById<CheckBox>(R.id.btn_settings_enter_action).performClick()
         }
         await("enter send mode disabled") {
             !context.getSharedPreferences("droidulator_prefs", Context.MODE_PRIVATE)
                 .getBoolean("enter_send_mode", true)
         }
-        activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(0)
-        }
+        selectTab(0)
         await("toolbar enter button visible") {
             activity { it.findViewById<View>(R.id.btn_enter).visibility == View.VISIBLE }
         }
@@ -330,23 +338,23 @@ class AndroidRegressionTest {
             }
         }
         // Restore enter mode to send
+        selectTab(6)
         activity {
-            it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(6)
             it.findViewById<CheckBox>(R.id.btn_settings_enter_action).performClick()
         }
     }
 
     @Test fun variablesAndConstantsCardsDisplay() {
         submit("ui_var_sample=99.5")
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(4) }
+        selectTab(4)
         await("variable card visible") {
             activity { containsLabel(it.findViewById(R.id.items_container), "ui_var_sample") }
         }
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(3) }
+        selectTab(3)
         await("constants cards visible") {
             activity { it.findViewById<ViewGroup>(R.id.items_container).childCount > 0 }
         }
-        activity { it.findViewById<Spinner>(R.id.spinner_tabs).setSelection(2) }
+        selectTab(2)
         await("formulas tab displayed") {
             activity { it.findViewById<View>(R.id.scroll_items).visibility == View.VISIBLE }
         }
