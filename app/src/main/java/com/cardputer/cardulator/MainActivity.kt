@@ -183,44 +183,6 @@ class MainActivity : AppCompatActivity() {
         androidx.core.view.ViewCompat.requestApplyInsets(view)
     }
 
-    private fun convArgumentsBeforeCaret(text: String, caret: Int): Pair<Int, List<String>>? {
-        val stack = mutableListOf<Int>()
-        var quote: Char? = null
-        var escaped = false
-        for (i in 0 until caret) {
-            val c = text[i]
-            if (quote != null) {
-                if (escaped) escaped = false
-                else if (c == '\\') escaped = true
-                else if (c == quote) quote = null
-            } else when (c) {
-                '\'', '"' -> quote = c
-                '(' -> stack.add(i)
-                ')' -> if (stack.isNotEmpty()) stack.removeAt(stack.lastIndex)
-            }
-        }
-        val open = stack.lastOrNull { pos -> pos >= 4 && text.substring(pos - 4, pos) == "conv" && (pos == 4 || !text[pos - 5].isLetterOrDigit() && text[pos - 5] != '_') } ?: return null
-        if (stack.last() != open) return null
-        val parts = mutableListOf<String>()
-        var start = open + 1
-        var depth = 0
-        quote = null
-        escaped = false
-        for (i in start until caret) {
-            val c = text[i]
-            if (quote != null) {
-                if (escaped) escaped = false else if (c == '\\') escaped = true else if (c == quote) quote = null
-            } else when (c) {
-                '\'', '"' -> quote = c
-                '(' -> depth++
-                ')' -> depth--
-                ',' -> if (depth == 0) { parts.add(text.substring(start, i)); start = i + 1 }
-            }
-        }
-        parts.add(text.substring(start, caret))
-        return start to parts
-    }
-
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
@@ -640,7 +602,7 @@ class MainActivity : AppCompatActivity() {
             val caret = etInput.selectionStart.coerceAtLeast(0)
 
             // Detect conv( context: suggest units/resistor codes inside conv(...)
-            val convContext = convArgumentsBeforeCaret(fullText, caret)
+            val convContext = ConversionCompletion.contextBeforeCaret(fullText, caret)
             if (convContext != null) {
                 val (splitPos, parts) = convContext
 
