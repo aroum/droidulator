@@ -768,6 +768,20 @@ int main() {
         runScript(cacheEvictionFunction);
         for (size_t i = 0; i < 2; ++i)
             assert(evaluate("cache_evict(1)+cache_evict(2)", signatureError) == 1563 && signatureError.empty());
+        expression::ArithmeticExpression::PreparedExpression pinnedSyntax;
+        assert(evaluateAst("cache_type_value+1", signatureError, &pinnedSyntax) == 5 && signatureError.empty());
+        const auto originalPinnedSyntax = pinnedSyntax;
+        for (size_t i = 0; i < 40; ++i)
+            assert(evaluate(std::to_string(i) + "+42", signatureError) == i + 42 && signatureError.empty());
+        evaluateInput("cache_type_value=6", signatureError, signatureDefinition);
+        assert(evaluateAst("cache_type_value+1", signatureError, &pinnedSyntax) == 7 && signatureError.empty());
+        assert(pinnedSyntax == originalPinnedSyntax);
+        assert(evaluateAst("cache_type_value+2", signatureError, &pinnedSyntax) == 8 && signatureError.empty());
+        assert(pinnedSyntax != originalPinnedSyntax);
+        assert(evaluate("sum(pinned_loop_i,1,2,cache_evict(pinned_loop_i))", signatureError) == 1563 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluate("sum(pinned_loop_i,1,3,ast_print_once(pinned_loop_i))", signatureError) == 6 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

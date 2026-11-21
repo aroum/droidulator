@@ -547,6 +547,9 @@ static bool exprReferencesIdent(const std::string& expr, const std::string& iden
     });
 }
 
+static std::optional<double> evaluateAst(const std::string& source, std::string& error,
+    expression::ArithmeticExpression::PreparedExpression* prepared = nullptr);
+
 static double evaluateIndexedReduction(std::string_view name, const std::string& index,
         double start, double end, const std::string& body, std::string& err) {
     const double int64Limit = std::ldexp(1.0, 63);
@@ -571,11 +574,14 @@ static double evaluateIndexedReduction(std::string_view name, const std::string&
     else if (name == "min") acc = std::numeric_limits<double>::infinity();
     else if (name == "max") acc = -std::numeric_limits<double>::infinity();
 
+    expression::ArithmeticExpression::PreparedExpression preparedBody;
     for (int64_t idx = i_start; idx <= i_end;) {
         if (loopIterationsRemaining == 0) { err = "Overflow Error: loop limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
         --loopIterationsRemaining;
         scalarBindings.back()[var_idx].val = static_cast<double>(idx);
-        double step_v = evaluateScalar(body, err, "Loop body");
+        const auto astValue = evaluateAst(body, err, &preparedBody);
+        const double step_v = astValue ? *astValue : evaluateScalar(body, err, "Loop body");
+        if (err.empty() && engineState().g_last_eval_is_array) err = "Loop body must be scalar";
         if (!err.empty()) {
             return std::numeric_limits<double>::quiet_NaN();
         }
@@ -999,14 +1005,15 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
     return {};
 }
 
-static std::optional<double> evaluateAst(const std::string& source, std::string& error) {
+static std::optional<double> evaluateAst(const std::string& source, std::string& error,
+        expression::ArithmeticExpression::PreparedExpression* prepared) {
     auto& state = engineState();
     state.g_math_domain_err.clear();
     state.g_last_result_angle = AngleUnit::NONE;
     state.g_last_eval_is_array = false;
     std::optional<std::vector<double>> array;
     const auto result = expression::ArithmeticExpression::evaluate(source, error, lookupScalar,
-        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array, &indexedReduction);
+        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array, &indexedReduction, prepared);
     if (!result) return std::nullopt;
     if (!state.g_math_domain_err.empty()) error = state.g_math_domain_err;
     state.g_last_eval_is_array = array.has_value();
