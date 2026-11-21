@@ -533,6 +533,16 @@ int main() {
         assert(evaluateArrayAst("script_map_formula([1,2,3])") && typedArray == std::vector<double>({1,4,9}) && signatureError.empty());
         assert(evaluateArrayAst("ast_script_call([1,2,3])") && typedArray == std::vector<double>({2,4,6}) && signatureError.empty());
         assert(evaluateArrayAst("sqrt([])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateLiteralAst("cbrt(27)+floor(2.9)+ceil(1.1)+round(1.5)+exp(0)") == 10 && signatureError.empty());
+        assert(evaluateArrayAst("cbrt([1,8,27])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        signatureError.clear();
+        bool unknownMap = false;
+        parseArrayExpr("unknown_empty_mapping([])", unknownMap, signatureError);
+        assert(signatureError == "Math Error");
+        signatureError.clear();
+        bool fallbackMap = false;
+        assert(parseArrayExpr("script_map_formula([2,3])", fallbackMap, signatureError) == std::vector<double>({4,9}));
+        assert(fallbackMap && signatureError.empty());
         assert(evaluateArrayAst("1:3") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
         assert(evaluateArrayAst("[3:-1:1]") && typedArray == std::vector<double>({3,2,1}) && signatureError.empty());
         assert(evaluateArrayAst("[1:2:5].*[1:2:5]") && typedArray == std::vector<double>({1,9,25}) && signatureError.empty());

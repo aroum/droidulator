@@ -827,6 +827,11 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
         {"fact", custom_fact},
         {"fib", custom_fib},
         {"abs", custom_abs},
+        {"cbrt", [](double value) { return std::cbrt(value); }},
+        {"exp", [](double value) { return std::exp(value); }},
+        {"floor", [](double value) { return std::floor(value); }},
+        {"ceil", [](double value) { return std::ceil(value); }},
+        {"round", [](double value) { return std::round(value); }},
     };
     return functions;
 }
@@ -2037,21 +2042,15 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                     return {expression::evaluateStatistic(*statistic, arg_vec)};
                 }
                 is_array = true;
+                const auto function = lookupUnary(func_name);
+                const auto custom = function ? expression::ArithmeticExpression::CustomFunction{} : lookupCustomFunction(func_name);
+                if (!function && !custom) { err = "Math Error"; return {}; }
                 std::vector<double> res(arg_vec.size());
+                std::vector<double> argument(1);
                 for (size_t i = 0; i < arg_vec.size(); ++i) {
-                    double val = arg_vec[i];
-                    const auto function = unaryFunctions().find(func_name);
-                    if (function != unaryFunctions().end()) res[i] = function->second(val);
-                    else if (func_name == "cbrt") res[i] = std::cbrt(val);
-                    else if (func_name == "exp") res[i] = std::exp(val);
-                    else if (func_name == "floor") res[i] = std::floor(val);
-                    else if (func_name == "ceil") res[i] = std::ceil(val);
-                    else if (func_name == "round") res[i] = std::round(val);
-                    else {
-                        std::string elementError;
-                        res[i] = evaluate(func_name + "(" + fmtInternal(val) + ")", elementError);
-                        if (!elementError.empty()) { err = elementError; return {}; }
-                    }
+                    argument[0] = arg_vec[i];
+                    res[i] = function ? function(arg_vec[i]) : custom(argument, err);
+                    if (!err.empty()) return {};
                     if (!engineState().g_math_domain_err.empty()) {
                         err = engineState().g_math_domain_err;
                         return {};
