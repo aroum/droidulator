@@ -973,6 +973,9 @@ static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std
                 arguments.push_back({function.params[i], values[i]});
             ScalarBindingScope scope(std::move(arguments));
             return evaluate(function.body, error);
+        }, []() -> std::optional<std::vector<double>> {
+            if (!engineState().g_last_eval_is_array) return std::nullopt;
+            return engineState().g_last_eval_array;
         }};
     }
     return {};
@@ -988,8 +991,8 @@ static std::optional<double> evaluateAst(const std::string& source, std::string&
         lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array);
     if (!result) return std::nullopt;
     if (!state.g_math_domain_err.empty()) error = state.g_math_domain_err;
+    state.g_last_eval_is_array = array.has_value();
     if (array) {
-        state.g_last_eval_is_array = true;
         state.g_last_eval_array = std::move(*array);
     }
     return result;

@@ -660,6 +660,22 @@ int main() {
             const auto result = evaluateArrayAst(source);
             assert(result && std::isnan(*result) && !signatureError.empty());
         }
+        evaluateInput("ast_pair(x)=[x,x+1]", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("ast_pair_sum(x)=sum(ast_pair(x))", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair(3)") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair(3)+1") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateLiteralAst("sum(ast_pair(3))") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_pair(3)[2]") == 4 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_pair(3)*ast_pair(4)") == 32 && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair_sum(3)") == 7 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,ast_pair(3),1/0)") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        const auto scalarArrayCall = evaluateLiteralAst("ast_pair(3)");
+        assert(scalarArrayCall && std::isnan(*scalarArrayCall) && !signatureError.empty());
+        runScript("ast_pair_saved=ast_pair(5); ast_pair_total=sum(ast_pair(5))");
+        assert(engineState().user_arrays.at("ast_pair_saved") == std::vector<double>({5,6}));
+        assert(evaluate("ast_pair_total", signatureError) == 11 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

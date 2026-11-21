@@ -27,13 +27,26 @@ public:
     struct CustomFunction {
         size_t arity = 0;
         std::function<double(const std::vector<double>&, std::string&)> invoke;
+        std::function<std::optional<std::vector<double>>()> resultArray;
         explicit operator bool() const { return static_cast<bool>(invoke); }
-        double operator()(const std::vector<double>& values, std::string& error) const {
+        double operator()(const std::vector<double>& values, std::string& error,
+                          std::optional<std::vector<double>>* array = nullptr) const {
             if (values.size() != arity) {
                 error = "Arg Count Mismatch";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            return invoke(values, error);
+            const double result = invoke(values, error);
+            if (error.empty() && resultArray) {
+                auto returnedArray = resultArray();
+                if (returnedArray) {
+                    if (array) *array = std::move(returnedArray);
+                    else {
+                        error = "Function result must be scalar";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                }
+            }
+            return result;
         }
     };
     using CustomLookup = CustomFunction (*)(std::string_view);
@@ -53,7 +66,7 @@ public:
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
             if (argument.scalarResult) return false;
-            return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'r' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
+            return argument.op == 'w' || argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'r' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
         // Bind array consumers before scalar name lookup.
@@ -124,7 +137,21 @@ public:
                 if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
                 continue;
             }
-            if (args.size() != 1 || !isArrayNode(args.front())) continue;
+            if (args.size() != 1 || !isArrayNode(args.front())) {
+                const bool builtin = (args.size() == 1 && unary && unary(node.symbol)) ||
+                    (args.size() == 2 && binary && binary(node.symbol)) || (variadic && variadic(node.symbol));
+                if (!builtin && custom) node.customFunction = custom(node.symbol);
+                if (node.customFunction && node.customFunction.resultArray) {
+                    if (node.customFunction.arity != args.size()) node.op = 'e';
+                    else {
+                        node.op = 'w';
+                        node.dynamicType = true;
+                        node.arraySlot = parser.literalArrays.size();
+                        parser.literalArrays.emplace_back();
+                    }
+                }
+                continue;
+            }
             const auto statistic = vectorStatistic(node.symbol);
             if (statistic && variadic && variadic(node.symbol)) {
                 node.op = 's';
@@ -143,7 +170,7 @@ public:
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
         const auto visitScalarInputs = [&](const Node& node, const auto& visit) {
-            if (node.op == 'c' || node.op == 'b' || node.op == 'r') {
+            if (node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
                 for (size_t argument : parser.callArguments[node.right]) visit(argument);
             } else if (node.op == 'q') {
                 const auto& args = parser.callArguments[node.right];
@@ -192,22 +219,22 @@ public:
         }
         const bool rootArray = isArrayNode(root);
         if (rootArray) {
-            if (!arrayResult) return std::nullopt;
+            if (!arrayResult && !parser.nodes[root].dynamicType) return std::nullopt;
             if (!parser.nodes[root].op) parser.nodes[root].op = 'a';
             consumedArrays[root] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if ((parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u' || parser.nodes[i].op == 'r' || parser.nodes[i].arrayConditional) && !consumedArrays[i]) return std::nullopt;
+            if ((parser.nodes[i].op == 'w' || parser.nodes[i].op == 'a' || parser.nodes[i].op == 'b' || parser.nodes[i].op == 't' || parser.nodes[i].op == 'u' || parser.nodes[i].op == 'r' || parser.nodes[i].arrayConditional) && !consumedArrays[i]) return std::nullopt;
         const auto arrayValue = [&](size_t index) -> const std::vector<double>* {
             const auto& node = parser.nodes[index];
             if (node.op == 'b') return &parser.literalArrays[node.left];
-            if (node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) return &parser.literalArrays[node.arraySlot];
+            if (node.op == 'w' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) return &parser.literalArrays[node.arraySlot];
             return arrays ? arrays(node.symbol) : nullptr;
         };
         // Resolve all names before evaluating any operations. Unsupported
         // expressions must fall back without changing the caller's error state.
         for (auto& node : parser.nodes) {
-            if (node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
+            if (node.op == 'w' || node.op == 'e' || node.op == 'a' || node.op == 'b' || node.op == 's' || node.op == 'd' || node.op == 'z' || node.op == 'i' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.op == 'q') continue;
             if (node.op == '%') {
                 if (!binary || !(node.binaryFunction = binary("mod"))) return std::nullopt;
                 continue;
@@ -306,7 +333,7 @@ public:
                     }
                     auto& target = parser.literalArrays[node.arraySlot];
                     if (source.op == 'b') target = std::move(parser.literalArrays[source.left]);
-                    else if (source.op == 't' || source.op == 'u' || source.op == 'r' || source.arrayConditional)
+                    else if (source.op == 'w' || source.op == 't' || source.op == 'u' || source.op == 'r' || source.arrayConditional)
                         target = std::move(parser.literalArrays[source.arraySlot]);
                     else target = *values;
                 }
@@ -317,7 +344,7 @@ public:
             }
             if (frame.stage == 0) {
                 frame.stage = 1;
-                if (node.op == 'c' || node.op == 'b' || node.op == 'r') {
+                if (node.op == 'c' || node.op == 'w' || node.op == 'b' || node.op == 'r') {
                     const auto& args = parser.callArguments[node.right];
                     for (auto argument = args.rbegin(); argument != args.rend(); ++argument)
                         if (!complete[*argument]) work.push_back({*argument});
@@ -341,6 +368,23 @@ public:
             complete[index] = true;
             work.pop_back();
             if (!node.op || node.op == 'a') continue;
+            if (node.op == 'w') {
+                std::vector<double> arguments;
+                for (size_t argument : parser.callArguments[node.right]) {
+                    const double value = parser.nodes[argument].value;
+                    if (!std::isfinite(value)) {
+                        error = std::isnan(value) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    arguments.push_back(value);
+                }
+                std::optional<std::vector<double>> returnedArray;
+                node.value = node.customFunction(arguments, error, &returnedArray);
+                if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                if (returnedArray) parser.literalArrays[node.arraySlot] = std::move(*returnedArray);
+                else node.scalarResult = true;
+                continue;
+            }
             if (node.op == 'r') {
                 const auto& args = parser.callArguments[node.right];
                 parser.literalArrays[node.arraySlot] = vectorRange(parser.nodes[args[0]].value,
@@ -564,6 +608,10 @@ public:
             }
         }
         if (rootArray && isArrayNode(root)) {
+            if (!arrayResult) {
+                error = "Expression result must be scalar";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
             const auto values = arrayValue(root);
             if (!values) {
                 error = "Array not defined";
@@ -572,7 +620,7 @@ public:
             const double first = values->empty() ? 0.0 : values->front();
             const auto& node = parser.nodes[root];
             if (node.op == 'b') *arrayResult = std::move(parser.literalArrays[node.left]);
-            else if (node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
+            else if (node.op == 'w' || node.op == 't' || node.op == 'u' || node.op == 'r' || node.arrayConditional) *arrayResult = std::move(parser.literalArrays[node.arraySlot]);
             else *arrayResult = *values;
             return first;
         }
