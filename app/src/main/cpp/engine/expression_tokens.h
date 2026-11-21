@@ -105,7 +105,7 @@ inline std::vector<Token> tokenize(std::string_view source) {
             kind = Kind::Operator;
             if (i < source.size() &&
                 ((source[i] == '=' && std::string_view("=<>!+-*/%").find(c) != std::string_view::npos) ||
-                 (source[i] == c && (c == '&' || c == '|' || c == '^')))) ++i;
+                 (source[i] == c && (c == '&' || c == '|' || c == '^' || c == '*')))) ++i;
         }
         result.push_back({kind, source.substr(start, i - start), start});
     }

@@ -1,9 +1,15 @@
 // Shared help catalogue. Keep entries in sync with the registration coverage test.
 struct HelpEntry { const char* name; const char* syntax; const char* description; const char* example; const char* detail; };
 static const HelpEntry helpEntries[] = {
+    {"**", "a ** b", "Power; an alias of ^.", "2**3 = 8", ""},
+    {"&", "a & b", "Logical AND, equivalent to &&. For bitwise operations use bitand(a,b).", "2 & 3 = 1", ""},
+    {"|", "a | b", "Logical OR, equivalent to ||. For bitwise operations use bitor(a,b).", "0 | 3 = 1", ""},
+    {"~", "~a", "Bitwise complement, equivalent to bitnot(a).", "~0 = bitnot(0)", ""},
+    {",", "expression1, expression2", "Evaluate scalar expressions in order and return the last value. Commas inside calls and array literals separate arguments or elements.", "(1,2)+3 = 5", ""},
+
     {"!", "n!", "Postfix factorial of an integer from 0 through 170.", "5! = 120", ""},
     {"!=", "a != b", "Compare values for not equal. Return 1 for true and 0 for false.", "3 != 2", ""},
-    {"%", "a % b", "Floating-point remainder with a nonzero divisor.", "7%3 = 1", ""},
+    {"%", "a % b", "Between operands, floating-point remainder with a nonzero divisor. Postfix % divides by 100; a + b% and a - b% apply a percentage relative to a.", "7%3 = 1", ""},
     {"*", "a * b", "Multiplication of scalars and supported arrays.", "2*3 = 6", ""},
     {"+", "a + b", "Addition.", "2+3 = 5", ""},
     {"-", "a - b or -a", "Subtraction or unary negation.", "5-2 = 3", ""},

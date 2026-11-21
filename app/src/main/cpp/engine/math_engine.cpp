@@ -606,6 +606,8 @@ static double evaluateIndexedReduction(std::string_view name, const std::string&
     return acc;
 }
 
+static bool acceptsBareUnary(std::string_view name);
+
 static const expression::ArithmeticExpression::IndexedReduction indexedReduction{
     [](std::string_view index, std::string_view body) {
         const std::string name(index);
@@ -613,7 +615,7 @@ static const expression::ArithmeticExpression::IndexedReduction indexedReduction
     },
     [](std::string_view name, std::string_view index, double start, double end, std::string_view body, std::string& error) {
         return evaluateIndexedReduction(name, std::string(index), start, end, std::string(body), error);
-    }
+    }, acceptsBareUnary
 };
 
 static std::string preprocessInlineConditionalsAndLoops(const std::string& s, std::string& err) {
@@ -866,7 +868,6 @@ static const std::map<std::string, UnaryFunction>& unaryFunctions() {
         {"exp", [](double value) { return std::exp(value); }},
         {"floor", [](double value) { return std::floor(value); }},
         {"ceil", [](double value) { return std::ceil(value); }},
-        {"round", [](double value) { return std::round(value); }},
     };
     return functions;
 }
@@ -981,6 +982,14 @@ static std::optional<double> lookupScalar(std::string_view name) {
         if (const auto function = std::get_if<te_fun0>(&builtin->m_value)) return (*function)();
     }
     return std::nullopt;
+}
+
+static bool acceptsBareUnary(std::string_view name) {
+    if (shadowsBuiltin(name) || scopedArray(name)) return false;
+    if (name == "round" || lookupUnary(name)) return true;
+    const auto& builtins = te_parser::builtin_functions();
+    const auto found = builtins.find(te_variable{std::string(name), 0.0});
+    return found != builtins.end() && std::holds_alternative<te_fun1>(found->m_value);
 }
 
 static expression::ArithmeticExpression::CustomFunction lookupInheritedBuiltin(std::string_view name) {
@@ -2128,7 +2137,7 @@ std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::
                 const auto function = lookupUnary(func_name);
                 const auto custom = function ? expression::ArithmeticExpression::CustomFunction{} : lookupCustomFunction(func_name);
                 if (!function && !custom) { err = "Math Error"; return {}; }
-                if (custom && custom.arity != 1) { err = "Arg Count Mismatch"; return {}; }
+                if (custom && !custom.acceptsArity(1)) { err = "Arg Count Mismatch"; return {}; }
                 std::vector<double> res(arg_vec.size());
                 std::vector<double> argument(1);
                 for (size_t i = 0; i < arg_vec.size(); ++i) {

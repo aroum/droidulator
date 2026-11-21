@@ -856,6 +856,56 @@ int main() {
         evaluate("syntax_infinite(1)", signatureError);
         assert(signatureError == "Function recursion limit exceeded");
         assert(evaluate("2+2", signatureError) == 4 && signatureError.empty());
+        for (const auto& builtin : te_parser::builtin_functions()) {
+            assert(helpIndex.find(builtin.m_name + "\n") != std::string::npos);
+            if (unaryFunctions().contains(builtin.m_name) || binaryFunctions().contains(builtin.m_name) ||
+                variadicFunctions().contains(builtin.m_name)) continue;
+            const auto adapter = lookupInheritedBuiltin(builtin.m_name);
+            assert(adapter);
+            std::visit([&](const auto function) {
+                using Function = std::decay_t<decltype(function)>;
+                if constexpr (te_is_function_v<Function>) {
+                    constexpr size_t arity = te_function_arity<Function>;
+                    assert(adapter.arity == arity);
+                    const bool variadic = (builtin.m_type & TE_VARIADIC) != 0;
+                    for (size_t count = 0; count <= arity + 1; ++count)
+                        assert(adapter.acceptsArity(count) == (variadic ? count >= 1 && count <= arity : count == arity));
+                } else assert(false);
+            }, builtin.m_value);
+        }
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"round(2.65,1)",2.7}, {"round(-2.65,1)",-2.7}, {"round(125,-1)",130},
+                {"round(2.5)",3}, {"round(-2.5)",-3}, {"round(1.234,2)",1.23}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateArrayAst("round([1.2,2.8,-2.5])") && typedArray == std::vector<double>({1,3,-3}) && signatureError.empty());
+        bool roundFallbackArray = false;
+        assert(parseArrayExpr("round([1.2,2.8,-2.5])", roundFallbackArray, signatureError) == std::vector<double>({1,3,-3}));
+        assert(roundFallbackArray && signatureError.empty());
+        std::string roundHelp;
+        assert(preprocessHelp("help(round)", roundHelp) && roundHelp.find("round(2.65, 1) = 2.7") != std::string::npos);
+        for (const auto& source : {"sin 0", "sqrt 9+1", "sqr -3", "abs -2^2", "2**3+1", "6&3", "1|2&4", "2&3+1", "1,2+3", "(1,2)+3", "abs abs -3", "~0"}) {
+            te_parser reference;
+            const double expected = reference.evaluate(source);
+            assert(std::isfinite(expected));
+            signatureError.clear();
+            const auto result = evaluateAst(source, signatureError);
+            if (!result || std::abs(*result - expected) >= 1e-12 || !signatureError.empty()) std::cerr << source << " expected=" << expected << " actual=" << (result ? *result : -999) << " error=" << signatureError << std::endl;
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+            assert(expression::ArithmeticExpression::validateSyntax(source, &indexedReduction));
+        }
+        for (int value = 1; value <= 100; ++value) {
+            const auto literal = std::to_string(value);
+            const auto source = "((" + literal + "+3)*2-5)/(" + literal + "+1)+sqr(2)";
+            te_parser reference;
+            signatureError.clear();
+            const auto result = evaluateAst(source, signatureError);
+            assert(result && std::abs(*result-reference.evaluate(source)) < 1e-12 && signatureError.empty());
+        }
+        evaluateInput("syntax_bare(x)=sqrt x+1", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("syntax_bare(9)", signatureError) == 4 && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

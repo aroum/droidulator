@@ -71,6 +71,7 @@ public:
         bool (*accepts)(std::string_view index, std::string_view body);
         double (*invoke)(std::string_view name, std::string_view index, double start, double end,
                          std::string_view body, std::string& error);
+        bool (*bareUnary)(std::string_view name) = nullptr;
     };
 
     static bool validateSyntax(std::string_view source, const IndexedReduction* reduction = nullptr) {
@@ -80,7 +81,7 @@ public:
             pending.pop_back();
             if (depth >= 128) return false;
             ArithmeticExpression parser(body, tokenize(body), reduction);
-            const auto root = parser.parse(0, 0);
+            const auto root = parser.parseList(0);
             if (root == invalid || parser.next != parser.tokens.size()) return false;
             for (const auto& node : parser.nodes)
                 if (node.op == 'R') pending.emplace_back(node.reductionBody, depth + 1);
@@ -104,6 +105,8 @@ public:
             if (!entry || entry->reduction != reduction || *entry->source != source) return false;
             return std::all_of(entry->decisions.begin(), entry->decisions.end(), [&](const auto& decision) {
                 return reduction->accepts(decision.index, decision.body) == decision.accepted;
+            }) && std::all_of(entry->unaryDecisions.begin(), entry->unaryDecisions.end(), [&](const auto& decision) {
+                return reduction->bareUnary(decision.first) == decision.second;
             });
         };
         PreparedExpression syntax = prepared && validSyntax(*prepared) ? *prepared : nullptr;
@@ -123,14 +126,15 @@ public:
             parser.literalArrays = syntax->arrays;
             root = syntax->root;
         } else {
-            root = parser.parse(0, 0);
+            root = parser.parseList(0);
             if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
             size_t bytes = source.size() + parser.tokens.size() * sizeof(Token) + parser.nodes.size() * sizeof(Node);
             for (const auto& args : parser.callArguments) bytes += sizeof(args) + args.size() * sizeof(size_t);
             bytes += parser.literalArrays.size() * sizeof(std::vector<double>);
             bytes += parser.reductionDecisions.size() * sizeof(ReductionDecision);
+            bytes += parser.unaryDecisions.size() * sizeof(std::pair<std::string_view, bool>);
             syntax = std::make_shared<ParsedSyntax>(ParsedSyntax{ownedSource, reduction, parser.tokens, parser.nodes,
-                parser.callArguments, parser.literalArrays, parser.reductionDecisions, root, bytes});
+                parser.callArguments, parser.literalArrays, parser.reductionDecisions, parser.unaryDecisions, root, bytes});
             constexpr size_t cacheBudget = 2 * 1024 * 1024;
             if (bytes <= cacheBudget) {
                 while (!syntaxCache.empty() && (syntaxCache.size() >= 16 || cachedBytes + bytes > cacheBudget)) {
@@ -269,7 +273,7 @@ public:
                 for (size_t i = 0; i + 1 < args.size(); i += 2) visit(args[i]);
             } else if (node.op == 'n' || node.op == 'f' || node.op == '[') {
                 visit(node.left);
-            } else if (node.op == 'R' || node.op == '^' || node.op == '%' || (node.op >= 'A' && node.op <= 'I')) {
+            } else if (node.op == ',' || node.op == 'R' || node.op == '^' || node.op == '%' || (node.op >= 'A' && node.op <= 'I')) {
                 visit(node.left);
                 visit(node.right);
             }
@@ -713,6 +717,7 @@ public:
                     break;
                 case '%': node.value = node.binaryFunction(left, right); break;
                 case '^': node.value = std::pow(left, right); break;
+                case ',': node.value = right; break;
                 case 'K':
                 case '/':
                     if (right == 0) {
@@ -798,10 +803,12 @@ private:
         std::vector<std::vector<size_t>> arguments;
         std::vector<std::vector<double>> arrays;
         std::vector<ReductionDecision> decisions;
+        std::vector<std::pair<std::string_view, bool>> unaryDecisions;
         size_t root;
         size_t bytes;
     };
     std::vector<ReductionDecision> reductionDecisions;
+    std::vector<std::pair<std::string_view, bool>> unaryDecisions;
     std::string_view source;
     std::vector<Token> tokens;
     const IndexedReduction* reduction;
@@ -823,20 +830,20 @@ private:
 
     static Operator binaryOperator(std::string_view op) {
         // Preserve the legacy relational evaluator's order and grouping.
-        if (op == "||" || op == "or") return {'A', 1, true};
+        if (op == "|" || op == "||" || op == "or") return {'A', 1, true};
         if (op == "^^" || op == "xor") return {'B', 2, true};
-        if (op == "&&" || op == "and") return {'C', 3, true};
+        if (op == "&" || op == "&&" || op == "and") return {'C', 3, true};
         if (op == "==") return {'D', 4, true};
         if (op == "!=") return {'E', 5, true};
         if (op == "<=") return {'F', 6, true};
         if (op == ">=") return {'G', 7, true};
         if (op == "<") return {'H', 8, true};
         if (op == ">") return {'I', 9, true};
-        if (op == "+" || op == "-") return {op.front(), 10};
-        if (op == "*" || op == "/" || op == "%") return {op.front(), 11};
-        if (op == ".*") return {'J', 11};
-        if (op == "./") return {'K', 11};
-        if (op == "^") return {'^', 12};
+        if (op == "+" || op == "-") return {op.front(), 12};
+        if (op == "*" || op == "/" || op == "%") return {op.front(), 13};
+        if (op == ".*") return {'J', 13};
+        if (op == "./") return {'K', 13};
+        if (op == "^" || op == "**") return {'^', 14};
         return {0, -1};
     }
 
@@ -877,13 +884,32 @@ private:
         return add(std::move(node));
     }
 
+    bool bareUnary(std::string_view name) {
+        if (!reduction || !reduction->bareUnary) return false;
+        const bool accepted = reduction->bareUnary(name);
+        unaryDecisions.emplace_back(name, accepted);
+        return accepted;
+    }
+
+    size_t parseList(unsigned depth) {
+        size_t left = parse(0, depth);
+        if (left == invalid) return invalid;
+        while (next < tokens.size() && tokens[next].kind == Kind::Comma) {
+            ++next;
+            const auto right = parse(0, depth);
+            if (right == invalid) return invalid;
+            left = add({0, ',', left, right});
+        }
+        return left;
+    }
+
     size_t parse(int minimum, unsigned depth) {
         if (depth >= 128 || next == tokens.size()) return invalid;
         std::vector<char> prefixes;
         while (next < tokens.size()) {
             const auto prefix = tokens[next].text;
-            if (prefix != "+" && prefix != "-" && prefix != "!" && prefix != "not") break;
-            if (prefix != "+") prefixes.push_back(prefix == "-" ? '-' : 'n');
+            if (prefix != "+" && prefix != "-" && prefix != "!" && prefix != "not" && prefix != "~") break;
+            if (prefix != "+") prefixes.push_back(prefix == "-" ? '-' : prefix == "~" ? '~' : 'n');
             ++next;
         }
         if (next == tokens.size()) return invalid;
@@ -962,11 +988,16 @@ private:
                         }
                         if (next == tokens.size() || tokens[next++].text != (index ? "]" : ")")) return invalid;
                     }
+                } else if (bareUnary(token.text)) {
+                    const auto argument = parse(15, depth + 1);
+                    if (argument == invalid) return invalid;
+                    left = add({0, 'c', argument, callArguments.size(), token.text});
+                    callArguments.push_back({argument});
                 } else {
                     left = add({0, 0, 0, 0, token.text});
                 }
             } else if (token.text == "(") {
-                left = parse(0, depth + 1);
+                left = parseList(depth + 1);
                 if (left == invalid || next == tokens.size() || tokens[next++].text != ")") return invalid;
                 nodes[left].grouped = true;
             } else {
@@ -985,7 +1016,11 @@ private:
         }
         for (auto prefix = prefixes.rbegin(); prefix != prefixes.rend(); ++prefix) {
             if (*prefix == 'n') left = add({0, 'n', left});
-            else {
+            else if (*prefix == '~') {
+                const auto argument = left;
+                left = add({0, 'c', argument, callArguments.size(), "bitnot"});
+                callArguments.push_back({argument});
+            } else {
                 const auto minusOne = add({-1});
                 left = add({0, '*', minusOne, left});
             }
@@ -998,7 +1033,7 @@ private:
                 // A percentage includes the current additive term. Defer it to
                 // that parser frame so 200+10% uses 200 as its relative base,
                 // while 2*50% scales the complete product by one hundredth.
-                if (minimum > 10) break;
+                if (minimum > 12) break;
                 ++next;
                 const auto expression = nodes[left];
                 const bool relative = !expression.grouped && (expression.op == '+' || expression.op == '-');

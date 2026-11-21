@@ -137,7 +137,7 @@ static bool legacyHelp(const std::string& s, std::string& help_out) {
                        "sgn(x)  : Sign of x (-1, 0, 1)\n"
                        "floor(x): Round down to integer\n"
                        "ceil(x) : Round up to integer\n"
-                       "round(x): Round to nearest integer\n"
+                       "round(x, places = 0): Round to decimal places; negative places round tens, hundreds, etc.\n"
                        "trunc(x): Integer part towards zero";
         }
         else if (target == "mod") {
