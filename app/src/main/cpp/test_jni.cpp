@@ -610,6 +610,14 @@ int main() {
         assert(largeDeviation && std::abs(*largeDeviation / 1e200 - std::sqrt(2.0)) < 1e-12 && signatureError.empty());
         const auto offsetVariance = evaluateLiteralAst("var([1e12+1,1e12+2,1e12+3])");
         assert(offsetVariance && std::abs(*offsetVariance - 1) < 1e-12 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[1,2],1/0)") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,1/0,[3,4])") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,7,[1/0])") == 7 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[1/0],9)") == 9 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,[1/0],1,11,[])") == 11 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,if(0,[1/0],13),[2])") == 13 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[2],iff(0,1/0,1,[4,5],7))") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,if(1,[1/0],2),1,if(1,17,[1/0]),[])") == 17 && !typedArray && signatureError.empty());
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());

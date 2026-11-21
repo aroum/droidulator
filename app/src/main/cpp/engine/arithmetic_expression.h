@@ -84,18 +84,25 @@ public:
                 if ((node.symbol == "if" && args.size() != 3) || args.size() < 3 || args.size() % 2 == 0)
                     return std::nullopt;
                 bool allArrays = isArrayNode(args.back());
+                bool anyArrays = allArrays;
                 for (size_t i = 0; i + 1 < args.size(); i += 2) {
                     if (isArrayNode(args[i])) return std::nullopt;
-                    allArrays = allArrays && isArrayNode(args[i + 1]);
+                    const bool branchArray = isArrayNode(args[i + 1]);
+                    allArrays = allArrays && branchArray;
+                    anyArrays = anyArrays || branchArray;
                 }
                 node.op = 'q';
-                node.arrayConditional = allArrays;
-                if (allArrays) {
+                node.arrayConditional = anyArrays;
+                node.mixedConditional = anyArrays && !allArrays;
+                for (size_t i = 1; i < args.size(); i += 2)
+                    node.mixedConditional = node.mixedConditional || parser.nodes[args[i]].mixedConditional;
+                node.mixedConditional = node.mixedConditional || parser.nodes[args.back()].mixedConditional;
+                if (anyArrays) {
                     node.arraySlot = parser.literalArrays.size();
                     parser.literalArrays.emplace_back();
                     for (size_t i = 1; i < args.size(); i += 2)
-                        if (!parser.nodes[args[i]].op) parser.nodes[args[i]].op = 'a';
-                    if (!parser.nodes[args.back()].op) parser.nodes[args.back()].op = 'a';
+                        if (isArrayNode(args[i]) && !parser.nodes[args[i]].op) parser.nodes[args[i]].op = 'a';
+                    if (isArrayNode(args.back()) && !parser.nodes[args.back()].op) parser.nodes[args.back()].op = 'a';
                 }
                 continue;
             }
@@ -131,6 +138,17 @@ public:
             node.left = args.front();
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
+        // A conditional can pass either type through another conditional. Other
+        // consumers still need a statically known type before execution starts.
+        std::vector<bool> conditionalBranches(parser.nodes.size(), false);
+        for (const auto& node : parser.nodes) {
+            if (node.op != 'q') continue;
+            const auto& args = parser.callArguments[node.right];
+            for (size_t i = 1; i < args.size(); i += 2) conditionalBranches[args[i]] = true;
+            conditionalBranches[args.back()] = true;
+        }
+        for (size_t i = 0; i < parser.nodes.size(); ++i)
+            if (parser.nodes[i].mixedConditional && i != root && !conditionalBranches[i]) return std::nullopt;
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
             if (node.arrayConditional) {
@@ -243,6 +261,7 @@ public:
                     work.push_back({selected});
                     continue;
                 }
+                if (node.mixedConditional && !isArrayNode(selected)) node.arrayConditional = false;
                 if (node.arrayConditional) {
                     const auto& source = parser.nodes[selected];
                     const auto values = arrayValue(selected);
@@ -456,7 +475,7 @@ public:
                     break;
             }
         }
-        if (rootArray) {
+        if (rootArray && isArrayNode(root)) {
             const auto values = arrayValue(root);
             if (!values) {
                 error = "Array not defined";
@@ -503,6 +522,7 @@ private:
         char arrayOperation = 0;
         size_t arraySlot = 0;
         bool arrayConditional = false;
+        bool mixedConditional = false;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}
