@@ -52,6 +52,7 @@ public:
         if (root == invalid || parser.next != parser.tokens.size()) return std::nullopt;
         const auto isArrayNode = [&](size_t index) {
             const auto& argument = parser.nodes[index];
+            if (argument.scalarResult) return false;
             return argument.op == 'b' || argument.op == 't' || argument.op == 'u' || argument.op == 'r' || argument.op == 'a' || argument.arrayConditional || (arrays && !argument.op && !argument.symbol.empty() &&
                 !(lookup && lookup(argument.symbol)) && arrays(argument.symbol));
         };
@@ -61,13 +62,15 @@ public:
                 const bool leftArray = isArrayNode(node.left);
                 const bool rightArray = isArrayNode(node.right);
                 if (leftArray || rightArray) {
-                    if (leftArray && rightArray && node.op == '*') node.op = 'd';
+                    if (leftArray && rightArray && node.op == '*' &&
+                        !parser.nodes[node.left].dynamicType && !parser.nodes[node.right].dynamicType) node.op = 'd';
                     else {
                         node.arrayOperation = node.op;
                         node.op = 't';
                         node.arraySlot = parser.literalArrays.size();
                         parser.literalArrays.emplace_back();
                     }
+                    node.dynamicType = parser.nodes[node.left].dynamicType || parser.nodes[node.right].dynamicType;
                     if (leftArray && !parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
                     if (rightArray && !parser.nodes[node.right].op) parser.nodes[node.right].op = 'a';
                 }
@@ -93,10 +96,10 @@ public:
                 }
                 node.op = 'q';
                 node.arrayConditional = anyArrays;
-                node.mixedConditional = anyArrays && !allArrays;
+                node.dynamicType = anyArrays && !allArrays;
                 for (size_t i = 1; i < args.size(); i += 2)
-                    node.mixedConditional = node.mixedConditional || parser.nodes[args[i]].mixedConditional;
-                node.mixedConditional = node.mixedConditional || parser.nodes[args.back()].mixedConditional;
+                    node.dynamicType = node.dynamicType || parser.nodes[args[i]].dynamicType;
+                node.dynamicType = node.dynamicType || parser.nodes[args.back()].dynamicType;
                 if (anyArrays) {
                     node.arraySlot = parser.literalArrays.size();
                     parser.literalArrays.emplace_back();
@@ -132,23 +135,31 @@ public:
                 if (!node.function && !node.customFunction) continue;
                 if (node.customFunction && node.customFunction.arity != 1) return std::nullopt;
                 node.op = 'u';
+                node.dynamicType = parser.nodes[args.front()].dynamicType;
                 node.arraySlot = parser.literalArrays.size();
                 parser.literalArrays.emplace_back();
             }
             node.left = args.front();
             if (!parser.nodes[node.left].op) parser.nodes[node.left].op = 'a';
         }
-        // A conditional can pass either type through another conditional. Other
-        // consumers still need a statically known type before execution starts.
-        std::vector<bool> conditionalBranches(parser.nodes.size(), false);
+        // Reject consumers that cannot yet preserve a dynamically selected type
+        // before any branch or user callback executes.
+        std::vector<bool> typedConsumers(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
+            if (node.op == 's' || node.op == 'z' || node.op == 'u' || node.op == 'i' || node.op == 'd')
+                typedConsumers[node.left] = true;
+            if (node.op == 'd') typedConsumers[node.right] = true;
+            if (node.op == 't') {
+                typedConsumers[node.left] = true;
+                typedConsumers[node.right] = true;
+            }
             if (node.op != 'q') continue;
             const auto& args = parser.callArguments[node.right];
-            for (size_t i = 1; i < args.size(); i += 2) conditionalBranches[args[i]] = true;
-            conditionalBranches[args.back()] = true;
+            for (size_t i = 1; i < args.size(); i += 2) typedConsumers[args[i]] = true;
+            typedConsumers[args.back()] = true;
         }
         for (size_t i = 0; i < parser.nodes.size(); ++i)
-            if (parser.nodes[i].mixedConditional && i != root && !conditionalBranches[i]) return std::nullopt;
+            if (parser.nodes[i].dynamicType && i != root && !typedConsumers[i]) return std::nullopt;
         std::vector<bool> consumedArrays(parser.nodes.size(), false);
         for (const auto& node : parser.nodes) {
             if (node.arrayConditional) {
@@ -261,7 +272,7 @@ public:
                     work.push_back({selected});
                     continue;
                 }
-                if (node.mixedConditional && !isArrayNode(selected)) node.arrayConditional = false;
+                if (node.dynamicType && !isArrayNode(selected)) node.arrayConditional = false;
                 if (node.arrayConditional) {
                     const auto& source = parser.nodes[selected];
                     const auto values = arrayValue(selected);
@@ -306,6 +317,17 @@ public:
                 continue;
             }
             if (node.op == 'u') {
+                if (!isArrayNode(node.left)) {
+                    const double input = parser.nodes[node.left].value;
+                    node.value = node.function ? node.function(input) : node.customFunction({input}, error);
+                    if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                    if (!std::isfinite(node.value)) {
+                        error = std::isnan(node.value) ? "Math Error" : "Overflow Error";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    node.scalarResult = true;
+                    continue;
+                }
                 const auto* source = arrayValue(node.left);
                 if (!source) {
                     error = "Array not defined";
@@ -337,6 +359,24 @@ public:
                     return std::numeric_limits<double>::quiet_NaN();
                 }
                 const char operation = node.arrayOperation;
+                if (!left && !right) {
+                    const double a = parser.nodes[node.left].value;
+                    const double b = parser.nodes[node.right].value;
+                    if ((operation == '/' || operation == 'K') && b == 0.0) {
+                        error = "Division by Zero";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    node.value = operation == '+' ? a + b : operation == '-' ? a - b :
+                        (operation == '*' || operation == 'J') ? a * b : a / b;
+                    node.scalarResult = true;
+                    continue;
+                }
+                if (operation == '*' && left && right) {
+                    node.value = vectorDot(*left, *right, error);
+                    if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
+                    node.scalarResult = true;
+                    continue;
+                }
                 const auto text = operation == 'J' ? std::string(".*") : operation == 'K' ? std::string("./") : std::string(1, operation);
                 parser.literalArrays[node.arraySlot] = vectorElementwise(text, left, parser.nodes[node.left].value,
                     right, parser.nodes[node.right].value, error);
@@ -345,6 +385,10 @@ public:
             }
             if (node.op == 'i') {
                 const auto& source = parser.nodes[node.left];
+                if (!isArrayNode(node.left)) {
+                    error = "Indexing requires an array";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
                 node.value = indexedValue(arrayValue(node.left), parser.nodes[node.right].value,
                     source.symbol.empty() ? "expression" : source.symbol, error);
                 if (!error.empty()) return std::numeric_limits<double>::quiet_NaN();
@@ -364,6 +408,10 @@ public:
                 continue;
             }
             if (node.op == 'd') {
+                if (!isArrayNode(node.left) || !isArrayNode(node.right)) {
+                    error = "Dot product requires arrays";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
                 const auto left = arrayValue(node.left);
                 const auto right = arrayValue(node.right);
                 if (!left || !right) {
@@ -375,6 +423,14 @@ public:
                 continue;
             }
             if (node.op == 's' || node.op == 'z') {
+                if (!isArrayNode(node.left)) {
+                    if (node.op == 'z') {
+                        error = "Length requires an array";
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                    node.value = evaluateStatistic(node.statistic, {parser.nodes[node.left].value});
+                    continue;
+                }
                 const auto name = parser.nodes[node.left].symbol;
                 const auto array = arrayValue(node.left);
                 if (!array) {
@@ -522,7 +578,8 @@ private:
         char arrayOperation = 0;
         size_t arraySlot = 0;
         bool arrayConditional = false;
-        bool mixedConditional = false;
+        bool dynamicType = false;
+        bool scalarResult = false;
     };
 
     explicit ArithmeticExpression(std::vector<Token> input) : tokens(std::move(input)) {}

@@ -618,6 +618,28 @@ int main() {
         assert(evaluateArrayAst("if(1,if(0,[1/0],13),[2])") == 13 && !typedArray && signatureError.empty());
         assert(evaluateArrayAst("if(0,[2],iff(0,1/0,1,[4,5],7))") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
         assert(evaluateArrayAst("iff(0,if(1,[1/0],2),1,if(1,17,[1/0]),[])") == 17 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,2,[1/0])+3") == 5 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("3+if(0,1/0,[4,5])") && typedArray == std::vector<double>({7,8}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,2,[1,2])*if(1,[3,4],7)") == 11 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,2,[1,2])*if(1,[3,4],7)") && typedArray == std::vector<double>({6,8}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,8,[1,2])/if(1,2,[3,4])") == 4 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,if(1,2,[1,2])+3,[4])") == 5 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("(if(1,2,[1,2])+3)*2") == 10 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("sqrt(if(1,9,[1/0]))") == 3 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("sqrt(if(0,1/0,[4,9]))") && typedArray == std::vector<double>({2,3}) && signatureError.empty());
+        assert(evaluateLiteralAst("sum(if(1,7,[1/0]))") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("std(if(1,7,[1/0]))") == 0 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(sqrt(if(0,1/0,[4,9])))") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("len(if(0,1/0,[4,9]))") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,1/0,[4,9])[2]") == 9 && signatureError.empty());
+        assert(evaluateLiteralAst("dot(if(0,1/0,[1,2]),[3,4])") == 11 && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula(if(1,2,[1/0]))") == 4 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula(if(0,1/0,[2,3]))") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        for (const auto& source : {"len(if(1,7,[1]))", "if(1,7,[1])[1]", "dot(if(1,7,[1]),[2])",
+                "if(1,2,[1])/if(1,0,[2])", "if(0,2,[1,2])*if(0,3,[4])"}) {
+            const auto result = evaluateArrayAst(source);
+            assert(result && std::isnan(*result) && !signatureError.empty());
+        }
         assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
         assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
         assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
