@@ -23,6 +23,24 @@ collect() {
 }
 trap collect EXIT
 
+# Check incremental/full color equivalence on the same isolated benchmark package
+# before measuring it. The class filter belongs only to this invocation.
+./gradlew :app:testBenchmarkUnitTest :app:connectedBenchmarkAndroidTest \
+  -PperformanceBenchmarks=true -PtestAbi=x86_64 \
+  -Pandroid.testInstrumentationRunnerArguments.ephemeralDevice=true \
+  '-Pandroid.testInstrumentationRunnerArguments.class=com.cardputer.cardulator.AndroidRegressionTest#highlightingIsImmediateAndCommentsMaskTokensInBothEditors' \
+  --max-workers=2 --stacktrace 2>&1 | tee performance-artifacts/highlighting-regression.log
+
+python3 - <<'PY'
+from pathlib import Path
+import xml.etree.ElementTree as ET
+cases = [case for report in Path('app/build/outputs/androidTest-results/connected/benchmark').rglob('TEST-*.xml')
+         for case in ET.parse(report).getroot().iter('testcase')
+         if case.get('name') == 'highlightingIsImmediateAndCommentsMaskTokensInBothEditors']
+assert len(cases) == 1, f'Expected one highlighting regression result, found {len(cases)}'
+assert not any(cases[0].find(tag) is not None for tag in ('failure', 'error', 'skipped'))
+PY
+
 # Suppress only the expected emulator warning. Debuggable/not-profileable errors remain fatal.
 ./gradlew :macrobenchmark:connectedBenchmarkAndroidTest \
   -PperformanceBenchmarks=true -PtestAbi=x86_64 \

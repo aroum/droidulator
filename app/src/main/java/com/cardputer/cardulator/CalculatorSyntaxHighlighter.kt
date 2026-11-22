@@ -24,14 +24,9 @@ internal class CalculatorSyntaxHighlighter {
 
     private data class SpanKey(val start: Int, val end: Int, val color: Int)
 
-    private companion object {
-        // Each alternative owns one capture group, so classification needs no second regex match.
-        private val NUMBER_REGEX = Regex("(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[a-zA-Z]*(?![A-Za-z0-9_])")
-        private val KEYWORD_REGEX = Regex("\\b(?:for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
-        private val FUNC_REGEX = Regex("\\b(?:sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
-        private val CONST_REGEX = Regex("\\b(?:pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
-        private val OP_REGEX = Regex("[+\\-*/^=><!%]")
-        private val SYNTAX_REGEX = Regex("(${NUMBER_REGEX.pattern})|(${KEYWORD_REGEX.pattern})|(${FUNC_REGEX.pattern})|(${CONST_REGEX.pattern})|(${OP_REGEX.pattern})")
+    /** Stored on its own Editable, excluded when Android copies the text. */
+    private class TokenCache : android.text.NoCopySpan {
+        val tokens = IncrementalSyntaxTokens()
     }
 
     // --- Syntax Highlighting & Bracket Matching ---
@@ -44,7 +39,7 @@ internal class CalculatorSyntaxHighlighter {
         }
     }
 
-    private fun spans(text: String, palette: SyntaxColors): List<SpanKey> {
+    private fun spans(text: String, palette: SyntaxColors, cache: IncrementalSyntaxTokens? = null): List<SpanKey> {
         val spans = ArrayList<SpanKey>()
         val numColor = palette.number
         val funcColor = palette.function
@@ -91,15 +86,16 @@ internal class CalculatorSyntaxHighlighter {
         if (quote != null) spans.add(SpanKey(stringStart, text.length, palette.string))
         val code = String(masked)
 
-        for (match in SYNTAX_REGEX.findAll(code)) {
-            val color = when {
-                match.groups[1] != null -> numColor
-                match.groups[2] != null -> keywordColor
-                match.groups[3] != null -> funcColor
-                match.groups[4] != null -> constColor
-                else -> opColor
+        val tokens = cache?.update(code) ?: IncrementalSyntaxTokens.scan(code)
+        for (token in tokens) {
+            val color = when (token.kind) {
+                IncrementalSyntaxTokens.Kind.NUMBER -> numColor
+                IncrementalSyntaxTokens.Kind.KEYWORD -> keywordColor
+                IncrementalSyntaxTokens.Kind.FUNCTION -> funcColor
+                IncrementalSyntaxTokens.Kind.CONSTANT -> constColor
+                IncrementalSyntaxTokens.Kind.OPERATION -> opColor
             }
-            spans.add(SpanKey(match.range.first, match.range.last + 1, color))
+            spans.add(SpanKey(token.start, token.end, color))
         }
 
         // 6. Rainbow Bracket Highlighting & Matching
@@ -152,10 +148,13 @@ internal class CalculatorSyntaxHighlighter {
         android.os.Trace.beginSection("Droidulator.highlight")
         try {
             val text = editable.toString()
-            // Plan plain ranges; constructing a second spanned buffer for every edit
-            // makes Android repeatedly maintain thousands of unrelated span indices.
+            val cache = editable.getSpans(0, editable.length, TokenCache::class.java).firstOrNull()
+                ?: TokenCache().also { editable.setSpan(it, 0, 0, Spannable.SPAN_MARK_MARK) }
+            // Masking strings/comments and validating bracket balance are cheap full scans.
+            // Only changed masked lines run the expensive token regex again. A quote or
+            // comment edit can therefore invalidate every affected downstream line safely.
             val planned = performanceTrace("Droidulator.highlightPlan") {
-                spans(text, SyntaxColors.capture())
+                spans(text, SyntaxColors.capture(), cache.tokens)
             }
             performanceTrace("Droidulator.highlightSync") {
                 val existing = mutableMapOf<SpanKey, ArrayDeque<ForegroundColorSpan>>()

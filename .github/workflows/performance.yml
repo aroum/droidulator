@@ -65,5 +65,9 @@ jobs:
             macrobenchmark/build/outputs/connected_android_test_additional_output/
             macrobenchmark/build/outputs/androidTest-results/
             macrobenchmark/build/reports/androidTests/
+            app/build/reports/tests/
+            app/build/test-results/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
           if-no-files-found: warn
           retention-days: 30

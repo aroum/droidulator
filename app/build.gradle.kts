@@ -8,7 +8,11 @@ val testAbi = providers.gradleProperty("testAbi").orNull
 android {
     namespace = "com.cardputer.cardulator"
     compileSdk = 36
-    testBuildType = if (testAbi != null) "ci" else "debug"
+    testBuildType = when {
+        providers.gradleProperty("performanceBenchmarks").orNull == "true" -> "benchmark"
+        testAbi != null -> "ci"
+        else -> "debug"
+    }
 
     defaultConfig {
         applicationId = "com.cardputer.cardulator"

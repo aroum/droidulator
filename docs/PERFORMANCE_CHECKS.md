@@ -69,6 +69,20 @@ compare repeated runs under the same build, API, compilation and workload settin
 Use a physical device for reliable user-facing performance claims; the user's
 phone smoke test remains separate.
 
+Before measurements the job runs Kotlin unit tests and the targeted Android
+highlighting regression against the same isolated benchmark package. The latter
+checks immediate colors and incremental/full equivalence after edits to multiline
+strings, comments, brackets, line boundaries and entire text replacements in both
+REPL and script editors. These checks run outside the measured iterations.
+
+Editor tokenization caches plain token kinds on each `Editable` using a
+`NoCopySpan`, so copied text and other editors do not inherit the cache. A change
+retokenizes whole affected masked lines and shifts the unchanged suffix. String/
+comment masking and bracket validation remain cheap full-document passes, so
+inserting a quote or comment marker correctly invalidates downstream tokens and
+closing a bracket can update an earlier unmatched opener. Colors are resolved
+from the current palette on every application, independent of cached token kinds.
+
 ## Disposable local emulator
 
 With a running API 36 emulator and Android SDK/JDK 17 available:

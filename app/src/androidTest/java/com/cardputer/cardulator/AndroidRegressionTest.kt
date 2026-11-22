@@ -407,6 +407,32 @@ class AndroidRegressionTest {
             assertEquals(setOf(ThemePalette.yellow), colorsAt(7))
             assertEquals(setOf(ThemePalette.red), colorsAt(10))
             assertEquals(setOf(ThemePalette.yellow), colorsAt(14))
+            fun assertMatchesFull() {
+                fun snapshot(text: android.text.Spannable) = text
+                    .getSpans(0, text.length, ForegroundColorSpan::class.java)
+                    .map { Triple(text.getSpanStart(it), text.getSpanEnd(it), it.foregroundColor) }
+                    .sortedWith(compareBy({ it.first }, { it.second }, { it.third }))
+                val full = android.text.SpannableStringBuilder(editor.text.toString())
+                CalculatorSyntaxHighlighter().highlight(full, 0, full.toString())
+                assertEquals("incremental/full colors: ${editor.text}", snapshot(full), snapshot(editor.text))
+            }
+            editor.setText("(\n1 + [2]\n)\n\"two\nlines\" +3\n#4")
+            assertMatchesFull()
+            editor.editableText.replace(0, 1, "{ ")
+            assertMatchesFull()
+            editor.editableText.replace(0, 2, "//")
+            assertMatchesFull()
+            editor.editableText.delete(0, 2)
+            assertMatchesFull()
+            val openingQuote = editor.text.indexOf('"')
+            editor.editableText.delete(openingQuote, openingQuote + 1)
+            assertMatchesFull()
+            editor.editableText.insert(0, "\" ")
+            assertMatchesFull()
+            editor.editableText.replace(0, editor.length(), "sin(1)\npi")
+            assertMatchesFull()
+            editor.editableText.replace(3, 7, "2+")
+            assertMatchesFull()
         }
         activity { checkEditor(it.findViewById(R.id.et_input)) }
         selectTab(1)
