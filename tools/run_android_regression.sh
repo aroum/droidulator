@@ -26,6 +26,6 @@ suites = [ET.parse(report).getroot() for report in reports]
 tests = sum(int(s.attrib.get('tests', 0)) for s in suites)
 failures = sum(int(s.attrib.get('failures', 0)) + int(s.attrib.get('errors', 0)) for s in suites)
 skipped = sum(int(s.attrib.get('skipped', 0)) for s in suites)
-assert tests >= 11 and failures == 0 and skipped == 0, (tests, failures, skipped)
+assert tests >= 14 and failures == 0 and skipped == 0, (tests, failures, skipped)
 print(f'Android regression: {tests} passed, no failures or skips')
 PY

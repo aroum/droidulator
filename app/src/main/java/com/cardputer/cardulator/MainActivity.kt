@@ -64,7 +64,6 @@ class MainActivity : AppCompatActivity() {
         pendingInputEdits.clear()
         pendingPlot?.cancel(false)
         ++plotRefreshGeneration
-        highlighter.close()
         if (replOutputDelegate.isInitialized()) replOutput.close()
         if (helpPanelDelegate.isInitialized()) helpPanel.close()
         activeDialogs.toList().forEach { it.dismiss() }
@@ -449,7 +448,7 @@ class MainActivity : AppCompatActivity() {
             }
         })
         val search = searchField
-        findViewById<View>(R.id.search_toggle).setOnClickListener {
+        findViewById<View>(R.id.search_toggle).setToolbarClickListener {
             val opening = search.visibility != View.VISIBLE
             spinnerTabs.visibility = if (opening) View.GONE else View.VISIBLE
             search.visibility = if (opening) View.VISIBLE else View.GONE
@@ -602,13 +601,13 @@ class MainActivity : AppCompatActivity() {
 
             override fun afterTextChanged(s: Editable?) {
                 if (isHighlighting || s == null || (s is Editable && highlighter.isApplying(s))) return
-                highlighter.schedule(etInput)
+                highlighter.apply(etInput.editableText)
             }
         })
     }
 
     private fun setupControlButtons() {
-        btnTab.setOnClickListener {
+        btnTab.setToolbarClickListener {
             selectAutocompleteEditor(etInput)
             autocomplete.complete(etInput.text.toString(), etInput.selectionStart.coerceAtLeast(0))?.let { edit ->
                 etInput.setText(edit.text)
@@ -616,11 +615,11 @@ class MainActivity : AppCompatActivity() {
             }
         }
 
-        btnClear.setOnClickListener {
+        btnClear.setToolbarClickListener {
             etInput.setText("")
             dismissErrorOverlay()
         }
-        btnEnter.setOnClickListener {
+        btnEnter.setToolbarClickListener {
             if (tabs[currentTabPosition] == "REPL") {
                 submitCurrentInput()
             }
@@ -637,17 +636,17 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Mode toggle (DEG / RAD)
-        tvMode.setOnClickListener {
+        tvMode.setToolbarClickListener {
             toggleDegRad()
         }
 
         // Add Item button (Var / Const / Script)
-        btnAddItem.setOnClickListener {
+        btnAddItem.setToolbarClickListener {
             showAddItemDialog()
         }
 
         // Delete All Items button (Red ✕)
-        btnDeleteAll.setOnClickListener {
+        btnDeleteAll.setToolbarClickListener {
             val activeTab = tabs[currentTabPosition]
             val fgColor = ThemePalette.fgText
             val tvMsg = TextView(this).apply {
@@ -666,7 +665,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Toggle e-history variables button (#)
-        btnToggleEVars.setOnClickListener {
+        btnToggleEVars.setToolbarClickListener {
             showEVars = !showEVars
             getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
                 .edit()
@@ -678,7 +677,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupNavigationButtons() {
         // Left arrow: Move cursor left in input box
-        btnNavLeft.setOnClickListener {
+        btnNavLeft.setToolbarClickListener {
             val sel = etInput.selectionStart
             if (sel > 0) {
                 etInput.setSelection(sel - 1)
@@ -687,7 +686,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Right arrow: Move cursor right in input box
-        btnNavRight.setOnClickListener {
+        btnNavRight.setToolbarClickListener {
             val sel = etInput.selectionStart
             if (sel < etInput.text.length) {
                 etInput.setSelection(sel + 1)
@@ -696,7 +695,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Up arrow: Scroll history UP in REPL (Recalls previous command including ones with errors)
-        btnNavUp.setOnClickListener {
+        btnNavUp.setToolbarClickListener {
             if (tabs[currentTabPosition] == "REPL" && replHistory.isNotEmpty()) {
                 if (replHistoryIndex == -1) {
                     tempReplInput = etInput.text.toString()
@@ -713,7 +712,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Down arrow: Scroll history DOWN in REPL
-        btnNavDown.setOnClickListener {
+        btnNavDown.setToolbarClickListener {
             if (tabs[currentTabPosition] == "REPL" && replHistoryIndex != -1) {
                 if (replHistoryIndex < replHistory.size - 1) {
                     replHistoryIndex++
@@ -773,6 +772,15 @@ class MainActivity : AppCompatActivity() {
         cbAutoPair.setOnCheckedChangeListener { _, isChecked ->
             isAutoPairEnabled = isChecked
             getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit().putBoolean("auto_pair", isChecked).apply()
+        }
+
+        findViewById<CheckBox>(R.id.cb_toolbar_haptics).apply {
+            isChecked = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
+                .getBoolean("toolbar_haptics", false)
+            setOnCheckedChangeListener { _, checked ->
+                getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit()
+                    .putBoolean("toolbar_haptics", checked).apply()
+            }
         }
 
         btnSettingsEnterAction.setOnClickListener {
@@ -896,6 +904,7 @@ class MainActivity : AppCompatActivity() {
         if (input.isEmpty() || !queueCommand(input)) return
         isSubmitting = true
         try { etInput.setText("") } finally { isSubmitting = false }
+        etInput.requestFocus()
     }
 
     private fun queueCommand(input: String, scriptName: String? = null): Boolean {
@@ -1210,6 +1219,10 @@ class MainActivity : AppCompatActivity() {
         rbThemeDark.setTextColor(fgColor)
         rbThemeLight.setTextColor(fgColor)
 
+        findViewById<CheckBox>(R.id.cb_toolbar_haptics).apply {
+            setTextColor(fgColor)
+            buttonTintList = ColorStateList.valueOf(ThemePalette.aqua)
+        }
         cbHideWelcome.setTextColor(fgColor)
         cbAutoPair.setTextColor(fgColor)
         cbDigitGrouping.setTextColor(fgColor)

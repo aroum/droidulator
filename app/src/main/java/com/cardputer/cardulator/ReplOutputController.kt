@@ -15,7 +15,7 @@ internal class ReplOutputController(
     private var generation = 0L
     private var pending: Future<*>? = null
     private var closed = false
-    private val scrollToEndTask = Runnable { if (!closed) scroll.fullScroll(ScrollView.FOCUS_DOWN) }
+    private val scrollToEndTask = Runnable { if (!closed) scroll.smoothScrollTo(0, output.bottom) }
 
     fun rebuild() {
         if (closed) return

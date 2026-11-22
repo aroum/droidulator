@@ -3,41 +3,23 @@ package com.cardputer.cardulator
 import android.text.Editable
 import android.text.Spannable
 import android.text.style.ForegroundColorSpan
-import android.widget.EditText
 
 internal data class SyntaxColors(
     val number: Int, val function: Int, val constant: Int,
     val keyword: Int, val operation: Int, val error: Int,
-    val string: Int, val brackets: IntArray
+    val string: Int, val comment: Int, val brackets: IntArray
 ) {
     companion object {
         fun capture() = SyntaxColors(
             ThemePalette.purple, ThemePalette.aqua, ThemePalette.yellow,
             ThemePalette.red, ThemePalette.orange, ThemePalette.red,
-            ThemePalette.green, ThemePalette.rainbowColors.toIntArray()
+            ThemePalette.green, ThemePalette.fgDim, ThemePalette.rainbowColors.toIntArray()
         )
     }
 }
 
 internal class CalculatorSyntaxHighlighter {
     private val highlightingEditables = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Editable, Boolean>())
-    private val pendingHighlight = java.util.WeakHashMap<EditText, Runnable>()
-    fun schedule(editor: EditText) {
-        pendingHighlight.remove(editor)?.let { editor.removeCallbacks(it) }
-        val task = Runnable { pendingHighlight.remove(editor); apply(editor.editableText) }
-        pendingHighlight[editor] = task
-        editor.postDelayed(task, 120)
-    }
-
-    fun cancel(editor: EditText) {
-        pendingHighlight.remove(editor)?.let { editor.removeCallbacks(it) }
-    }
-
-    fun close() {
-        pendingHighlight.toList().forEach { (editor, task) -> editor.removeCallbacks(task) }
-        pendingHighlight.clear()
-    }
-
     fun isApplying(editable: Editable): Boolean = highlightingEditables.contains(editable)
 
     private companion object {
@@ -64,8 +46,22 @@ internal class CalculatorSyntaxHighlighter {
         var quote: Char? = null
         var escaped = false
         var stringStart = -1
+        var commentStart = -1
         for (i in text.indices) {
             val c = text[i]
+            if (commentStart >= 0) {
+                if (c == '\n' || c == '\r') {
+                    ssb.setSpan(ForegroundColorSpan(palette.comment), startOffset + commentStart,
+                        startOffset + i, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    commentStart = -1
+                } else masked[i] = ' '
+                continue
+            }
+            if (quote == null && (c == '#' || (c == '/' && text.getOrNull(i + 1) == '/'))) {
+                commentStart = i
+                masked[i] = ' '
+                continue
+            }
             if (quote == null && (c == '"' || c == '\'')) {
                 quote = c
                 stringStart = i
@@ -82,6 +78,8 @@ internal class CalculatorSyntaxHighlighter {
                 if (quote == null) stringStart = -1
             }
         }
+        if (commentStart >= 0) ssb.setSpan(ForegroundColorSpan(palette.comment),
+            startOffset + commentStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         if (quote != null) ssb.setSpan(ForegroundColorSpan(palette.string), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
         val code = String(masked)
 

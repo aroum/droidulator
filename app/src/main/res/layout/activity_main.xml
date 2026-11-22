@@ -308,6 +308,16 @@
                 android:layout_marginBottom="4dp" />
 
             <CheckBox
+                android:id="@+id/cb_toolbar_haptics"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/toolbar_haptics_checkbox"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
                 android:id="@+id/cb_auto_pair"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"

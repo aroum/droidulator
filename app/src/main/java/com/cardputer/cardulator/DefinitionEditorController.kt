@@ -31,11 +31,11 @@ internal class DefinitionEditorController(
         val draft = session.definitionDraft ?: DefinitionDraft(title, hintText, tab, initialExpr)
             .also { session.definitionDraft = it }
         val et = dialogs.definitionInput(draft, hintText) { input, text ->
-            if (!highlighter.isApplying(text)) highlighter.schedule(input)
+            if (!highlighter.isApplying(text)) highlighter.apply(input.editableText)
         }
 
         if (initialExpr.isNotEmpty()) {
-            highlighter.schedule(et)
+            highlighter.apply(et.editableText)
         }
 
         val dialog = dialogs.show(title, et, positiveText = activity.getString(R.string.action_save), positiveValidator = {
@@ -56,7 +56,6 @@ internal class DefinitionEditorController(
             et.isEnabled = false
         }
         dialog.setOnDismissListener {
-            highlighter.cancel(et)
             untrack(dialog)
             if (editor?.dialog === dialog) editor = null
             if (activity.isChangingConfigurations) draft.cursor = et.selectionStart

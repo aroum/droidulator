@@ -93,12 +93,12 @@ internal class ScriptEditor(
             setHintTextColor(fgDim)
             val editor = this
             doAfterTextChanged { text ->
-                if (text != null && !highlighter.isApplying(text)) highlighter.schedule(editor)
+                if (text != null && !highlighter.isApplying(text)) highlighter.apply(editor.editableText)
             }
         }
 
         if (draft.code.isNotEmpty()) {
-            highlighter.schedule(etCode)
+            highlighter.apply(etCode.editableText)
         }
 
         val btnFg = ThemePalette.btnText
@@ -106,7 +106,7 @@ internal class ScriptEditor(
         btnNavLeft.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
             setTextColor(btnFg)
-            setOnClickListener {
+            setToolbarClickListener {
                 val sel = etCode.selectionStart
                 if (sel > 0) etCode.setSelection(sel - 1)
                 etCode.requestFocus()
@@ -116,7 +116,7 @@ internal class ScriptEditor(
         btnNavRight.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.blue)
             setTextColor(btnFg)
-            setOnClickListener {
+            setToolbarClickListener {
                 val sel = etCode.selectionStart
                 if (sel < etCode.text.length) etCode.setSelection(sel + 1)
                 etCode.requestFocus()
@@ -126,7 +126,7 @@ internal class ScriptEditor(
         btnNavUp.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
             setTextColor(btnFg)
-            setOnClickListener {
+            setToolbarClickListener {
                 val layout = etCode.layout
                 if (layout != null) {
                     val pos = etCode.selectionStart
@@ -146,7 +146,7 @@ internal class ScriptEditor(
         btnNavDown.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.purple)
             setTextColor(btnFg)
-            setOnClickListener {
+            setToolbarClickListener {
                 val layout = etCode.layout
                 if (layout != null) {
                     val pos = etCode.selectionStart
@@ -166,15 +166,15 @@ internal class ScriptEditor(
         btnCancel.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
             setTextColor(btnFg)
-            setOnClickListener { dialog.dismiss() }
+            setToolbarClickListener { dialog.dismiss() }
         }
 
         btnTab.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
             setTextColor(btnFg)
             iconTint = ColorStateList.valueOf(btnFg)
-            setOnClickListener {
-                if (session.commandRunning) return@setOnClickListener
+            setToolbarClickListener {
+                if (session.commandRunning) return@setToolbarClickListener
                 selectAutocompleteEditor(etCode)
                 val cursor = etCode.selectionStart.coerceAtLeast(0)
                 val fullText = etCode.text.toString()
@@ -194,14 +194,14 @@ internal class ScriptEditor(
                         val match = localVars.first()
                         etCode.text.replace(wordStart, cursor, match)
                         etCode.setSelection((wordStart + match.length).coerceAtMost(etCode.text.length))
-                        return@setOnClickListener
+                        return@setToolbarClickListener
                     } else {
                         val outCursor = intArrayOf(prefix.length)
                         val completed = session.engine.nativeAutocomplete(prefix, prefix.length, outCursor)
                         if (completed != prefix) {
                             etCode.text.replace(wordStart, cursor, completed)
                             etCode.setSelection((wordStart + completed.length).coerceAtMost(etCode.text.length))
-                            return@setOnClickListener
+                            return@setToolbarClickListener
                         }
                     }
                 }
@@ -218,8 +218,8 @@ internal class ScriptEditor(
         btnRun.apply {
             backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
             setTextColor(btnFg)
-            setOnClickListener {
-                if (session.commandRunning) return@setOnClickListener
+            setToolbarClickListener {
+                if (session.commandRunning) return@setToolbarClickListener
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
@@ -233,8 +233,8 @@ internal class ScriptEditor(
         btnSave.apply {
             backgroundTintList = ColorStateList.valueOf(btnAqua)
             iconTint = ColorStateList.valueOf(btnFg)
-            setOnClickListener {
-                if (session.commandRunning) return@setOnClickListener
+            setToolbarClickListener {
+                if (session.commandRunning) return@setToolbarClickListener
                 val newName = etName.text.toString().trim()
                 val newCode = etCode.text.toString().trim()
                 if (newName.isNotEmpty() && newCode.isNotEmpty()) {
@@ -246,7 +246,6 @@ internal class ScriptEditor(
         }
 
         dialog.setOnDismissListener {
-            highlighter.cancel(etCode)
             draft.nameCursor = etName.selectionStart
             draft.codeCursor = etCode.selectionStart
             onDismiss(dialog)

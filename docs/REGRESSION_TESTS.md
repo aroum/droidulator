@@ -19,7 +19,11 @@ that release validation rejects missing credentials.
 The Android suite exercises the actual packaged JNI library, REPL precision,
 rotation, script CRUD and drafts, Help/Units search, persisted session restoration,
 corrupt storage recovery, Enter settings and plot serialization. All waits are
-bounded and wait for observable state rather than fixed delays.
+bounded and wait for observable state rather than fixed delays. The suite requires
+at least 14 scenarios, including synchronous comment/string highlighting in both
+editors, REPL input focus after scrolling results, and toolbar haptics preference
+persistence across rotation. Physical vibration and vendor keyboard behavior still
+need a device check.
 
 ## Disposable emulators only
 

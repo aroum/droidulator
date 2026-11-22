@@ -3,6 +3,7 @@ package com.cardputer.cardulator
 import android.content.Context
 import android.os.Build
 import android.os.SystemClock
+import android.text.style.ForegroundColorSpan
 import android.view.View
 import android.view.ViewGroup
 import android.view.inputmethod.EditorInfo
@@ -378,6 +379,65 @@ class AndroidRegressionTest {
         selectTab(6)
         activity {
             it.findViewById<CheckBox>(R.id.btn_settings_enter_action).performClick()
+        }
+    }
+
+    @Test fun highlightingIsImmediateAndCommentsMaskTokensInBothEditors() {
+        fun checkEditor(editor: EditText) {
+            val source = "# 1. - sin(2)\n// 3 + [4]\n\"# 5 -\" + 6"
+            editor.setText(source)
+            fun colorsAt(index: Int) = editor.text
+                .getSpans(index, index + 1, ForegroundColorSpan::class.java)
+                .map { it.foregroundColor }.toSet()
+            for (token in listOf("1", "-", "sin", "2", "3", "[")) {
+                assertEquals("comment token $token", setOf(ThemePalette.fgDim), colorsAt(source.indexOf(token)))
+            }
+            assertEquals(setOf(ThemePalette.green), colorsAt(source.indexOf("5")))
+            assertEquals(setOf(ThemePalette.purple), colorsAt(source.lastIndexOf("6")))
+            // Check during the edit itself, before any delayed callback can run.
+            editor.setText("# 1")
+            editor.editableText.delete(0, 2)
+            assertEquals(setOf(ThemePalette.purple), colorsAt(0))
+            editor.editableText.append("2")
+            assertEquals(setOf(ThemePalette.purple), colorsAt(1))
+        }
+        activity { checkEditor(it.findViewById(R.id.et_input)) }
+        selectTab(1)
+        activity { it.findViewById<View>(R.id.btn_add_item).performClick() }
+        awaitView("script editor ready") {
+            onView(withId(R.id.et_script_code)).inRoot(isDialog()).check(matches(isDisplayed()))
+        }
+        onView(withId(R.id.et_script_code)).inRoot(isDialog()).check { view, error ->
+            if (error != null) throw error
+            checkEditor(view as EditText)
+        }
+    }
+
+    @Test fun replKeepsInputFocusWhenResultsScroll() {
+        activity { it.findViewById<EditText>(R.id.et_input).requestFocus() }
+        repeat(20) { submit("$it+1") }
+        await("last result rendered") { output().contains("> 19+1") }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        assertTrue(activity { it.findViewById<EditText>(R.id.et_input).hasFocus() })
+    }
+
+    @Test fun toolbarHapticsPreferenceSurvivesRotation() {
+        selectTab(6)
+        activity { screen ->
+            val checkbox = screen.findViewById<CheckBox>(R.id.cb_toolbar_haptics)
+            assertFalse(checkbox.isChecked)
+            checkbox.performClick()
+            assertTrue(screen.getSharedPreferences("droidulator_prefs", Context.MODE_PRIVATE)
+                .getBoolean("toolbar_haptics", false))
+        }
+        scenario.recreate()
+        selectTab(6)
+        activity { screen ->
+            val checkbox = screen.findViewById<CheckBox>(R.id.cb_toolbar_haptics)
+            assertTrue(checkbox.isChecked)
+            checkbox.performClick()
+            assertFalse(screen.getSharedPreferences("droidulator_prefs", Context.MODE_PRIVATE)
+                .getBoolean("toolbar_haptics", true))
         }
     }
 
