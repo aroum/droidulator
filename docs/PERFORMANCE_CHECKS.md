@@ -40,6 +40,12 @@ frame overruns describe rendered frames, not end-to-end key latency. Macrobenchm
 scenario durations include UI Automator calls and waits. Android JSON reports
 contain repeat values, medians, and frame percentiles.
 
+Command workloads use the app's visible toolbar Send button, enabled through its
+normal Enter preference in setup. This avoids asynchronous Gboard decoding of
+injected hardware Enter events on the emulator; it does not benchmark keyboard
+Enter behavior. Timeout diagnostics dump the target window to logcat before the
+benchmark framework terminates the target process.
+
 ## Read the results
 
 Open the run's **Summary** for measurements. Download its `performance-api36-*`

@@ -42,9 +42,21 @@ class PerformanceBenchmark {
         check(device.executeShellCommand("pm clear $PACKAGE").trim() == "Success")
     }
 
-    private fun view(id: String): UiObject2 = checkNotNull(
+    private fun view(id: String): UiObject2 =
         device.wait(Until.findObject(By.res(PACKAGE, id)), TIMEOUT)
-    ) { "Timed out finding $id" }
+            ?: failWithWindow("Timed out finding $id")
+
+    private fun failWithWindow(message: String): Nothing {
+        // Macrobenchmark stops the target on failure, so capture its window before throwing.
+        runCatching {
+            val window = java.io.ByteArrayOutputStream()
+            device.dumpWindowHierarchy(window)
+            window.toString("UTF-8").chunked(3500).forEach {
+                android.util.Log.e("PerformanceBenchmark", it)
+            }
+        }
+        error(message)
+    }
 
     private fun await(description: String, condition: () -> Boolean) {
         val deadline = SystemClock.uptimeMillis() + TIMEOUT
@@ -52,7 +64,7 @@ class PerformanceBenchmark {
             if (condition()) return
             SystemClock.sleep(50)
         }
-        error("Timed out waiting for $description")
+        failWithWindow("Timed out waiting for $description")
     }
 
     private fun ready() {
@@ -75,10 +87,24 @@ class PerformanceBenchmark {
     private fun output(): String = view("tv_output").text.orEmpty()
     private fun normalizedOutput() = output().filterNot(Char::isWhitespace)
 
+    private fun prepareRepl() {
+        choose("spinner_tabs", "Settings")
+        val sendOnEnter = view("btn_settings_enter_action")
+        if (sendOnEnter.isChecked) sendOnEnter.click()
+        await("toolbar send enabled") { !view("btn_settings_enter_action").isChecked }
+        choose("spinner_tabs", "REPL")
+        ready()
+        view("btn_enter")
+    }
+
     private fun submit(expression: String, plot: Boolean = false) {
         val previous = output()
-        view("et_input").apply { click(); text = expression }
-        device.pressEnter()
+        // A hardware Enter is intercepted by Gboard on the hosted emulator and can
+        // be decoded asynchronously against an old input connection. Submit through
+        // the real toolbar instead; keyboard correctness belongs to regression tests.
+        view("et_input").text = expression
+        await("input populated") { view("et_input").text == expression }
+        view("btn_enter").click()
         if (plot) {
             view("plot_view")
             device.waitForIdle()
@@ -95,7 +121,7 @@ class PerformanceBenchmark {
 
     private fun seedHistory() {
         for (i in 1..60) submit("$i/7")
-        device.pressBack() // Close the keyboard before scrolling or opening dropdowns.
+        device.waitForIdle()
     }
 
     @Test fun coldStartup() = benchmark.measureRepeated(
@@ -121,6 +147,7 @@ class PerformanceBenchmark {
                 if (!seeded) {
                     startActivityAndWait()
                     ready()
+                    prepareRepl()
                     seedHistory()
                     seeded = true
                 }
@@ -146,6 +173,7 @@ class PerformanceBenchmark {
                 if (!seeded) {
                     startActivityAndWait()
                     ready()
+                    prepareRepl()
                     seedHistory()
                     choose("spinner_fmt_mode", "FIX")
                     choose("spinner_fmt_prec", "12dp")
@@ -196,6 +224,7 @@ class PerformanceBenchmark {
             startActivityAndWait()
             choose("spinner_tabs", "REPL")
             ready()
+            prepareRepl()
         }
     ) {
         submit("plot((0:1:10000),sin((0:1:10000)))", plot = true)
@@ -212,7 +241,7 @@ class PerformanceBenchmark {
         metrics = listOf(FrameTimingMetric(), TraceSectionMetric("Droidulator.command")),
         compilationMode = CompilationMode.Full(),
         iterations = iterations,
-        setupBlock = { startActivityAndWait(); ready() }
+        setupBlock = { startActivityAndWait(); ready(); prepareRepl() }
     ) {
         submit("sum(sqrt((1:1:20000)))")
         device.waitForIdle()
