@@ -22,20 +22,30 @@ internal class CalculatorSyntaxHighlighter {
     private val highlightingEditables = java.util.Collections.newSetFromMap(java.util.IdentityHashMap<Editable, Boolean>())
     fun isApplying(editable: Editable): Boolean = highlightingEditables.contains(editable)
 
+    private data class SpanKey(val start: Int, val end: Int, val color: Int)
+
     private companion object {
-        // Pre-compiled regex patterns for zero-allocation syntax highlighting
+        // Each alternative owns one capture group, so classification needs no second regex match.
         private val NUMBER_REGEX = Regex("(?<![A-Za-z0-9_])(?:\\d+(?:\\.\\d*)?|\\.\\d+)(?:[eE][+-]?\\d+)?[a-zA-Z]*(?![A-Za-z0-9_])")
-        private val KEYWORD_REGEX = Regex("\\b(for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
-        private val FUNC_REGEX = Regex("\\b(sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
-        private val CONST_REGEX = Regex("\\b(pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
+        private val KEYWORD_REGEX = Regex("\\b(?:for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
+        private val FUNC_REGEX = Regex("\\b(?:sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
+        private val CONST_REGEX = Regex("\\b(?:pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
         private val OP_REGEX = Regex("[+\\-*/^=><!%]")
-        private val SYNTAX_REGEX = Regex("(?:${NUMBER_REGEX.pattern})|(?:${KEYWORD_REGEX.pattern})|(?:${FUNC_REGEX.pattern})|(?:${CONST_REGEX.pattern})|(?:${OP_REGEX.pattern})")
+        private val SYNTAX_REGEX = Regex("(${NUMBER_REGEX.pattern})|(${KEYWORD_REGEX.pattern})|(${FUNC_REGEX.pattern})|(${CONST_REGEX.pattern})|(${OP_REGEX.pattern})")
     }
 
     // --- Syntax Highlighting & Bracket Matching ---
     // This method only touches the supplied text and palette, so detached output
     // can be prepared on a worker while editor highlighting stays on the UI thread.
     fun highlight(ssb: Spannable, startOffset: Int, text: String, palette: SyntaxColors = SyntaxColors.capture()) {
+        for (span in spans(text, palette)) {
+            ssb.setSpan(ForegroundColorSpan(span.color), startOffset + span.start,
+                startOffset + span.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        }
+    }
+
+    private fun spans(text: String, palette: SyntaxColors): List<SpanKey> {
+        val spans = ArrayList<SpanKey>()
         val numColor = palette.number
         val funcColor = palette.function
         val constColor = palette.constant
@@ -51,8 +61,7 @@ internal class CalculatorSyntaxHighlighter {
             val c = text[i]
             if (commentStart >= 0) {
                 if (c == '\n' || c == '\r') {
-                    ssb.setSpan(ForegroundColorSpan(palette.comment), startOffset + commentStart,
-                        startOffset + i, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    spans.add(SpanKey(commentStart, i, palette.comment))
                     commentStart = -1
                 } else masked[i] = ' '
                 continue
@@ -69,7 +78,7 @@ internal class CalculatorSyntaxHighlighter {
                 if (escaped) escaped = false
                 else if (c == '\\') escaped = true
                 else if (c == quote) {
-                    ssb.setSpan(ForegroundColorSpan(palette.string), startOffset + stringStart, startOffset + i + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    spans.add(SpanKey(stringStart, i + 1, palette.string))
                     quote = null
                 }
             }
@@ -78,21 +87,19 @@ internal class CalculatorSyntaxHighlighter {
                 if (quote == null) stringStart = -1
             }
         }
-        if (commentStart >= 0) ssb.setSpan(ForegroundColorSpan(palette.comment),
-            startOffset + commentStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        if (quote != null) ssb.setSpan(ForegroundColorSpan(palette.string), startOffset + stringStart, startOffset + text.length, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+        if (commentStart >= 0) spans.add(SpanKey(commentStart, text.length, palette.comment))
+        if (quote != null) spans.add(SpanKey(stringStart, text.length, palette.string))
         val code = String(masked)
 
         for (match in SYNTAX_REGEX.findAll(code)) {
             val color = when {
-                NUMBER_REGEX.matches(match.value) -> numColor
-                KEYWORD_REGEX.matches(match.value) -> keywordColor
-                FUNC_REGEX.matches(match.value) -> funcColor
-                CONST_REGEX.matches(match.value) -> constColor
+                match.groups[1] != null -> numColor
+                match.groups[2] != null -> keywordColor
+                match.groups[3] != null -> funcColor
+                match.groups[4] != null -> constColor
                 else -> opColor
             }
-            ssb.setSpan(ForegroundColorSpan(color), startOffset + match.range.first,
-                startOffset + match.range.last + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            spans.add(SpanKey(match.range.first, match.range.last + 1, color))
         }
 
         // 6. Rainbow Bracket Highlighting & Matching
@@ -105,13 +112,12 @@ internal class CalculatorSyntaxHighlighter {
 
         for (i in text.indices) {
             val c = code[i]
-            val absPos = startOffset + i
             if (c == '(' || c == '[' || c == '{') {
                 val color = colors[stackSize % numColors]
-                ssb.setSpan(ForegroundColorSpan(color), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                spans.add(SpanKey(i, i + 1, color))
                 if (stackSize < maxStack) {
                     charStack[stackSize] = c
-                    posStack[stackSize] = absPos
+                    posStack[stackSize] = i
                     stackSize++
                 }
             } else if (c == ')' || c == ']' || c == '}') {
@@ -123,12 +129,12 @@ internal class CalculatorSyntaxHighlighter {
                                   (topChar == '{' && c == '}')
                     if (matches) {
                         val color = colors[stackSize % numColors]
-                        ssb.setSpan(ForegroundColorSpan(color), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        spans.add(SpanKey(i, i + 1, color))
                     } else {
-                        ssb.setSpan(ForegroundColorSpan(errColor), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                        spans.add(SpanKey(i, i + 1, errColor))
                     }
                 } else {
-                    ssb.setSpan(ForegroundColorSpan(errColor), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                    spans.add(SpanKey(i, i + 1, errColor))
                 }
             }
         }
@@ -136,8 +142,9 @@ internal class CalculatorSyntaxHighlighter {
         while (stackSize > 0) {
             stackSize--
             val unclosedPos = posStack[stackSize]
-            ssb.setSpan(ForegroundColorSpan(errColor), unclosedPos, unclosedPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            spans.add(SpanKey(unclosedPos, unclosedPos + 1, errColor))
         }
+        return spans
     }
 
     fun apply(editable: Editable) {
@@ -145,21 +152,24 @@ internal class CalculatorSyntaxHighlighter {
         android.os.Trace.beginSection("Droidulator.highlight")
         try {
             val text = editable.toString()
-            val highlighted = android.text.SpannableStringBuilder(text)
-            highlight(highlighted, 0, text)
-            data class SpanKey(val start: Int, val end: Int, val color: Int)
-            val existing = mutableMapOf<SpanKey, ArrayDeque<ForegroundColorSpan>>()
-            for (span in editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)) {
-                val key = SpanKey(editable.getSpanStart(span), editable.getSpanEnd(span), span.foregroundColor)
-                existing.getOrPut(key) { ArrayDeque() }.addLast(span)
+            // Plan plain ranges; constructing a second spanned buffer for every edit
+            // makes Android repeatedly maintain thousands of unrelated span indices.
+            val planned = performanceTrace("Droidulator.highlightPlan") {
+                spans(text, SyntaxColors.capture())
             }
-            for (span in highlighted.getSpans(0, highlighted.length, ForegroundColorSpan::class.java)) {
-                val key = SpanKey(highlighted.getSpanStart(span), highlighted.getSpanEnd(span), span.foregroundColor)
-                val reusable = existing[key]
-                if (reusable != null && reusable.isNotEmpty()) reusable.removeFirst()
-                else editable.setSpan(ForegroundColorSpan(key.color), key.start, key.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+            performanceTrace("Droidulator.highlightSync") {
+                val existing = mutableMapOf<SpanKey, ArrayDeque<ForegroundColorSpan>>()
+                for (span in editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)) {
+                    val key = SpanKey(editable.getSpanStart(span), editable.getSpanEnd(span), span.foregroundColor)
+                    existing.getOrPut(key) { ArrayDeque() }.addLast(span)
+                }
+                for (key in planned) {
+                    val reusable = existing[key]
+                    if (reusable != null && reusable.isNotEmpty()) reusable.removeFirst()
+                    else editable.setSpan(ForegroundColorSpan(key.color), key.start, key.end, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
+                }
+                for (spans in existing.values) for (span in spans) editable.removeSpan(span)
             }
-            for (spans in existing.values) for (span in spans) editable.removeSpan(span)
         } finally {
             android.os.Trace.endSection()
             highlightingEditables.remove(editable)

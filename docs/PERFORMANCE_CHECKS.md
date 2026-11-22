@@ -34,6 +34,8 @@ package; it never clears `com.cardputer.cardulator`.
   engine controls concurrently with a running command.
 
 Traces include app sections: `Droidulator.highlight` for editor coloring,
+with `Droidulator.highlightPlan` for token/range planning and
+`Droidulator.highlightSync` for applying/reusing editor spans,
 `Droidulator.replRebuild` for worker-side history formatting/rendering, and
 `Droidulator.command` for worker evaluation plus persistence. Frame durations and
 frame overruns describe rendered frames, not end-to-end key latency. Macrobenchmark

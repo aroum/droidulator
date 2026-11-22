@@ -192,7 +192,10 @@ class PerformanceBenchmark {
 
     @Test fun largeScriptTyping() = benchmark.measureRepeated(
         packageName = PACKAGE,
-        metrics = listOf(FrameTimingMetric(), TraceSectionMetric("Droidulator.highlight")),
+        metrics = listOf(
+            FrameTimingMetric(), TraceSectionMetric("Droidulator.highlight"),
+            TraceSectionMetric("Droidulator.highlightPlan"), TraceSectionMetric("Droidulator.highlightSync")
+        ),
         compilationMode = CompilationMode.Full(),
         iterations = iterations,
         setupBlock = {

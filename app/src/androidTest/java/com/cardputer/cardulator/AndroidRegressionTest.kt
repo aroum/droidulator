@@ -400,6 +400,13 @@ class AndroidRegressionTest {
             assertEquals(setOf(ThemePalette.purple), colorsAt(0))
             editor.editableText.append("2")
             assertEquals(setOf(ThemePalette.purple), colorsAt(1))
+            editor.setText("sin(2)+pi xor e1")
+            assertEquals(setOf(ThemePalette.aqua), colorsAt(0))
+            assertEquals(setOf(ThemePalette.purple), colorsAt(4))
+            assertEquals(setOf(ThemePalette.orange), colorsAt(6))
+            assertEquals(setOf(ThemePalette.yellow), colorsAt(7))
+            assertEquals(setOf(ThemePalette.red), colorsAt(10))
+            assertEquals(setOf(ThemePalette.yellow), colorsAt(14))
         }
         activity { checkEditor(it.findViewById(R.id.et_input)) }
         selectTab(1)
