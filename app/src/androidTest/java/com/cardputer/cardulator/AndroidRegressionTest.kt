@@ -20,6 +20,7 @@ import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.RootMatchers.isDialog
 import androidx.test.espresso.matcher.RootMatchers.isPlatformPopup
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
@@ -233,7 +234,14 @@ class AndroidRegressionTest {
             (0 until container.childCount).map { container.getChildAt(it) }
                 .first { it.tag?.toString()?.startsWith("conv ") == true }.performClick()
         }
-        onView(withText(android.R.string.ok)).check(matches(isCompletelyDisplayed())).perform(click())
+        // Opening a dialog transfers focus asynchronously. Select its window explicitly,
+        // otherwise Espresso can latch onto the Activity root that just lost focus.
+        awaitView("conversion help dialog ready") {
+            onView(withText(android.R.string.ok)).inRoot(isDialog())
+                .check(matches(isCompletelyDisplayed()))
+        }
+        onView(withText(android.R.string.ok)).inRoot(isDialog()).perform(click())
+        await("Activity focus after closing help") { activity { it.hasWindowFocus() } }
         pressBack()
         await("exit search") { activity { it.findViewById<View>(R.id.search_query).visibility != View.VISIBLE } }
         selectTab(8)
