@@ -213,11 +213,12 @@ jobs:
         with:
           name: ${{ env.RELEASE_TITLE }}
           files: app/build/outputs/apk/${{ env.APK_VARIANT }}/*.apk
-          generate_release_notes: true
+          body_path: docs/releases/${{ github.ref_name }}.md
+          draft: true
           prerelease: false
 
       - name: Clean up previous Nightly release
-        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"
+        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') && !contains(github.event.head_commit.message, '[skip nightly]')"
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -225,7 +226,7 @@ jobs:
           sleep 2
 
       - name: Create Nightly GitHub Release
-        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/')"
+        if: "github.event_name == 'push' && !startsWith(github.ref, 'refs/tags/') && !contains(github.event.head_commit.message, '[skip nightly]')"
         uses: softprops/action-gh-release@v2
         with:
           tag_name: nightly
