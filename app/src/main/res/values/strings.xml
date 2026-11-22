@@ -60,7 +60,6 @@
     <string name="ui_text_035" formatted="false">Hide Welcome Message on Start</string>
     <string name="ui_text_036" formatted="false">Auto-Pair Brackets &amp; Quotes (( ), [ ], { }, \" \")</string>
     <string name="ui_text_037" formatted="false">Digit Grouping (Spaces for 1 234 and 0.000 001)</string>
-    <string name="ui_text_038" formatted="false">Enter Key Action in REPL:</string>
     <string name="ui_text_039" formatted="false">Enter Key: Send Command</string>
     <string name="ui_text_040" formatted="false">Clear History &amp; Reset Engine Session</string>
     <string name="ui_text_041" formatted="false">◀</string>

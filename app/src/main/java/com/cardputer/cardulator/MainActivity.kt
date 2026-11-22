@@ -111,7 +111,6 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvSettingsSectionTheme: TextView
     private lateinit var tvSettingsSectionCustomTheme: TextView
     private lateinit var tvSettingsSectionDisplay: TextView
-    private lateinit var tvSettingsSectionEnterAction: TextView
 
     // Number Formatting Spinners
     private lateinit var spinnerFmtMode: Spinner
@@ -284,7 +283,6 @@ class MainActivity : AppCompatActivity() {
         tvSettingsSectionTheme = findViewById(R.id.tv_settings_section_theme)
         tvSettingsSectionCustomTheme = findViewById(R.id.tv_settings_section_custom_theme)
         tvSettingsSectionDisplay = findViewById(R.id.tv_settings_section_display)
-        tvSettingsSectionEnterAction = findViewById(R.id.tv_settings_section_enter_action)
 
         // Number Formatting Spinners
         spinnerFmtMode = findViewById(R.id.spinner_fmt_mode)
@@ -1213,21 +1211,14 @@ class MainActivity : AppCompatActivity() {
         tvSettingsSectionTheme.setTextColor(fgColor)
         tvSettingsSectionCustomTheme.setTextColor(fgColor)
         tvSettingsSectionDisplay.setTextColor(fgColor)
-        tvSettingsSectionEnterAction.setTextColor(fgColor)
 
-        rbThemeAuto.setTextColor(fgColor)
-        rbThemeDark.setTextColor(fgColor)
-        rbThemeLight.setTextColor(fgColor)
-
-        findViewById<CheckBox>(R.id.cb_toolbar_haptics).apply {
-            setTextColor(fgColor)
-            buttonTintList = ColorStateList.valueOf(ThemePalette.aqua)
+        val settingsTint = ColorStateList.valueOf(ThemePalette.aqua)
+        listOf(rbThemeAuto, rbThemeDark, rbThemeLight, cbHideWelcome, cbAutoPair,
+            cbDigitGrouping, btnSettingsEnterAction,
+            findViewById<CheckBox>(R.id.cb_toolbar_haptics)).forEach { control ->
+            control.setTextColor(fgColor)
+            control.buttonTintList = settingsTint
         }
-        cbHideWelcome.setTextColor(fgColor)
-        cbAutoPair.setTextColor(fgColor)
-        cbDigitGrouping.setTextColor(fgColor)
-        btnSettingsEnterAction.setTextColor(fgColor)
-        btnSettingsEnterAction.buttonTintList = ColorStateList.valueOf(ThemePalette.aqua)
 
         btnResetCustomTheme.setTextColor(fgColor)
         btnResetCustomTheme.backgroundTintList = ColorStateList.valueOf(bgSoftColor)

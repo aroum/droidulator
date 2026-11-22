@@ -335,16 +335,6 @@
                 android:textColor="@color/gruvbox_fg"
                 android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:id="@+id/tv_settings_section_enter_action"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="@string/ui_text_038"
-                android:textColor="@color/gruvbox_fg"
-                android:fontFamily="monospace"
-                android:textSize="14sp"
                 android:layout_marginBottom="4dp" />
 
             <CheckBox
