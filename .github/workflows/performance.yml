@@ -1,0 +1,69 @@
+name: Performance measurements
+
+on:
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: Iterations per scenario (1–10)
+        type: number
+        default: 3
+  workflow_call:
+    inputs:
+      iterations:
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+concurrency:
+  group: performance-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  benchmark:
+    name: Startup, history, editing and plots
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Verify report processing
+        run: python3 tests/test_performance_summary.py
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Measure on disposable emulator
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          PERFORMANCE_ITERATIONS: ${{ inputs.iterations }}
+        with:
+          api-level: 36
+          target: google_apis
+          arch: x86_64
+          profile: pixel_2
+          ram-size: 3072M
+          disable-animations: true
+          script: bash tools/run_android_performance.sh
+      - name: Publish readable measurements
+        if: always()
+        run: python3 tools/summarize_performance.py macrobenchmark/build/outputs performance-artifacts
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: performance-api36-${{ github.sha }}
+          path: |
+            performance-artifacts/
+            macrobenchmark/build/outputs/connected_android_test_additional_output/
+            macrobenchmark/build/outputs/androidTest-results/
+            macrobenchmark/build/reports/androidTests/
+          if-no-files-found: warn
+          retention-days: 30

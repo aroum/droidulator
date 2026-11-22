@@ -58,6 +58,15 @@ android {
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
         }
+        if (providers.gradleProperty("performanceBenchmarks").orNull == "true") {
+            create("benchmark") {
+                initWith(getByName("release"))
+                isDebuggable = false
+                signingConfig = signingConfigs.getByName("debug")
+                applicationIdSuffix = ".benchmark"
+                matchingFallbacks += listOf("release")
+            }
+        }
         create("ci") {
             isDebuggable = true
             val relStore = signingConfigs.getByName("release").storeFile
@@ -86,6 +95,9 @@ android {
 }
 
 dependencies {
+    if (providers.gradleProperty("performanceBenchmarks").orNull == "true") {
+        add("benchmarkImplementation", "androidx.profileinstaller:profileinstaller:1.4.1")
+    }
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")

@@ -127,14 +127,16 @@ class CalculatorSession : ViewModel() {
         commandRunning = true
         val scripts = userScripts.toList()
         compute({
-            val entry = if (scriptName == null) evaluateEntry(input) else
-                ReplDisplayItem("", nativeRunScript(input), false, isRawText = true)
-            if (!entry.isError) {
-                repository.save(scripts)
-                if (scriptName != null || input.startsWith("plot(") || input.startsWith("plot.") || input.startsWith("run("))
-                    repository.savePlot()
+            performanceTrace("Droidulator.command") {
+                val entry = if (scriptName == null) evaluateEntry(input) else
+                    ReplDisplayItem("", nativeRunScript(input), false, isRawText = true)
+                if (!entry.isError) {
+                    repository.save(scripts)
+                    if (scriptName != null || input.startsWith("plot(") || input.startsWith("plot.") || input.startsWith("run("))
+                        repository.savePlot()
+                }
+                entry
             }
-            entry
         }) { result ->
             commandRunning = false
             val entry = result.getOrElse {

@@ -15,6 +15,10 @@ on:
         description: Run the complete regression package without publishing APKs
         type: boolean
         default: false
+      performance_only:
+        description: Collect performance measurements and traces without publishing APKs
+        type: boolean
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -25,13 +29,19 @@ env:
 
 jobs:
   regression:
-    if: ${{ inputs.regression_only == true }}
+    if: ${{ inputs.regression_only == true && inputs.performance_only != true }}
     permissions:
       contents: read
     uses: ./.github/workflows/regression.yml
 
+  performance:
+    if: ${{ inputs.performance_only == true }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/performance.yml
+
   apk:
-    if: ${{ inputs.regression_only != true }}
+    if: ${{ inputs.regression_only != true && inputs.performance_only != true }}
     name: Generate APK
     runs-on: ubuntu-latest
     permissions:

@@ -6,6 +6,8 @@
 # Build directories
 /build
 /app/build
+/macrobenchmark/build
+/performance-artifacts/
 /build-test/
 /build_native/
 /captures

@@ -27,9 +27,11 @@ internal class ReplOutputController(
         val palette = ReplOutputRenderer.Palette.capture()
         val snapshotRenderer = renderer
         pending = session.compute({
-            nativeSetFormatSettings(mode, precision, grouping)
-            val formatted = ReplOutputRenderer.formatResults(items) { nativeFormatNumbers(it) }
-            snapshotRenderer.render(items, message, showWelcome, formatted, palette)
+            performanceTrace("Droidulator.replRebuild") {
+                nativeSetFormatSettings(mode, precision, grouping)
+                val formatted = ReplOutputRenderer.formatResults(items) { nativeFormatNumbers(it) }
+                snapshotRenderer.render(items, message, showWelcome, formatted, palette)
+            }
         }) { result ->
             if (closed || version != generation) return@compute
             pending = null

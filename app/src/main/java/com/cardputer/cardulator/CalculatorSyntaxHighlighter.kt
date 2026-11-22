@@ -142,6 +142,7 @@ internal class CalculatorSyntaxHighlighter {
 
     fun apply(editable: Editable) {
         if (!highlightingEditables.add(editable)) return
+        android.os.Trace.beginSection("Droidulator.highlight")
         try {
             val text = editable.toString()
             val highlighted = android.text.SpannableStringBuilder(text)
@@ -160,6 +161,7 @@ internal class CalculatorSyntaxHighlighter {
             }
             for (spans in existing.values) for (span in spans) editable.removeSpan(span)
         } finally {
+            android.os.Trace.endSection()
             highlightingEditables.remove(editable)
         }
     }

@@ -2,6 +2,7 @@ package com.cardputer.cardulator
 
 import androidx.activity.OnBackPressedCallback
 import androidx.core.widget.doAfterTextChanged
+import androidx.core.view.doOnPreDraw
 import android.app.Dialog
 import android.content.res.ColorStateList
 import android.graphics.Color
@@ -331,6 +332,7 @@ class MainActivity : AppCompatActivity() {
         applyTheme()
         rebuildReplOutput()
         mainRoot.visibility = View.VISIBLE
+        mainRoot.doOnPreDraw { reportFullyDrawn() }
         observeCommands()
         session.definitionDraft?.let { definitionController.show(it.title, it.expression, it.hint, it.tab) }
         session.formulaRunDraft?.let { formulaRunner.show(it.formula, it.arguments) }
