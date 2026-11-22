@@ -4,6 +4,7 @@ import android.os.Build
 import android.os.SystemClock
 import android.view.KeyEvent
 import androidx.benchmark.macro.CompilationMode
+import androidx.benchmark.macro.ExperimentalMetricApi
 import androidx.benchmark.macro.FrameTimingMetric
 import androidx.benchmark.macro.StartupMode
 import androidx.benchmark.macro.StartupTimingMetric
@@ -25,6 +26,7 @@ import org.junit.runner.RunWith
 
 /** End-to-end timings include automation overhead. App trace sections isolate app work. */
 @RunWith(AndroidJUnit4::class)
+@OptIn(ExperimentalMetricApi::class)
 class PerformanceBenchmark {
     @get:Rule val benchmark = MacrobenchmarkRule()
     private val arguments get() = InstrumentationRegistry.getArguments()
