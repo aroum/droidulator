@@ -13,12 +13,14 @@ import android.widget.TextView
 import androidx.lifecycle.ViewModelProvider
 import androidx.test.core.app.ActivityScenario
 import androidx.test.core.app.ApplicationProvider
+import androidx.test.espresso.Espresso.onData
 import androidx.test.espresso.Espresso.onView
 import androidx.test.espresso.Espresso.pressBack
 import androidx.test.espresso.action.ViewActions.click
 import androidx.test.espresso.action.ViewActions.closeSoftKeyboard
 import androidx.test.espresso.action.ViewActions.replaceText
 import androidx.test.espresso.assertion.ViewAssertions.matches
+import androidx.test.espresso.matcher.RootMatchers.isPlatformPopup
 import androidx.test.espresso.matcher.ViewMatchers.withId
 import androidx.test.espresso.matcher.ViewMatchers.withText
 import androidx.test.espresso.matcher.ViewMatchers.isCompletelyDisplayed
@@ -29,6 +31,7 @@ import java.io.File
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicReference
+import org.hamcrest.Matchers.anything
 import org.junit.After
 import org.junit.Assert.*
 import org.junit.Before
@@ -96,11 +99,29 @@ class AndroidRegressionTest {
         }
     }
 
+    private fun selectSpinner(id: Int, position: Int) {
+        if (activity { it.findViewById<Spinner>(id).selectedItemPosition } != position) {
+            onView(withId(id)).perform(click())
+            onData(anything()).inRoot(isPlatformPopup()).atPosition(position).perform(click())
+        }
+        InstrumentationRegistry.getInstrumentation().waitForIdleSync()
+        await("spinner $id selected item $position") {
+            activity { it.findViewById<Spinner>(id).selectedItemPosition == position }
+        }
+    }
+
     private fun selectTab(position: Int) {
-        activity {
-            val spinner = it.findViewById<Spinner>(R.id.spinner_tabs)
-            spinner.setSelection(position)
-            spinner.onItemSelectedListener?.onItemSelected(spinner, null, position, position.toLong())
+        selectSpinner(R.id.spinner_tabs, position)
+        await("selected tab content $position") {
+            activity { screen ->
+                val content = when (position) {
+                    0 -> R.id.scroll_view
+                    5 -> R.id.plot_view
+                    6 -> R.id.scroll_settings
+                    else -> R.id.scroll_items
+                }
+                screen.findViewById<View>(content).isShown
+            }
         }
     }
 
@@ -143,20 +164,10 @@ class AndroidRegressionTest {
     @Test fun precisionRoundTripAndRotationKeepFullResult() {
         submit("1/7")
         await("initial REPL result") { output().contains("0.142857") }
-        activity {
-            val spinnerMode = it.findViewById<Spinner>(R.id.spinner_fmt_mode)
-            val spinnerPrec = it.findViewById<Spinner>(R.id.spinner_fmt_prec)
-            spinnerMode.setSelection(2)
-            spinnerPrec.setSelection(0)
-            spinnerMode.onItemSelectedListener?.onItemSelected(spinnerMode, null, 2, 2L)
-            spinnerPrec.onItemSelectedListener?.onItemSelected(spinnerPrec, null, 0, 0L)
-        }
+        selectSpinner(R.id.spinner_fmt_mode, 2) // FIX: zero decimal places must display zero.
+        selectSpinner(R.id.spinner_fmt_prec, 0)
         await("zero precision") { output().contains("= 0\n") }
-        activity {
-            val spinnerPrec = it.findViewById<Spinner>(R.id.spinner_fmt_prec)
-            spinnerPrec.setSelection(12)
-            spinnerPrec.onItemSelectedListener?.onItemSelected(spinnerPrec, null, 12, 12L)
-        }
+        selectSpinner(R.id.spinner_fmt_prec, 12)
         await("restored precision") { output().contains("0.142857142857") }
         val previous = activity { session(it) }
         scenario.recreate()
@@ -319,6 +330,10 @@ class AndroidRegressionTest {
         await("cursor moved left") {
             activity { it.findViewById<EditText>(R.id.et_input).selectionStart == 4 }
         }
+        activity { it.findViewById<View>(R.id.btn_nav_right).performClick() }
+        await("cursor moved right") {
+            activity { it.findViewById<EditText>(R.id.et_input).selectionStart == 5 }
+        }
         activity {
             it.findViewById<View>(R.id.btn_clear).performClick()
         }
@@ -358,19 +373,34 @@ class AndroidRegressionTest {
         }
     }
 
-    @Test fun variablesAndConstantsCardsDisplay() {
+    private fun containsCard(screen: MainActivity, title: String, subtitle: String): Boolean {
+        val container = screen.findViewById<ViewGroup>(R.id.items_container)
+        fun hasText(view: View, expected: String): Boolean = view.isShown &&
+            ((view is TextView && view.text.toString().trim() == expected) ||
+                (view is ViewGroup && (0 until view.childCount).any { hasText(view.getChildAt(it), expected) }))
+        return (0 until container.childCount).any { index ->
+            val card = container.getChildAt(index)
+            hasText(card, title) && hasText(card, subtitle)
+        }
+    }
+
+    @Test fun variablesConstantsAndFormulasShowOwnCards() {
         submit("ui_var_sample=99.5")
+        submit("const UI_CONST_SAMPLE=123.25")
+        submit("ui_formula_sample(x)=x+7")
         selectTab(4)
-        await("variable card visible") {
-            activity { containsLabel(it.findViewById(R.id.items_container), "ui_var_sample") }
+        await("variable name and value in the same card") {
+            activity { containsCard(it, "ui_var_sample", "= 99.5") }
         }
         selectTab(3)
-        await("constants cards visible") {
-            activity { it.findViewById<ViewGroup>(R.id.items_container).childCount > 0 }
+        await("user constant name and value in the same card") {
+            activity { containsCard(it, "UI_CONST_SAMPLE", "= 123.25") }
         }
+        assertFalse(activity { containsLabel(it.findViewById(R.id.items_container), "ui_var_sample") })
         selectTab(2)
-        await("formulas tab displayed") {
-            activity { it.findViewById<View>(R.id.scroll_items).visibility == View.VISIBLE }
+        await("formula signature and expression in the same card") {
+            activity { containsCard(it, "ui_formula_sample(x)", "= x+7") }
         }
+        assertFalse(activity { containsLabel(it.findViewById(R.id.items_container), "UI_CONST_SAMPLE") })
     }
 }
