@@ -1,5 +1,5 @@
 /*
- * units_bridge.c  –  compiled as pure C so gnu-units/units.h K&R
+ * units_bridge.c  –  compiled as pure C so gnu-units-2.27/units.h K&R
  * declarations do not conflict with C++ system headers.
  * This file lives in the main cpp directory, not inside the gnu-units submodule.
  */
@@ -8,11 +8,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <pthread.h>
+#include <setjmp.h>
 
 /* Suppress old-style K&R re-declarations that live inside units.h. */
 #pragma clang diagnostic push
 #pragma clang diagnostic ignored "-Wincompatible-library-redeclaration"
-#include "gnu-units/units.h"
+#include "gnu-units-2.27/units.h"
 #pragma clang diagnostic pop
 
 #include "units_bridge.h"
@@ -22,39 +24,37 @@ extern int   completereduce(struct unittype *unit);
 extern int   readunits(char *file, FILE *errfile,
                        int *unitcount, int *prefixcount, int *funccount,
                        int depth);
-extern char *findunitsfile(void);
+extern char *findunitsfile(int print);
 extern int   unit2num(struct unittype *input);
 /* mylocale is normally set by units.c main(); init before readunits(). */
 extern char *mylocale;
 
 static int g_initialized = 0;
 
-int bridge_init(const char *units_dat_path)
+static int bridge_init_unlocked(const char *units_dat_path)
 {
     if (g_initialized) return 0;
 
-    if (!mylocale) {
-        mylocale = getenv("LOCALE");
-        if (!mylocale) mylocale = "en_US";
-    }
+    mylocale = "en_US";
 
     int ucount = 0, pcount = 0, fcount = 0;
     int err;
     if (units_dat_path) {
         err = readunits((char *)units_dat_path, stderr, &ucount, &pcount, &fcount, 0);
     } else {
-        char *path = findunitsfile();
+        char *path = findunitsfile(0);
+        if (!path) return E_FILE;
         err = readunits(path, stderr, &ucount, &pcount, &fcount, 0);
     }
 
-    if (err == 0 || err == E_UNKNOWNUNIT) {
+    if (err == 0) {
         g_initialized = 1;
         return 0;
     }
     return err;
 }
 
-int bridge_convert(double      value,
+static int bridge_convert_unlocked(double      value,
                    const char *unit_a,
                    const char *unit_b,
                    double     *out_value,
@@ -70,6 +70,11 @@ int bridge_convert(double      value,
 
     if (out_err     && err_len    > 0) out_err[0]    = '\0';
     if (out_si_unit && si_unit_len > 0) out_si_unit[0] = '\0';
+
+    if (!unit_a || strlen(unit_a) >= 256 || (unit_b && strlen(unit_b) >= 256)) {
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Unit expression is too long");
+        return 1;
+    }
 
     initializeunit(&have_unit);
     initializeunit(&want_unit);
@@ -151,12 +156,18 @@ int bridge_convert(double      value,
         return 3;
     }
 
+    err = completereduce(&diff);
+    if (err) {
+        if (out_err) snprintf(out_err, (size_t)err_len, "Reduce error");
+        freeunit(&have_unit); freeunit(&want_unit); freeunit(&diff);
+        return 3;
+    }
     double ratio = diff.factor;
     err = unit2num(&diff);   /* also calls completereduce; frees diff on success */
     if (err) {
         if (out_err) snprintf(out_err, (size_t)err_len,
                               "Incompatible units: %s and %s", unit_a, unit_b);
-        freeunit(&have_unit); freeunit(&want_unit);
+        freeunit(&have_unit); freeunit(&want_unit); freeunit(&diff);
         return 3;
     }
 
@@ -164,3 +175,68 @@ int bridge_convert(double      value,
     freeunit(&have_unit); freeunit(&want_unit);
     return 0;
 }
+
+/* GNU Units uses shared parser state. Serialize every access through the bridge.
+ * Its CLI-style exit() is redirected here. The jump stays within C frames;
+ * after a fatal error the engine is disabled because its state may be partial. */
+static pthread_mutex_t g_bridge_mutex = PTHREAD_MUTEX_INITIALIZER;
+static jmp_buf g_bridge_recovery;
+static int g_bridge_active = 0;
+static int g_bridge_failed = 0;
+
+_Noreturn void gnu_units_abort(int status) {
+    (void)status;
+    if (g_bridge_active) longjmp(g_bridge_recovery, 1);
+    abort(); /* A call outside the bridge violates the integration contract. */
+}
+
+int bridge_init(const char *path) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    if (g_bridge_failed) { pthread_mutex_unlock(&g_bridge_mutex); return E_MEMORY; }
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        pthread_mutex_unlock(&g_bridge_mutex);
+        return E_MEMORY;
+    }
+    int result = bridge_init_unlocked(path);
+    if (result != 0) g_bridge_failed = 1;
+    g_bridge_active = 0;
+    pthread_mutex_unlock(&g_bridge_mutex);
+    return result;
+}
+
+int bridge_convert(double value, const char *unit_a, const char *unit_b,
+                   double *out_value, char *out_si_unit, int si_unit_len,
+                   char *out_err, int err_len) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    if (g_bridge_failed) {
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Units engine unavailable after a fatal error");
+        pthread_mutex_unlock(&g_bridge_mutex); return 4;
+    }
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        if (out_err && err_len > 0) snprintf(out_err, (size_t)err_len, "Units engine encountered a fatal error");
+        pthread_mutex_unlock(&g_bridge_mutex); return 4;
+    }
+    int result = bridge_convert_unlocked(value, unit_a, unit_b, out_value,
+                                         out_si_unit, si_unit_len, out_err, err_len);
+    g_bridge_active = 0;
+    pthread_mutex_unlock(&g_bridge_mutex);
+    return result;
+}
+
+#ifdef DROIDULATOR_TESTING
+/* Used only by host tests to exercise the fatal-error escape path. */
+int bridge_test_fatal(void) {
+    pthread_mutex_lock(&g_bridge_mutex);
+    g_bridge_active = 1;
+    if (setjmp(g_bridge_recovery)) {
+        g_bridge_active = 0; g_bridge_failed = 1;
+        pthread_mutex_unlock(&g_bridge_mutex);
+        return 1;
+    }
+    gnu_units_abort(1);
+}
+#endif

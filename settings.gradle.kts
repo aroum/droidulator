@@ -15,3 +15,6 @@ dependencyResolutionManagement {
 
 rootProject.name = "droidulator"
 include(":app")
+if (providers.gradleProperty("performanceBenchmarks").orNull == "true") {
+    include(":macrobenchmark")
+}

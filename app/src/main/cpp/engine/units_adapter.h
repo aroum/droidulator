@@ -4,6 +4,7 @@
 #include <sstream>
 #include <cmath>
 #include <algorithm>
+#include <cctype>
 
 #ifdef __ANDROID__
 #include <android/log.h>
@@ -17,6 +18,7 @@
 
 struct ConvResult {
     bool        success  = false;
+    bool        textOnly = false;
     double      value    = 0.0;
     std::string unitStr;
     std::string errorMsg;
@@ -44,7 +46,7 @@ inline ConvResult handleConv(double value,
     }
 
     auto toLower = [](std::string s) {
-        std::transform(s.begin(), s.end(), s.begin(), ::tolower);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
         return s;
     };
 
@@ -55,7 +57,7 @@ inline ConvResult handleConv(double value,
     auto parseSMD3 = [](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s;
@@ -66,9 +68,9 @@ inline ConvResult handleConv(double value,
                 // Notation like 2R2 -> 2.2, 4R7 -> 4.7, 0R1 -> 0.1
                 temp[rPos] = '.';
             }
-            try { ohms = std::stod(temp); return true; } catch(...) { return false; }
+            try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             ohms = base * std::pow(10.0, exp);
@@ -80,7 +82,7 @@ inline ConvResult handleConv(double value,
     auto parseSMD4 = [](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s;
@@ -89,9 +91,9 @@ inline ConvResult handleConv(double value,
             } else {
                 temp[rPos] = '.';
             }
-            try { ohms = std::stod(temp); return true; } catch(...) { return false; }
+            try { size_t used = 0; ohms = std::stod(temp, &used); return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 4 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2]) && std::isdigit(s[3])) {
+        if (s.size() == 4 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2])) && std::isdigit(static_cast<unsigned char>(s[3]))) {
             int base = (s[0] - '0') * 100 + (s[1] - '0') * 10 + (s[2] - '0');
             int exp = s[3] - '0';
             ohms = base * std::pow(10.0, exp);
@@ -117,8 +119,8 @@ inline ConvResult handleConv(double value,
     auto parseEIA96 = [&](const std::string& code, double& ohms) -> bool {
         std::string s = code;
         if (s.size() != 3) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
-        if (!std::isdigit(s[0]) || !std::isdigit(s[1])) return false;
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
+        if (!std::isdigit(static_cast<unsigned char>(s[0])) || !std::isdigit(static_cast<unsigned char>(s[1]))) return false;
         int codeNum = (s[0] - '0') * 10 + (s[1] - '0');
         if (codeNum < 1 || codeNum > 96) return false;
         int base = EIA96_TABLE[codeNum];
@@ -142,8 +144,12 @@ inline ConvResult handleConv(double value,
     };
 
     auto ohmsToSMD3 = [](double ohms) -> std::string {
-        if (ohms < 0) return "";
-        if (ohms < 10) {
+        if (!std::isfinite(ohms) || ohms < 0.01 || ohms >= 1e11) return "";
+        if (ohms < 0.1) {
+            int n = static_cast<int>(std::round(ohms * 100));
+            char b[8]; snprintf(b, sizeof(b), "R%02d", n); return b;
+        }
+        if (ohms < 9.95) {
             char b[16]; snprintf(b, sizeof(b), "%.1f", ohms);
             std::string s(b); size_t p = s.find('.'); if (p != std::string::npos) s[p] = 'R';
             return s;
@@ -152,31 +158,39 @@ inline ConvResult handleConv(double value,
         while (temp >= 100.0 && exp < 9) { temp /= 10.0; exp++; }
         int val = static_cast<int>(std::round(temp));
         if (val >= 100) { val /= 10; exp++; }
-        if (val < 10) return "";
+        if (val < 10 || exp > 9) return "";
         char b[16]; snprintf(b, sizeof(b), "%02d%d", val, exp);
         return std::string(b);
     };
 
     auto ohmsToSMD4 = [](double ohms) -> std::string {
-        if (ohms < 0) return "";
-        if (ohms < 100) {
+        if (!std::isfinite(ohms) || ohms < 0.001 || ohms >= 1e12) return "";
+        if (ohms < 0.1) {
+            int n = static_cast<int>(std::round(ohms * 1000));
+            char b[8]; snprintf(b, sizeof(b), "R%03d", n); return b;
+        }
+        if (ohms < 9.995) {
             char b[16]; snprintf(b, sizeof(b), "%.2f", ohms);
             std::string s(b); size_t p = s.find('.'); if (p != std::string::npos) s[p] = 'R';
             if (s.size() > 4 && s[0] == '0') s = s.substr(1);
             return s;
+        }
+        if (ohms < 99.95) {
+            char b[16]; snprintf(b, sizeof(b), "%.1f", ohms);
+            std::string s(b); s[s.find('.')] = 'R'; return s;
         }
         double temp = ohms; int exp = 0;
         while (temp >= 1000.0 && exp < 9) { temp /= 10.0; exp++; }
         while (temp < 100.0 && exp > 0) { temp *= 10.0; exp--; }
         int val = static_cast<int>(std::round(temp));
         if (val >= 1000) { val /= 10; exp++; }
-        if (val < 100) return "";
+        if (val < 100 || exp > 9) return "";
         char b[16]; snprintf(b, sizeof(b), "%03d%d", val, exp);
         return std::string(b);
     };
 
     auto ohmsToEIA96 = [&](double ohms) -> std::string {
-        if (ohms <= 0) return "";
+        if (!std::isfinite(ohms) || ohms < 0.1 || ohms > 976.0 * 1e5) return "";
         static const struct { char c; double m; int exp; } mults[] = {
             {'Z', 0.001, -3}, {'Y', 0.01, -2}, {'X', 0.1, -1}, {'A', 1.0, 0},
             {'B', 10.0, 1}, {'C', 100.0, 2}, {'D', 1000.0, 3}, {'E', 10000.0, 4}, {'F', 100000.0, 5}
@@ -224,7 +238,7 @@ inline ConvResult handleConv(double value,
     auto parseCapCode = [](const std::string& code, double& farads) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         
         // Check for p, n, u RKM notation (e.g., 4p7, 10n, 1u5)
         for (char unitChar : {'P', 'N', 'U'}) {
@@ -232,14 +246,16 @@ inline ConvResult handleConv(double value,
             if (pos != std::string::npos) {
                 std::string temp = s; temp[pos] = '.';
                 try {
-                    double val = std::stod(temp);
+                    size_t used = 0;
+                    double val = std::stod(temp, &used);
+                    if (used != temp.size()) return false;
                     double mult = (unitChar == 'P') ? 1e-12 : (unitChar == 'N') ? 1e-9 : 1e-6;
                     farads = val * mult;
                     return true;
                 } catch(...) { return false; }
             }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             double pF = base * std::pow(10.0, exp);
@@ -252,20 +268,20 @@ inline ConvResult handleConv(double value,
     auto parseIndCode = [](const std::string& code, double& henries) -> bool {
         std::string s = code;
         if (s.empty()) return false;
-        std::transform(s.begin(), s.end(), s.begin(), ::toupper);
+        std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return static_cast<char>(std::toupper(c)); });
         
         // RKM notation for inductors in uH or nH (e.g. 4R7 = 4.7 uH, 10n = 10 nH)
         size_t rPos = s.find('R');
         if (rPos != std::string::npos) {
             std::string temp = s; temp[rPos] = '.';
-            try { henries = std::stod(temp) * 1e-6; return true; } catch(...) { return false; }
+            try { size_t used = 0; henries = std::stod(temp, &used) * 1e-6; return used == temp.size(); } catch(...) { return false; }
         }
         size_t nPos = s.find('N');
         if (nPos != std::string::npos) {
             std::string temp = s; temp[nPos] = '.';
-            try { henries = std::stod(temp) * 1e-9; return true; } catch(...) { return false; }
+            try { size_t used = 0; henries = std::stod(temp, &used) * 1e-9; return used == temp.size(); } catch(...) { return false; }
         }
-        if (s.size() == 3 && std::isdigit(s[0]) && std::isdigit(s[1]) && std::isdigit(s[2])) {
+        if (s.size() == 3 && std::isdigit(static_cast<unsigned char>(s[0])) && std::isdigit(static_cast<unsigned char>(s[1])) && std::isdigit(static_cast<unsigned char>(s[2]))) {
             int base = (s[0] - '0') * 10 + (s[1] - '0');
             int exp = s[2] - '0';
             double uH = base * std::pow(10.0, exp);
@@ -292,15 +308,18 @@ inline ConvResult handleConv(double value,
 
     // Target code requests when value is numeric or first arg is numeric string (e.g., conv(200, "smd3") or conv(200, "ohm", "smd3"))
     double targetVal = (isUnitANumeric ? numericVal : value);
-    std::string targetCodeFormat = lb.empty() ? (isUnitANumeric ? la : "") : lb;
+    std::string targetCodeFormat = lb.empty() ? la : lb;
     if (targetVal > 0 && (targetCodeFormat == "smd3" || targetCodeFormat == "smd4" || targetCodeFormat == "eia96" || targetCodeFormat == "eia-96")) {
         if (targetCodeFormat == "smd3") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD3(targetVal); return res;
+            res.unitStr = ohmsToSMD3(targetVal);
         } else if (targetCodeFormat == "smd4") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD4(targetVal); return res;
+            res.unitStr = ohmsToSMD4(targetVal);
         } else if (targetCodeFormat == "eia96" || targetCodeFormat == "eia-96") {
-            res.success = true; res.value = 0; res.unitStr = ohmsToEIA96(targetVal); return res;
+            res.unitStr = ohmsToEIA96(targetVal);
         }
+        res.success = !res.unitStr.empty(); res.textOnly = res.success;
+        if (!res.success) res.errorMsg = "Value is outside the representable code range";
+        return res;
     }
 
     // String code parsing if unit_a is a code string (e.g., conv("01C", "ohm") or conv("104", "farad"))
@@ -334,11 +353,11 @@ inline ConvResult handleConv(double value,
         };
 
         if (lb == "smd3" && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD3(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD3(parsedResOhms); return res;
         } else if (lb == "smd4" && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToSMD4(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToSMD4(parsedResOhms); return res;
         } else if ((lb == "eia96" || lb == "eia-96") && parseInputCode(unit_a, parsedResOhms)) {
-            res.success = true; res.value = 0; res.unitStr = ohmsToEIA96(parsedResOhms); return res;
+            res.success = true; res.value = 0; res.textOnly = true; res.unitStr = ohmsToEIA96(parsedResOhms); return res;
         } else if (lb == "ohm" || lb == "ohms" || lb.empty()) {
             if (parseInputCode(unit_a, parsedResOhms)) {
                 res.success = true; res.value = parsedResOhms; res.unitStr = lb.empty() ? "ohm" : unit_b; return res;
@@ -490,132 +509,41 @@ inline ConvResult handleConv(double value,
         {"dbu",  "v",  0.774596669, true}   // sqrt(0.6 mW in 600 ohm) ≈ 0.7746 V
     };
 
+    auto linearFactor = [](const std::string& unit, bool voltage, double& factor) {
+        const std::string base = voltage ? "V" : "W";
+        if (unit == base || unit == (voltage ? "volt" : "watt")) { factor = 1; return true; }
+        if (unit == "m" + base) { factor = 1e-3; return true; }
+        if (unit == "u" + base || unit == "µ" + base) { factor = 1e-6; return true; }
+        if (unit == "k" + base) { factor = 1e3; return true; }
+        if (unit == "M" + base) { factor = 1e6; return true; }
+        return false;
+    };
     for (const auto& ref : dbRefs) {
         double factor = ref.isVoltage ? 20.0 : 10.0;
-        // From dBx to target unit (or SI)
-        if (la == ref.name && (lb == ref.targetUnit || lb.empty())) {
+        const double referenceSI = ref.refVal * (ref.targetUnit == "mw" || ref.targetUnit == "mv" ? 1e-3 : ref.targetUnit == "uv" ? 1e-6 : 1.0);
+        double unitFactor = 0;
+        if (la == ref.name && (lb.empty() || linearFactor(unit_b, ref.isVoltage, unitFactor))) {
             res.success = true;
-            res.value = ref.refVal * std::pow(10.0, value / factor);
-            res.unitStr = ref.targetUnit;
+            res.value = (lb.empty() ? ref.refVal : referenceSI / unitFactor) * std::pow(10.0, value / factor);
+            res.unitStr = lb.empty() ? ref.targetUnit : unit_b;
             return res;
         }
-        // From target unit to dBx
-        if (la == ref.targetUnit && lb == ref.name) {
+        if (lb == ref.name && linearFactor(unit_a, ref.isVoltage, unitFactor)) {
             if (value <= 0.0) {
                 res.errorMsg = "Domain Error: dB conversion requires value > 0";
                 return res;
             }
             res.success = true;
-            res.value = factor * std::log10(value / ref.refVal);
+            res.value = factor * std::log10(value * unitFactor / referenceSI);
             res.unitStr = unit_b;
             return res;
         }
     }
 
     // --- 2.5 Built-in Standard Physical Unit Conversions (Offline / Flash fallback) ---
-    {
-        // Length (base: meter)
-        auto getLengthFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "m" || u == "meter" || u == "meters") { factor = 1.0; canonical = "m"; return true; }
-            if (u == "mm") { factor = 1e-3; canonical = "mm"; return true; }
-            if (u == "cm") { factor = 1e-2; canonical = "cm"; return true; }
-            if (u == "km") { factor = 1e3; canonical = "km"; return true; }
-            if (u == "in" || u == "inch" || u == "inches") { factor = 0.0254; canonical = "inch"; return true; }
-            if (u == "ft" || u == "foot" || u == "feet") { factor = 0.3048; canonical = "ft"; return true; }
-            if (u == "yd" || u == "yard" || u == "yards") { factor = 0.9144; canonical = "yd"; return true; }
-            if (u == "mi" || u == "mile" || u == "miles") { factor = 1609.344; canonical = "mile"; return true; }
-            if (u == "nauticalmile" || u == "nmi") { factor = 1852.0; canonical = "nmi"; return true; }
-            if (u == "angstrom") { factor = 1e-10; canonical = "angstrom"; return true; }
-            if (u == "au") { factor = 149597870700.0; canonical = "au"; return true; }
-            return false;
-        };
-
-        // Mass (base: kg)
-        auto getMassFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "kg" || u == "kilogram" || u == "kilograms") { factor = 1.0; canonical = "kg"; return true; }
-            if (u == "g" || u == "gram" || u == "grams") { factor = 1e-3; canonical = "g"; return true; }
-            if (u == "mg") { factor = 1e-6; canonical = "mg"; return true; }
-            if (u == "ug") { factor = 1e-9; canonical = "ug"; return true; }
-            if (u == "lb" || u == "lbs" || u == "pound" || u == "pounds") { factor = 0.45359237; canonical = "lb"; return true; }
-            if (u == "oz" || u == "ounce" || u == "ounces") { factor = 0.028349523125; canonical = "oz"; return true; }
-            if (u == "ton" || u == "tonne" || u == "tonnes") { factor = 1000.0; canonical = "ton"; return true; }
-            if (u == "stone") { factor = 6.35029318; canonical = "stone"; return true; }
-            if (u == "carat") { factor = 0.0002; canonical = "carat"; return true; }
-            return false;
-        };
-
-        // Time (base: second)
-        auto getTimeFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "s" || u == "sec" || u == "second" || u == "seconds") { factor = 1.0; canonical = "s"; return true; }
-            if (u == "ms") { factor = 1e-3; canonical = "ms"; return true; }
-            if (u == "us") { factor = 1e-6; canonical = "us"; return true; }
-            if (u == "ns") { factor = 1e-9; canonical = "ns"; return true; }
-            if (u == "min" || u == "minute" || u == "minutes") { factor = 60.0; canonical = "min"; return true; }
-            if (u == "hr" || u == "hour" || u == "hours") { factor = 3600.0; canonical = "hr"; return true; }
-            if (u == "day" || u == "days") { factor = 86400.0; canonical = "day"; return true; }
-            if (u == "week" || u == "weeks") { factor = 604800.0; canonical = "week"; return true; }
-            if (u == "year" || u == "years") { factor = 31557600.0; canonical = "year"; return true; }
-            return false;
-        };
-
-        // Pressure (base: Pascal)
-        auto getPressureFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "pa" || u == "pascal") { factor = 1.0; canonical = "Pa"; return true; }
-            if (u == "kpa") { factor = 1e3; canonical = "kPa"; return true; }
-            if (u == "mpa") { factor = 1e6; canonical = "MPa"; return true; }
-            if (u == "gpa") { factor = 1e9; canonical = "GPa"; return true; }
-            if (u == "bar") { factor = 1e5; canonical = "bar"; return true; }
-            if (u == "mbar") { factor = 100.0; canonical = "mbar"; return true; }
-            if (u == "atm") { factor = 101325.0; canonical = "atm"; return true; }
-            if (u == "torr" || u == "mmhg") { factor = 101325.0 / 760.0; canonical = (u == "mmhg" ? "mmHg" : "torr"); return true; }
-            if (u == "psi") { factor = 6894.757293168; canonical = "psi"; return true; }
-            if (u == "psf") { factor = 47.88025898; canonical = "psf"; return true; }
-            if (u == "inhg") { factor = 3386.38866667; canonical = "inHg"; return true; }
-            return false;
-        };
-
-        // Volume (base: liter)
-        auto getVolumeFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "l" || u == "liter" || u == "liters" || u == "litre" || u == "litres") { factor = 1.0; canonical = "l"; return true; }
-            if (u == "ml") { factor = 1e-3; canonical = "ml"; return true; }
-            if (u == "dl") { factor = 1e-1; canonical = "dl"; return true; }
-            if (u == "cl") { factor = 1e-2; canonical = "cl"; return true; }
-            if (u == "m^3" || u == "m3") { factor = 1000.0; canonical = "m^3"; return true; }
-            if (u == "cm^3" || u == "cm3") { factor = 1e-3; canonical = "cm^3"; return true; }
-            if (u == "gal" || u == "gallon" || u == "gallons") { factor = 3.785411784; canonical = "gal"; return true; }
-            if (u == "quart" || u == "quarts") { factor = 0.946352946; canonical = "quart"; return true; }
-            if (u == "pint" || u == "pints") { factor = 0.473176473; canonical = "pint"; return true; }
-            if (u == "cup" || u == "cups") { factor = 0.2365882365; canonical = "cup"; return true; }
-            if (u == "floz") { factor = 0.0295735295625; canonical = "floz"; return true; }
-            if (u == "tbsp") { factor = 0.01478676478125; canonical = "tbsp"; return true; }
-            if (u == "tsp") { factor = 0.00492892159375; canonical = "tsp"; return true; }
-            if (u == "barrel") { factor = 158.987294928; canonical = "barrel"; return true; }
-            return false;
-        };
-
-        // Speed (base: m/s)
-        auto getSpeedFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "m/s" || u == "mps") { factor = 1.0; canonical = "m/s"; return true; }
-            if (u == "km/h" || u == "km/hr" || u == "kph") { factor = 1000.0 / 3600.0; canonical = "km/h"; return true; }
-            if (u == "mph" || u == "mi/h" || u == "mile/h") { factor = 1609.344 / 3600.0; canonical = "mph"; return true; }
-            if (u == "knot" || u == "knots" || u == "kt") { factor = 1852.0 / 3600.0; canonical = "knot"; return true; }
-            if (u == "mach") { factor = 331.46; canonical = "mach"; return true; }
-            if (u == "ft/s" || u == "fps") { factor = 0.3048; canonical = "ft/s"; return true; }
-            return false;
-        };
-
-        // Acceleration (base: m/s^2)
-        auto getAccelerationFactor = [](const std::string& u, double& factor, std::string& canonical) -> bool {
-            if (u == "m/s^2" || u == "m/s2" || u == "m / s^2" || u == "m / s2") { factor = 1.0; canonical = "m/s^2"; return true; }
-            if (u == "cm/s^2" || u == "cm/s2" || u == "cm / s^2" || u == "cm / s2" || u == "gal") { factor = 0.01; canonical = "cm/s^2"; return true; }
-            if (u == "km/s^2" || u == "km/s2" || u == "km / s^2" || u == "km / s2") { factor = 1000.0; canonical = "km/s^2"; return true; }
-            if (u == "km/h^2" || u == "km/h2" || u == "km/hr^2" || u == "km/hr2" || u == "km / h^2" || u == "km / h2") { factor = 1000.0 / (3600.0 * 3600.0); canonical = "km/h^2"; return true; }
-            if (u == "ft/s^2" || u == "ft/s2" || u == "ft / s^2" || u == "ft / s2" || u == "fps2") { factor = 0.3048; canonical = "ft/s^2"; return true; }
-            if (u == "in/s^2" || u == "in/s2" || u == "in / s^2" || u == "in / s2") { factor = 0.0254; canonical = "in/s^2"; return true; }
-            if (u == "g0" || u == "gee" || u == "gravity" || u == "g") { factor = 9.80665; canonical = (u == "g0" || u == "gee" || u == "g" ? u : "g0"); return true; }
-            return false;
-        };
-
+    if ((unit_a == la && unit_b == lb) ||
+        ((la == "degc" || la == "degf" || la == "degr" || la == "k" || la == "tempc" || la == "tempf" || la == "tempk" || la == "tempr" || la == "celsius" || la == "fahrenheit" || la == "kelvin" || la == "rankine") &&
+         (lb.empty() || lb == "degc" || lb == "degf" || lb == "degr" || lb == "k" || lb == "tempc" || lb == "tempf" || lb == "tempk" || lb == "tempr" || lb == "celsius" || lb == "fahrenheit" || lb == "kelvin" || lb == "rankine"))) {
         // Temperature (special conversion)
         auto isTemp = [](const std::string& u) {
             return u == "degc" || u == "tempc" || u == "celsius" ||
@@ -648,109 +576,13 @@ inline ConvResult handleConv(double value,
             return res;
         }
 
-        // Check standard dimension groups
-        double f_a = 0.0, f_b = 0.0;
-        std::string can_a, can_b;
-        if (getLengthFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "m";
-                return res;
-            } else if (getLengthFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getMassFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "kg";
-                return res;
-            } else if (getMassFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getTimeFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "s";
-                return res;
-            } else if (getTimeFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getPressureFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "Pa";
-                return res;
-            } else if (getPressureFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getVolumeFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "l";
-                return res;
-            } else if (getVolumeFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getSpeedFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "m/s";
-                return res;
-            } else if (getSpeedFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
-        if (getAccelerationFactor(la, f_a, can_a)) {
-            if (lb.empty()) {
-                res.success = true;
-                res.value = value * f_a;
-                res.unitStr = "m/s^2";
-                return res;
-            } else if (getAccelerationFactor(lb, f_b, can_b)) {
-                res.success = true;
-                res.value = (value * f_a) / f_b;
-                res.unitStr = unit_b.empty() ? can_b : unit_b;
-                return res;
-            }
-        }
     }
 
     // --- 3. Fallback to GNU Units bridge ---
-    static bool s_init = false;
-    if (!s_init) {
-        const char *dat = units_dat.empty() ? nullptr : units_dat.c_str();
-        bridge_init(dat);
-        s_init = true;
-        UNITS_LOGI("GNU Units bridge initialised");
+    const char *dat = units_dat.empty() ? nullptr : units_dat.c_str();
+    if (bridge_init(dat) != 0) {
+        res.errorMsg = "Unable to initialize the units database";
+        return res;
     }
 
     // Normalize commonly typed case variations for GNU Units database
@@ -758,17 +590,18 @@ inline ConvResult handleConv(double value,
         std::string low = toLower(u);
         if (low == "mmhg") return "mmHg";
         if (low == "inhg") return "inHg";
-        if (low == "pa")   return "Pa";
-        if (low == "kpa")  return "kPa";
-        if (low == "mpa")  return "MPa";
-        if (low == "gpa")  return "GPa";
+        if (u == "pa")   return "Pa";
+        if (u == "kpa")  return "kPa";
+        if (u == "gpa")  return "GPa";
+        if (u == "psf")  return "lbf / ft^2";
+        if (u == "mps")  return "m / s";
+        if (u == "fps2") return "ft / s^2";
+        if (u == "kt") return "knot";
+        if (u == "mi/h" || u == "mile/h") return "mile / hr";
         if (low == "mbar") return "mbar";
         if (low == "hz")   return "Hz";
         if (low == "khz")  return "kHz";
-        if (low == "mhz")  return "MHz";
-        if (low == "ghz")  return "GHz";
         if (low == "g0" || low == "gee") return "gravity";
-        if (low == "gal")  return "Gal";
         if (low == "km/h^2" || low == "km/h2") return "km / hr^2";
         if (low == "km/hr2") return "km / hr^2";
         if (low == "km/h" || low == "kph") return "km / hr";
@@ -779,8 +612,15 @@ inline ConvResult handleConv(double value,
         return u;
     };
 
-    std::string norm_unit_a = normalizeGnuUnit(unit_a);
-    std::string norm_unit_b = normalizeGnuUnit(unit_b);
+    auto acceleration = [](std::string u) {
+        u.erase(std::remove_if(u.begin(), u.end(), [](unsigned char c) { return std::isspace(c); }), u.end());
+        return u.find("/s^2") != std::string::npos || u.find("/s2") != std::string::npos ||
+            u.find("/h^2") != std::string::npos || u.find("/h2") != std::string::npos ||
+            u.find("/hr^2") != std::string::npos || u.find("/hr2") != std::string::npos ||
+            u == "fps2" || u == "g0" || u == "gee" || u == "gravity" || u == "Gal";
+    };
+    std::string norm_unit_a = unit_a == "g" && acceleration(unit_b) ? "gravity" : normalizeGnuUnit(unit_a);
+    std::string norm_unit_b = unit_b == "g" && acceleration(unit_a) ? "gravity" : normalizeGnuUnit(unit_b);
     const char *want = norm_unit_b.empty() ? nullptr : norm_unit_b.c_str();
 
     double     out_value = 0.0;

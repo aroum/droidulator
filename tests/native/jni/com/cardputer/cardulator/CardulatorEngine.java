@@ -1,0 +1,182 @@
+package com.cardputer.cardulator;
+public class CardulatorEngine {
+
+  private final long nativeHandle = nativeCreate();
+  native long nativeCreate();
+  native void nativeDestroy(long handle);
+  native void nativeInit(); static native void nativeInitUnits(String path); native String nativeEvaluate(String s);
+  native String[] nativeEvaluateDetailed(String s);
+  native void nativeRegisterScript(String name, String code); native void nativeUnregisterScript(String name);
+  native double nativeGetLastNumericVal();
+  native NativeValue[] nativeValues(boolean constants);
+  native NativeFormula[] nativeFormulas();
+  native NativePlotLine[] nativeGetPlotLines(); native double[] nativeGetPlotLimits();
+  native String[][] nativeGetScriptFunctions(); native void nativeRestoreScriptFunction(String[] fields);
+  native void nativeRestorePlot(NativePlotLine[] lines, double[] limits);
+  native void nativeRestoreScalar(String name,double value,boolean constant); native void nativeRestoreArray(String name,double[] vals);
+  native String nativeFormatNumber(double value);
+  native String[] nativeFormatNumbers(double[] values);
+  native double[] nativeLastArray();
+  native void nativeSetFormatSettings(int mode, int precision, boolean grouping);
+  public static void main(String[] args) {
+    System.load(args[0]);
+    CardulatorEngine e = new CardulatorEngine(); e.nativeInit(); e.nativeInitUnits(args[1]);
+    double[] formattingValues = {0, -0.125, 1.0/3, 1234567.89, 1e-15, Double.NaN, Double.POSITIVE_INFINITY};
+    for (int mode=0; mode<3; mode++) for (int precision=0; precision<=12; precision++) {
+      e.nativeSetFormatSettings(mode, precision, true);
+      String[] formatted = e.nativeFormatNumbers(formattingValues);
+      if (formatted.length != formattingValues.length) throw new AssertionError("batch formatting length");
+      for (int i=0; i<formatted.length; i++)
+        if (!formatted[i].equals(e.nativeFormatNumber(formattingValues[i])))
+          throw new AssertionError("batch formatting mismatch");
+    }
+    if (e.nativeFormatNumbers(new double[0]).length != 0) throw new AssertionError("empty formatting batch");
+    try { e.nativeFormatNumbers(null); throw new AssertionError("null formatting batch accepted"); }
+    catch (IllegalArgumentException expected) { }
+    e.nativeSetFormatSettings(0, 12, false);
+    CardulatorEngine second = new CardulatorEngine();
+    second.nativeInit();
+    e.nativeEvaluate("session_value=42");
+    second.nativeEvaluate("session_value=17");
+    e.nativeEvaluate("session_value");
+    second.nativeEvaluate("session_value");
+    if (e.nativeGetLastNumericVal() != 42 || second.nativeGetLastNumericVal() != 17)
+      throw new AssertionError("JNI sessions share state");
+    second.nativeDestroy(second.nativeHandle);
+    e.nativeEvaluate("[1,2]+[3,4]");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{4,6})) throw new AssertionError("AST array output");
+    e.nativeEvaluate("[]");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[0])) throw new AssertionError("empty AST array output");
+    e.nativeEvaluate("sum([1,2])");
+    if (e.nativeLastArray() != null || e.nativeGetLastNumericVal() != 3) throw new AssertionError("scalar after array output");
+    e.nativeEvaluate("jni_typed_mix(a,b)=a+b");
+    e.nativeEvaluate("jni_typed_mix([1,2],3)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{4,5})) throw new AssertionError("typed formula arguments");
+    e.nativeEvaluate("fn jni_typed_mutate(a,b) { a[1]=a[1]+b; return a }");
+    e.nativeEvaluate("jni_typed_mutate([1,2],5)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{6,2})) throw new AssertionError("typed script arguments");
+    for (String invalid : new String[]{"[1,]", "1:0:3", "if([1],2,3)", "unknown_call(1)", "jni_typed_mix([1,2],[3])"}) {
+      if (!e.nativeEvaluateDetailed(invalid)[0].equals("error")) throw new AssertionError("accepted invalid AST: " + invalid);
+      e.nativeEvaluate("2+2");
+      if (e.nativeGetLastNumericVal() != 4 || e.nativeLastArray() != null) throw new AssertionError("AST recovery after " + invalid);
+    }
+    e.nativeEvaluate("jni_syntax(x)=x+1");
+    if (!e.nativeEvaluateDetailed("jni_syntax(x)=x+")[0].equals("error")) throw new AssertionError("invalid definition accepted");
+    e.nativeEvaluate("jni_syntax(3)");
+    if (e.nativeGetLastNumericVal() != 4) throw new AssertionError("definition rollback");
+    e.nativeEvaluate("jni_index_shadow(a,b)=sum(a,1,3,a*b)+len(a)");
+    e.nativeEvaluate("jni_index_shadow([5,6],2)");
+    if (e.nativeGetLastNumericVal() != 14) throw new AssertionError("array parameter shadows reduction index");
+    e.nativeRestoreScalar("jni_parameter_constant", 100, true);
+    e.nativeEvaluate("fn jni_constant_shadow(jni_parameter_constant,b) { jni_parameter_constant[1]=b; return jni_parameter_constant }");
+    e.nativeEvaluate("jni_constant_shadow([1,2],5)");
+    if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{5,2})) throw new AssertionError("constant shadows array parameter");
+    e.nativeEvaluate("jni_parameter_constant");
+    if (e.nativeGetLastNumericVal() != 100) throw new AssertionError("shadowed constant was not restored");
+    e.nativeEvaluate("jni_factorial(x)=if(x<=1,1,x*jni_factorial(x-1))");
+    e.nativeEvaluate("jni_factorial(5)");
+    if (e.nativeGetLastNumericVal() != 120) throw new AssertionError("recursive AST formula");
+    CardulatorEngine isolatedAst = new CardulatorEngine();
+    isolatedAst.nativeInit();
+    e.nativeEvaluate("jni_shared_source=[1,2]");
+    isolatedAst.nativeEvaluate("jni_shared_source=7");
+    for (int i=0; i<3; i++) {
+      e.nativeEvaluate("jni_shared_source+1");
+      isolatedAst.nativeEvaluate("jni_shared_source+1");
+      if (!java.util.Arrays.equals(e.nativeLastArray(), new double[]{2,3}) || isolatedAst.nativeGetLastNumericVal() != 8 || isolatedAst.nativeLastArray() != null)
+        throw new AssertionError("cached AST types crossed JNI sessions");
+    }
+    isolatedAst.nativeDestroy(isolatedAst.nativeHandle);
+    e.nativeInit();
+    if (!e.nativeEvaluate("").isEmpty()) throw new AssertionError("empty string");
+    String x=e.nativeEvaluate("print(\"Привет 😀\")"); if (!x.contains("Привет 😀")) throw new AssertionError(x);
+    String withNul = e.nativeEvaluate("print(\"a\u0000b\")");
+    if (!withNul.contains("a\u0000b")) throw new AssertionError("NUL in output");
+    for (int i=1;i<=130;i++) e.nativeEvaluate(Integer.toString(i));
+    NativeValue[] history = e.nativeValues(false);
+    if (history.length != 128 || !history[0].name.equals("e3") || history[0].scalar != 3 ||
+        !history[127].name.equals("e130") || history[127].scalar != 130)
+      throw new AssertionError("typed history eviction or ordering");
+    if (!e.nativeEvaluate("e3=1").startsWith("ERROR")) throw new AssertionError("eN writable");
+    String[] printedError = e.nativeEvaluateDetailed("print(\"ERROR: x\")");
+    if (!printedError[0].equals("ok") || !printedError[1].equals("ERROR: x")) throw new AssertionError("print status");
+    String[] actualError = e.nativeEvaluateDetailed("sqrt(-1)");
+    if (!actualError[0].equals("error")) throw new AssertionError("error status");
+    for (String unit : new String[]{"rad", "rpm", "rem", "rankine"}) {
+      String result = e.nativeEvaluate("conv(0, \"" + unit + "\")");
+      if (result.startsWith("ERROR") || !result.contains("0")) throw new AssertionError(unit + ": " + result);
+    }
+    e.nativeRegisterScript("named_test", "print(42)");
+    if (e.nativeEvaluate("run(\"named_test\")").startsWith("ERROR")) throw new AssertionError("script registration");
+    e.nativeUnregisterScript("named_test");
+    if (!e.nativeEvaluate("run(\"named_test\")").startsWith("ERROR")) throw new AssertionError("script deletion");
+    for (String[] tc : new String[][]{{"3!+4!", "30"}, {"(2+1)!*2!", "12"}, {"2 xor 3", "0"}, {"0 xor 3", "1"}}) {
+      String output = e.nativeEvaluate(tc[0]);
+      if (output.startsWith("ERROR") || e.nativeGetLastNumericVal() != Double.parseDouble(tc[1])) throw new AssertionError(tc[0] + ": " + output);
+    }
+    e.nativeRestoreScalar("x",Double.POSITIVE_INFINITY,false);
+    e.nativeRestoreArray("arr",new double[]{1.0,Double.NaN});
+    NativeValue[] snapshot = e.nativeValues(false);
+    if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("x") && v.scalar == Double.POSITIVE_INFINITY && v.elements == null))
+      throw new AssertionError("typed scalar");
+    if (java.util.Arrays.stream(snapshot).noneMatch(v -> v.name.equals("arr") && v.elements.length == 2 && Double.isNaN(v.elements[1])))
+      throw new AssertionError("typed array");
+    e.nativeRestoreScalar("jni_const", 42, true);
+    if (java.util.Arrays.stream(e.nativeValues(true)).noneMatch(v -> v.name.equals("jni_const") && v.scalar == 42 && v.elements == null))
+      throw new AssertionError("typed constant");
+    e.nativeEvaluate("jni_formula(x)=x^2");
+    if (java.util.Arrays.stream(e.nativeFormulas()).noneMatch(f -> f.name.equals("jni_formula") && f.parameters.length == 1 && f.parameters[0].equals("x") && f.body.equals("x^2")))
+      throw new AssertionError("formula snapshot");
+    e.nativeRestoreScriptFunction(new String[]{"abc","1","x","return x*2"}); if(e.nativeGetScriptFunctions().length != 1) throw new AssertionError("function");
+    String zero=e.nativeEvaluate("conv(0, \"rad\")");
+    if (zero.startsWith("ERROR") || !zero.contains("0")) throw new AssertionError(zero);
+    String bad=e.nativeEvaluate("conv(unknown_variable, \"m\", \"cm\")");
+    if (!bad.startsWith("ERROR")) throw new AssertionError(bad);
+    String nestedDefinition = e.nativeEvaluate("fn nested_test(x) { if(x>0) { return x } else { return -1 } }; 7");
+    if (nestedDefinition.startsWith("ERROR") || e.nativeGetLastNumericVal() != 7) throw new AssertionError(nestedDefinition);
+    if (e.nativeEvaluate("nested_test(2)").startsWith("ERROR") || e.nativeGetLastNumericVal() != 2) throw new AssertionError("nested function");
+    e.nativeEvaluate("fn recursion_test(x) { return recursion_test(x) }");
+    if (!e.nativeEvaluate("recursion_test(1)").contains("recursion limit")) throw new AssertionError("recursion limit");
+    String printedFunction = e.nativeEvaluate("fn print_test(x) { print(x); return x*2 }; print_test(4)");
+    if (!printedFunction.contains("4\n") || e.nativeGetLastNumericVal() != 8) throw new AssertionError(printedFunction);
+    String numeric=e.nativeEvaluate("conv(104, \"pf\")");
+    double numericValue=e.nativeGetLastNumericVal();
+    String marking=e.nativeEvaluate("conv(\"104\", \"pf\")");
+    double markingValue=e.nativeGetLastNumericVal();
+    if (numeric.startsWith("ERROR") || marking.startsWith("ERROR") || Math.abs(numericValue - 104e-12) > 1e-18 || Math.abs(markingValue - 100000) > 1e-6) throw new AssertionError(numeric + " / " + marking);
+    String mega=e.nativeEvaluate("conv(1, \"Mm\", \"m\")");
+    if (mega.startsWith("ERROR") || Math.abs(e.nativeGetLastNumericVal() - 1e6) > 1e-6) throw new AssertionError(mega);
+    String p=e.nativeEvaluate("plot([0,1], [1234567.89,2])"); if (p.startsWith("ERROR")) throw new AssertionError(p);
+    NativePlotLine[] lines=e.nativeGetPlotLines(); if(lines.length != 1 || lines[0].y[0] != 1234567.89 || e.nativeGetPlotLimits().length != 7) throw new AssertionError("plot");
+    double[] plotLimits = e.nativeGetPlotLimits();
+    e.nativeEvaluate("plot.close()");
+    e.nativeRestorePlot(lines, plotLimits);
+    if (e.nativeGetPlotLines().length != 1 || e.nativeGetPlotLines()[0].y[0] != 1234567.89) throw new AssertionError("restore plot");
+    System.out.println("JNI tests passed");
+  }
+}
+
+
+final class NativeValue {
+  final String name;
+  final double scalar;
+  final double[] elements;
+
+  NativeValue(String name, double scalar, double[] elements) {
+    this.name = name;
+    this.scalar = scalar;
+    this.elements = elements;
+  }
+}
+
+final class NativeFormula {
+  final String name;
+  final String[] parameters;
+  final String body;
+
+  NativeFormula(String name, String[] parameters, String body) {
+    this.name = name;
+    this.parameters = parameters;
+    this.body = body;
+  }
+}

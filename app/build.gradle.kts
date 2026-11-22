@@ -3,15 +3,23 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val testAbi = providers.gradleProperty("testAbi").orNull
+
 android {
     namespace = "com.cardputer.cardulator"
-    compileSdk = 34
+    compileSdk = 36
+    testBuildType = when {
+        providers.gradleProperty("performanceBenchmarks").orNull == "true" -> "benchmark"
+        testAbi != null -> "ci"
+        else -> "debug"
+    }
 
     defaultConfig {
         applicationId = "com.cardputer.cardulator"
         minSdk = 24
-        targetSdk = 34
-        versionCode = 1
+        targetSdk = 36
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        versionCode = (System.getenv("VERSION_CODE") ?: project.findProperty("versionCode")?.toString() ?: "1").toInt()
         val appVersionName = System.getenv("VERSION_NAME") ?: (project.findProperty("versionName") as? String ?: "26.10.25")
         versionName = appVersionName
 
@@ -27,7 +35,7 @@ android {
         abi {
             isEnable = true
             reset()
-            include("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
+            include(*(testAbi?.let { arrayOf(it) } ?: arrayOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")))
             isUniversalApk = true
         }
     }
@@ -39,7 +47,7 @@ android {
             val keyAliasEnv = System.getenv("RELEASE_KEY_ALIAS") ?: ""
             val keyPasswordEnv = System.getenv("RELEASE_KEY_PASSWORD") ?: ""
 
-            if (file(keystorePath).exists() && keystorePasswordEnv.isNotEmpty()) {
+            if (file(keystorePath).exists() && listOf(keystorePasswordEnv, keyAliasEnv, keyPasswordEnv).all { it.isNotBlank() }) {
                 storeFile = file(keystorePath)
                 storePassword = keystorePasswordEnv
                 keyAlias = keyAliasEnv
@@ -53,6 +61,15 @@ android {
             isMinifyEnabled = false
             signingConfig = signingConfigs.getByName("release")
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+        }
+        if (providers.gradleProperty("performanceBenchmarks").orNull == "true") {
+            create("benchmark") {
+                initWith(getByName("release"))
+                isDebuggable = false
+                signingConfig = signingConfigs.getByName("debug")
+                applicationIdSuffix = ".benchmark"
+                matchingFallbacks += listOf("release")
+            }
         }
         create("ci") {
             isDebuggable = true
@@ -82,8 +99,27 @@ android {
 }
 
 dependencies {
+    if (providers.gradleProperty("performanceBenchmarks").orNull == "true") {
+        add("benchmarkImplementation", "androidx.profileinstaller:profileinstaller:1.4.1")
+    }
     implementation("androidx.core:core-ktx:1.12.0")
     implementation("androidx.appcompat:appcompat:1.6.1")
     implementation("com.google.android.material:material:1.11.0")
+    implementation("androidx.lifecycle:lifecycle-viewmodel:2.8.7")
     testImplementation("junit:junit:4.13.2")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test:core:1.6.1")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test.espresso:espresso-core:3.6.1")
+}
+
+// Validate only release artifacts; debug and CI builds do not need release secrets.
+val validateRelease by tasks.registering {
+    doLast {
+        require(android.defaultConfig.versionCode!! > 1) { "Set VERSION_CODE or -PversionCode to a unique, increasing release version code" }
+        require(android.signingConfigs.getByName("release").isSigningReady) { "Release signing requires a keystore and all RELEASE_KEYSTORE_* / RELEASE_KEY_* credentials" }
+    }
+}
+tasks.configureEach {
+    if (name == "preReleaseBuild") dependsOn(validateRelease)
 }

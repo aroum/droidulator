@@ -4,6 +4,7 @@
 #include <string>
 #include <vector>
 #include <map>
+#include <random>
 
 struct UserArg {
     std::string name;
@@ -34,50 +35,80 @@ struct PlotLine {
     std::string linestyle;
 };
 
-enum AppState {
-    STATE_CALC,
-    STATE_HELP,
-    STATE_VARS,
-    STATE_SCRIPTS,
-    STATE_PLOT,
-    STATE_BINDS,
-    STATE_FORMULAS,
-    STATE_PARAMS,
-    STATE_CONSTS
-};
-
-inline AppState appState = STATE_CALC;
-inline std::vector<PlotLine> plot_lines;
-inline bool plot_hold = false;
-inline bool plot_manual_limits = false;
-inline double plot_xlim_min = 0.0;
-inline double plot_xlim_max = 0.0;
-inline double plot_ylim_min = 0.0;
-inline double plot_ylim_max = 0.0;
-inline double plot_center_x = 0.0;
-inline double plot_center_y = 0.0;
-inline double plot_scale = 1.0;
-inline std::string g_math_domain_err = "";
 
 enum class AngleUnit {
     NONE,
     DEG,
     RAD
 };
-inline AngleUnit g_last_result_angle = AngleUnit::NONE;
-inline bool g_last_eval_is_array = false;
-inline std::vector<double> g_last_eval_array;
 
-extern std::vector<CustomScriptFunc> user_script_funcs;
-extern std::vector<double> history;
-extern std::vector<UserArg> user_args;
-extern std::vector<UserConst> user_consts;
-extern std::vector<std::string> user_funcs;
-extern std::map<std::string, std::vector<double>> user_arrays;
-extern std::map<std::string, std::string> user_named_scripts;
-extern std::vector<std::string> autocomplete_words;
-extern std::vector<std::string> script_console_output;
-extern bool degreesMode;
-extern bool use_thousands_sep;
-extern bool auto_brackets;
-extern bool sticky_mode;
+constexpr size_t MAX_HISTORY_VALUES = 128;
+size_t appendHistory(double value);
+void clearHistory();
+bool isHistoryName(const std::string& name);
+bool isReservedName(const std::string& name);
+void resetAutocompleteWords();
+void removeUserAutocompleteWord(const std::string& word);
+
+// Each context owns one calculator session. Bind it on the calling thread for
+// the duration of an operation, including callbacks into the evaluator.
+struct EngineContext {
+    EngineContext();
+    std::mt19937 randomGenerator{std::random_device{}()};
+    bool g_last_eval_error = false;
+    bool lastOutputWasArray = false;
+    bool g_last_has_num = false;
+    double g_last_num_val = 0.0;
+    std::string g_last_prefix;
+    std::string g_last_suffix;
+    std::vector<PlotLine> plot_lines{};
+    bool plot_hold = false;
+    bool plot_manual_limits = false;
+    bool plot_manual_x = false;
+    bool plot_manual_y = false;
+    double plot_xlim_min = 0.0;
+    double plot_xlim_max = 0.0;
+    double plot_ylim_min = 0.0;
+    double plot_ylim_max = 0.0;
+    std::string g_math_domain_err = "";
+    AngleUnit g_last_result_angle = AngleUnit::NONE;
+    bool g_last_eval_is_array = false;
+    std::vector<double> g_last_eval_array{};
+    std::vector<CustomScriptFunc> user_script_funcs{};
+    std::vector<double> history{};
+    size_t history_first_number = 1;
+    std::vector<UserArg> user_args{};
+    std::vector<UserConst> user_consts{};
+    std::vector<std::string> user_funcs{};
+    std::map<std::string, std::vector<double>> user_arrays{};
+    std::map<std::string, std::string> user_named_scripts{};
+    std::vector<std::string> autocomplete_words;
+    std::vector<std::string> script_console_output{};
+    bool degreesMode = true;
+    bool use_thousands_sep = false;
+    bool auto_brackets = true;
+    double script_return_val = 0.0;
+    bool script_has_returned = false;
+    std::vector<double> script_return_vec{};
+    bool script_return_is_vec = false;
+    std::string g_tab_orig_prefix = "";
+    size_t g_tab_comp_start = 0;
+    int g_tab_match_idx = -1;
+    std::string g_tab_last_inserted = "";
+    std::vector<std::string> g_tab_cached_matches{};
+    int fmt_mode = 0;
+    int fmt_precision = 6;
+};
+
+EngineContext& engineState();
+
+class EngineContextScope {
+public:
+    explicit EngineContextScope(EngineContext& context);
+    ~EngineContextScope();
+    EngineContextScope(const EngineContextScope&) = delete;
+    EngineContextScope& operator=(const EngineContextScope&) = delete;
+
+private:
+    EngineContext* previous;
+};

@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <dimen name="toolbar_control_size">36dp</dimen>
+    <dimen name="toolbar_gap">4dp</dimen>
+    <dimen name="toolbar_padding_vertical">2dp</dimen>
+    <dimen name="toolbar_icon_size">20dp</dimen>
+</resources>

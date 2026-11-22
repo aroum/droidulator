@@ -1,16 +1,15 @@
 package com.cardputer.cardulator
 
+import androidx.activity.OnBackPressedCallback
+import androidx.core.widget.doAfterTextChanged
+import androidx.core.view.doOnPreDraw
 import android.app.Dialog
 import android.content.res.ColorStateList
-import android.content.res.Configuration
 import android.graphics.Color
-import android.graphics.drawable.ColorDrawable
 import android.graphics.drawable.GradientDrawable
 import android.os.Bundle
 import android.text.Editable
-import android.text.Spannable
 import android.text.TextWatcher
-import android.text.style.ForegroundColorSpan
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
@@ -18,14 +17,65 @@ import android.view.inputmethod.EditorInfo
 import android.widget.*
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.lifecycle.ViewModelProvider
+
+
+data class ReplDisplayItem(
+        val input: String,
+        val rawOutput: String,
+        val isError: Boolean,
+        val hasNum: Boolean = false,
+        val numVal: Double = 0.0,
+        val prefix: String = "",
+        val suffix: String = "",
+        val arrayValues: DoubleArray? = null,
+        val isRawText: Boolean = false
+    )
+
 
 class MainActivity : AppCompatActivity() {
+
+    private val dialogs by lazy { CalculatorDialogs(this, ::trackDialog) }
+    private val activeDialogs = mutableSetOf<Dialog>()
+
+    private fun trackDialog(dialog: Dialog): Dialog {
+        activeDialogs.add(dialog)
+        dialog.setOnDismissListener { activeDialogs.remove(dialog) }
+        return dialog
+    }
+
+    private val pendingInputEdits = mutableSetOf<Runnable>()
+
+    private fun postInputEdit(action: () -> Unit) {
+        lateinit var task: Runnable
+        task = Runnable {
+            pendingInputEdits.remove(task)
+            if (!isDestroyed && !isFinishing && etInput.isAttachedToWindow) action()
+        }
+        pendingInputEdits.add(task)
+        etInput.post(task)
+    }
+
+    private var startupDelivery: CompletionDelivery<Throwable?>? = null
+    private var pendingPlot: java.util.concurrent.Future<*>? = null
+
+    override fun onDestroy() {
+        startupDelivery?.cancel()
+        if (::etInput.isInitialized) pendingInputEdits.forEach { etInput.removeCallbacks(it) }
+        pendingInputEdits.clear()
+        pendingPlot?.cancel(false)
+        ++plotRefreshGeneration
+        if (replOutputDelegate.isInitialized()) replOutput.close()
+        if (helpPanelDelegate.isInitialized()) helpPanel.close()
+        activeDialogs.toList().forEach { it.dismiss() }
+        activeDialogs.clear()
+        super.onDestroy()
+    }
 
     private lateinit var mainRoot: LinearLayout
     private lateinit var topHeaderBar: LinearLayout
     private lateinit var spinnerTabs: Spinner
     private lateinit var tvMode: TextView
-    private lateinit var btnRunScript: Button
     private lateinit var btnAddItem: Button
 
     private lateinit var tvOutput: TextView
@@ -45,6 +95,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var btnNavDown: Button
     private lateinit var btnTab: Button
     private lateinit var btnClear: Button
+    private lateinit var btnEnter: Button
 
     // Settings UI elements
     private lateinit var rgThemeMode: RadioGroup
@@ -53,7 +104,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var rbThemeLight: RadioButton
     private lateinit var btnLoadCustomTheme: Button
     private lateinit var btnResetCustomTheme: Button
-    private lateinit var btnSettingsEnterAction: Button
+    private lateinit var btnSettingsEnterAction: CheckBox
     private lateinit var btnSettingsClearHistory: Button
     private lateinit var cbDigitGrouping: CheckBox
     private lateinit var cbHideWelcome: CheckBox
@@ -61,15 +112,14 @@ class MainActivity : AppCompatActivity() {
     private lateinit var tvSettingsSectionTheme: TextView
     private lateinit var tvSettingsSectionCustomTheme: TextView
     private lateinit var tvSettingsSectionDisplay: TextView
-    private lateinit var tvSettingsSectionEnterAction: TextView
 
     // Number Formatting Spinners
     private lateinit var spinnerFmtMode: Spinner
     private lateinit var spinnerFmtPrec: Spinner
     private val fmtModeItems = arrayOf("NORM", "FLT", "FIX", "SCI", "ENG")
-    private val fmtModeItemsDisplay = arrayOf("NORM ▼", "FLT ▼", "FIX ▼", "SCI ▼", "ENG ▼")
+    private val fmtModeItemsDisplay = arrayOf("NORM", "FLT", "FIX", "SCI", "ENG")
     private val fmtPrecItems = arrayOf("0dp", "1dp", "2dp", "3dp", "4dp", "5dp", "6dp", "7dp", "8dp", "9dp", "10dp", "11dp", "12dp")
-    private val fmtPrecItemsDisplay = arrayOf("0dp ▼", "1dp ▼", "2dp ▼", "3dp ▼", "4dp ▼", "5dp ▼", "6dp ▼", "7dp ▼", "8dp ▼", "9dp ▼", "10dp ▼", "11dp ▼", "12dp ▼")
+    private val fmtPrecItemsDisplay = arrayOf("0dp", "1dp", "2dp", "3dp", "4dp", "5dp", "6dp", "7dp", "8dp", "9dp", "10dp", "11dp", "12dp")
 
     private var fmtMode = 0
     private var fmtPrecision = 6
@@ -81,16 +131,26 @@ class MainActivity : AppCompatActivity() {
     private var isEnterSendMode = true
 
     private var currentTabPosition = 0
-    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings")
-    private val tabsDisplay = arrayOf("REPL ▼", "Scripts ▼", "Formulas ▼", "Constants ▼", "Variables ▼", "Plot ▼", "Settings ▼")
+    private var plotRefreshGeneration = 0L
+    private val tabs = arrayOf("REPL", "Scripts", "Formulas", "Constants", "Variables", "Plot", "Settings", "Help", "Units")
+    private val tabsDisplay get() = arrayOf(R.string.tab_repl_display, R.string.tab_scripts_display, R.string.tab_formulas_display, R.string.tab_constants_display, R.string.tab_variables_display, R.string.tab_plot_display, R.string.tab_settings_display, R.string.help_tab, R.string.units_tab).map(::getString).toTypedArray()
+    private fun tabTitle(tab: String): String = when (tab) {
+        "REPL" -> getString(R.string.tab_repl)
+        "Scripts" -> getString(R.string.tab_scripts)
+        "Formulas" -> getString(R.string.tab_formulas)
+        "Constants" -> getString(R.string.tab_constants)
+        "Variables" -> getString(R.string.tab_variables)
+        "Plot" -> getString(R.string.tab_plot_display).removeSuffix("")
+        "Settings" -> getString(R.string.tab_settings)
+        else -> tab
+    }
 
-    // Built-in scripts storage for Scripts menu tab
-    private val userScripts = mutableListOf(
-        Pair("fibonacci", "x = 1\ny = 1\nfor (i = 1; i <= 10; i++) {\n  print(x)\n  tmp = x + y\n  x = y\n  y = tmp\n}"),
-        Pair("factorial_test", "n = 5\nres = 1\nfor (i = 1; i <= n; i++) {\n  res = res * i\n}\nprint(res)")
-    )
+    private val session by lazy { ViewModelProvider(this)[CalculatorSession::class.java] }
+    private val userScripts get() = session.userScripts
+    private val scriptLibrary get() = session.scriptLibrary
 
     // Theme Mode: 0 = Auto (System), 1 = Dark, 2 = Light
+    private val themeSettings by lazy { CalculatorThemeSettings(applicationContext) }
     private var themeMode = 0
     private var isLightThemeActive = false
     private lateinit var btnDeleteAll: Button
@@ -99,65 +159,93 @@ class MainActivity : AppCompatActivity() {
     private var showEVars = false
 
     // REPL History management
-    private data class ReplDisplayItem(
-        val input: String,
-        val rawOutput: String,
-        val isError: Boolean,
-        val hasNum: Boolean = false,
-        val numVal: Double = 0.0,
-        val prefix: String = "",
-        val suffix: String = "",
-        val isRawText: Boolean = false
-    )
-    private val replHistory = mutableListOf<String>()
-    private val replDisplayItems = mutableListOf<ReplDisplayItem>()
+    private val replHistory get() = session.replHistory
+    private val replDisplayItems get() = session.replDisplayItems
     private var replHistoryIndex = -1
     private var tempReplInput = ""
 
     // Flag to avoid infinite loop in TextWatcher during syntax highlighting
     private var isHighlighting = false
+    private val highlighter = CalculatorSyntaxHighlighter()
     private var isSubmitting = false
+    private var autocompleteEditor: EditText? = null
 
-    // Cycling Tab Autocomplete state for conv and plot contexts
-    private var convTabOrigPrefix: String? = null
-    private var convTabSplitPos: Int = -1
-    private var convTabMatchIdx: Int = 0
-    private var convTabCachedMatches: List<String>? = null
+    private fun selectAutocompleteEditor(editor: EditText) {
+        if (autocompleteEditor !== editor) {
+            session.resetAutocomplete()
+            autocomplete.reset()
+            autocompleteEditor = editor
+        }
+    }
 
-    companion object {
-        private const val WELCOME_MSG = "Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n"
+    private val autocomplete by lazy { session.newAutocompleteController() }
 
-        // Pre-compiled regex patterns for zero-allocation syntax highlighting
-        private val NUMBER_REGEX = Regex("\\b\\d+(\\.\\d+)?\\b")
-        private val KEYWORD_REGEX = Regex("\\b(for|while|if|iff|else|return|const|fn|def|function|and|or|not|xor)\\b")
-        private val FUNC_REGEX = Regex("\\b(sin|cos|tan|tg|cot|ctg|ctan|sec|csc|cosec|asin|arcsin|acos|arccos|atan|arctan|atg|arctg|atan2|acot|arccot|actg|arcctg|actan|arcctan|asec|arcsec|acsc|arccsc|acosec|arccosec|sinh|sh|cosh|ch|tanh|th|coth|cth|ctgh|ctanh|sech|sch|csch|cosech|asinh|ahsin|arcsinh|arsinh|arsh|acosh|ahcos|arccosh|arcosh|arch|atanh|ahtan|arctanh|artanh|arth|artg|arctgh|acoth|ahcot|arccoth|arcoth|arcth|ahcoth|asech|ahsec|arcsech|arsech|ahsech|acsch|ahcsc|arccsch|arcsch|acosech|arccosech|ahcsch|deg2rad|d2r|rad2deg|r2d|sqrt|ln|log|log10|log2|logb|exp|cbrt|abs|ceil|floor|round|trunc|sgn|mod|mean|median|mode|var|std|sum|prod|min|max|dot|C|Cnk|P|rUni|rNor|fact|gcd|lcm|fib|len|print|run|plot|conv|help)\\b")
-        private val CONST_REGEX = Regex("\\b(pi|phi|e\\d+)\\b|(?<![a-zA-Z0-9_])e(?![a-zA-Z0-9_])")
-        private val OP_REGEX = Regex("[+\\-*/^=><!%]")
+    private val welcomeMessage get() = getString(R.string.ui_text_026)
+
+    private fun dp(value: Int): Int = (value * resources.displayMetrics.density + 0.5f).toInt()
+
+    private fun applySystemInsets(view: View) {
+        if (android.os.Build.VERSION.SDK_INT < 35) return
+        val left = view.paddingLeft
+        val top = view.paddingTop
+        val right = view.paddingRight
+        val bottom = view.paddingBottom
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(view) { target, insets ->
+            val bars = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.systemBars() or androidx.core.view.WindowInsetsCompat.Type.displayCutout())
+            val ime = insets.getInsets(androidx.core.view.WindowInsetsCompat.Type.ime())
+            val bottomInset = maxOf(bars.bottom, ime.bottom)
+            target.setPadding(left + bars.left, top + bars.top, right + bars.right, bottom + bottomInset)
+            insets
+        }
+        androidx.core.view.ViewCompat.requestApplyInsets(view)
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         setContentView(R.layout.activity_main)
-
-        // Initialize C++ Engine
-        CardulatorEngine.nativeInit()
-        loadUserDataFromStorage()
-
-        // Extract units.dat from assets to internal storage so the C bridge can read it
-        val unitsDatFile = java.io.File(filesDir, "units.dat")
-        if (!unitsDatFile.exists()) {
-            assets.open("units.dat").use { input ->
-                unitsDatFile.outputStream().use { output -> input.copyTo(output) }
+        // Bind the complete screen before its first visible frame.
+        findViewById<View>(R.id.main_root).visibility = View.INVISIBLE
+        startupDelivery = UnitsDatabase.initialize(applicationContext) { failure ->
+            if (isFinishing || isDestroyed) return@initialize
+            when (failure) {
+                null -> finishStartup()
+                is UnsatisfiedLinkError -> {
+                    android.util.Log.e("Droidulator", "Unable to load calculator engine", failure)
+                    AlertDialog.Builder(this).setMessage(R.string.engine_load_error)
+                        .setPositiveButton(android.R.string.ok) { _, _ -> finish() }
+                        .setOnCancelListener { finish() }.show()
+                }
+                else -> {
+                    android.util.Log.e("Droidulator", "Unable to install units data", failure)
+                    Toast.makeText(this, R.string.ui_text_001, Toast.LENGTH_LONG).show()
+                    finish()
+                }
             }
         }
-        CardulatorEngine.nativeInitUnits(unitsDatFile.absolutePath)
+    }
+
+    private fun finishStartup() {
+        if (session.commandRunning) {
+            session.commandResult.observe(this, object : androidx.lifecycle.Observer<CalculatorSession.CommandResult?> {
+                override fun onChanged(value: CalculatorSession.CommandResult?) {
+                    if (value == null) return
+                    session.commandResult.removeObserver(this)
+                    finishStartup()
+                }
+            })
+            return
+        }
+        if (!session.initialized) {
+            if (!session.initialize(applicationContext))
+                Toast.makeText(this, R.string.ui_text_019, Toast.LENGTH_LONG).show()
+        }
 
         // Bind Views
         mainRoot = findViewById(R.id.main_root)
+        applySystemInsets(mainRoot)
         topHeaderBar = mainRoot.getChildAt(0) as LinearLayout
         spinnerTabs = findViewById(R.id.spinner_tabs)
         tvMode = findViewById(R.id.tv_mode)
-        btnRunScript = findViewById(R.id.btn_run_script)
         btnAddItem = findViewById(R.id.btn_add_item)
         btnDeleteAll = findViewById(R.id.btn_delete_all)
         btnToggleEVars = findViewById(R.id.btn_toggle_evars)
@@ -179,6 +267,7 @@ class MainActivity : AppCompatActivity() {
         btnNavDown = findViewById(R.id.btn_nav_down)
         btnTab = findViewById(R.id.btn_tab)
         btnClear = findViewById(R.id.btn_clear)
+        btnEnter = findViewById(R.id.btn_enter)
 
         // Settings views
         rgThemeMode = findViewById(R.id.rg_theme_mode)
@@ -195,7 +284,6 @@ class MainActivity : AppCompatActivity() {
         tvSettingsSectionTheme = findViewById(R.id.tv_settings_section_theme)
         tvSettingsSectionCustomTheme = findViewById(R.id.tv_settings_section_custom_theme)
         tvSettingsSectionDisplay = findViewById(R.id.tv_settings_section_display)
-        tvSettingsSectionEnterAction = findViewById(R.id.tv_settings_section_enter_action)
 
         // Number Formatting Spinners
         spinnerFmtMode = findViewById(R.id.spinner_fmt_mode)
@@ -209,31 +297,28 @@ class MainActivity : AppCompatActivity() {
         hideWelcomeMessage = prefs.getBoolean("hide_welcome", false)
         isAutoPairEnabled = prefs.getBoolean("auto_pair", true)
         showEVars = prefs.getBoolean("show_evars", false)
-        themeMode = prefs.getInt("theme_mode", 0)
+        themeMode = themeSettings.mode
         isEnterSendMode = prefs.getBoolean("enter_send_mode", true)
         val savedDegMode = prefs.getBoolean("degrees_mode", true)
 
         cbDigitGrouping.isChecked = isDigitGroupingActive
         cbHideWelcome.isChecked = hideWelcomeMessage
         cbAutoPair.isChecked = isAutoPairEnabled
-        CardulatorEngine.nativeSetDegRad(savedDegMode)
+        session.setAngleMode(savedDegMode)
         tvMode.text = if (savedDegMode) "DEG" else "RAD"
+        tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         updateEnterActionButtonText()
+        updateInputImeOptions()
         if (hideWelcomeMessage) {
             tvOutput.text = ""
         } else {
-            tvOutput.text = WELCOME_MSG
+            tvOutput.text = welcomeMessage
         }
 
         listOf(rbThemeAuto, rbThemeDark, rbThemeLight).getOrNull(themeMode)?.isChecked = true
         if (themeMode !in 0..2) rbThemeAuto.isChecked = true
 
-        val savedThemeJson = prefs.getString("custom_theme_json", null)
-        if (!savedThemeJson.isNullOrEmpty()) {
-            ThemePalette.loadCustomThemeJson(savedThemeJson)
-        }
-
-        CardulatorEngine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
+        themeSettings.restoreCustomPalette()
 
         setupTabSpinner()
         setupFormatSpinners()
@@ -243,80 +328,149 @@ class MainActivity : AppCompatActivity() {
         setupErrorOverlayHandlers()
         setupSettingsHandlers()
 
-        // Apply theme upon creation
+        // Apply theme upon creation and restore the retained REPL output.
         applyTheme()
+        rebuildReplOutput()
+        mainRoot.visibility = View.VISIBLE
+        mainRoot.doOnPreDraw { reportFullyDrawn() }
+        observeCommands()
+        session.definitionDraft?.let { definitionController.show(it.title, it.expression, it.hint, it.tab) }
+        session.formulaRunDraft?.let { formulaRunner.show(it.formula, it.arguments) }
+        session.scriptDraft?.let { openScriptEditor(it.originalName) }
+    }
+
+    private fun rounded(color: Int) = GradientDrawable().apply {
+        setColor(color)
+        cornerRadius = dp(8).toFloat()
+    }
+
+    private fun spinnerColor(spinner: Spinner): Int = when (spinner) {
+        spinnerTabs -> ThemePalette.green
+        spinnerFmtMode -> ThemePalette.orange
+        else -> ThemePalette.yellow
+    }
+
+    private fun closeSearch() {
+        searchField.text.clear()
+        searchField.visibility = View.GONE
+        spinnerTabs.visibility = View.VISIBLE
+        hideSoftKeyboard()
+    }
+
+    private fun spinnerAdapter(items: Array<String>, spinner: Spinner) =
+        object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, items) {
+            private fun row(position: Int, popup: Boolean) = TextView(this@MainActivity).apply {
+                text = items[position]
+                typeface = android.graphics.Typeface.MONOSPACE
+                textSize = 13f
+                gravity = android.view.Gravity.CENTER
+                minHeight = dp(36)
+                setSingleLine()
+                setPadding(dp(4), dp(8), dp(4), dp(8))
+                val selected = popup && position == spinner.selectedItemPosition
+                setTextColor(if (selected || !popup) ThemePalette.btnText else spinnerColor(spinner))
+                if (selected) background = rounded(spinnerColor(spinner))
+            }
+            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, false)
+            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View = row(position, true)
+        }
+
+    private val menuCards by lazy { CalculatorMenuCards(this) }
+
+    private val searchableTabs = setOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")
+    private val searchField get() = findViewById<EditText>(R.id.search_query)
+    private val definitionController by lazy {
+        DefinitionEditorController(this, session, dialogs, highlighter, { expression, draft ->
+            session.runCommand(expression, definition = draft)
+        }, { activeDialogs.remove(it) })
+    }
+
+    private val formulaRunner by lazy {
+        FormulaRunner(this, session, dialogs, { queueCommand(it) }, { activeDialogs.remove(it) })
+    }
+
+    private val replOutputDelegate = lazy {
+        ReplOutputController(
+            session, ReplOutputRenderer(highlighter), tvOutput, scrollView,
+            welcome = { welcomeMessage to !hideWelcomeMessage },
+            formatSettings = { Triple(fmtMode, fmtPrecision, isDigitGroupingActive) }
+        )
+    }
+    private val replOutput by replOutputDelegate
+
+    private val libraryPanel by lazy { LibraryPanel(this, itemsContainer, menuCards) }
+
+    private val helpPanelDelegate = lazy { HelpPanel(itemsContainer, menuCards, dialogs, session) }
+    private val helpPanel by helpPanelDelegate
+
+    private val unitsPanel by lazy { UnitsPanel(this, itemsContainer, menuCards, dialogs) }
+
+    private fun renderUnits() = unitsPanel.render(searchField.text.toString())
+
+    private fun filterCards() {
+        if (tabs[currentTabPosition] == "Units") {
+            renderUnits()
+            return
+        }
+        val words = searchField.text.toString().trim().split(Regex("\\s+")).filter { it.isNotEmpty() }
+        for (index in 0 until itemsContainer.childCount) {
+            val card = itemsContainer.getChildAt(index)
+            val content = card.tag as? String ?: ""
+            card.visibility = if (words.all { content.contains(it, ignoreCase = true) }) View.VISIBLE else View.GONE
+        }
     }
 
     private fun setupTabSpinner() {
-        val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, tabsDisplay) {
-            override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getView(position, convertView, parent) as TextView
-                v.text = tabsDisplay[position]
-                v.setTextColor(ThemePalette.green)
-                v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                v.textSize = 14f
-                v.gravity = android.view.Gravity.START or android.view.Gravity.CENTER_VERTICAL
-                v.setPadding(0, 0, 0, 0)
-                return v
-            }
-
-            override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
-                val v = super.getDropDownView(position, convertView, parent) as TextView
-                v.text = tabs[position]
-                v.setBackgroundColor(ThemePalette.bgSoft)
-                v.setTextColor(ThemePalette.fgText)
-                v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                v.textSize = 14f
-                v.setPadding(16, 16, 16, 16)
-                return v
+        for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
+            spinner.addOnLayoutChangeListener { _, left, _, right, _, _, _, _, _ ->
+                if (right > left) {
+                    spinner.dropDownWidth = right - left
+                    spinner.dropDownHorizontalOffset = 0
+                }
             }
         }
-        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-        spinnerTabs.adapter = adapter
-
+        spinnerTabs.adapter = spinnerAdapter(tabsDisplay, spinnerTabs)
         spinnerTabs.onItemSelectedListener = object : AdapterView.OnItemSelectedListener {
             override fun onItemSelected(parent: AdapterView<*>?, view: View?, position: Int, id: Long) {
                 currentTabPosition = position
-                val selectedTab = tabs[position]
-                refreshTabContent(selectedTab)
+                refreshTabContent(tabs[position])
             }
-
             override fun onNothingSelected(parent: AdapterView<*>?) {}
+        }
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (searchField.visibility == View.VISIBLE) closeSearch()
+                else {
+                    isEnabled = false
+                    onBackPressedDispatcher.onBackPressed()
+                    isEnabled = true
+                }
+            }
+        })
+        val search = searchField
+        findViewById<View>(R.id.search_toggle).setToolbarClickListener {
+            val opening = search.visibility != View.VISIBLE
+            spinnerTabs.visibility = if (opening) View.GONE else View.VISIBLE
+            search.visibility = if (opening) View.VISIBLE else View.GONE
+            if (opening) {
+                search.requestFocus()
+                (getSystemService(INPUT_METHOD_SERVICE) as android.view.inputmethod.InputMethodManager)
+                    .showSoftInput(search, android.view.inputmethod.InputMethodManager.SHOW_IMPLICIT)
+            } else {
+                closeSearch()
+            }
+        }
+        search.doAfterTextChanged { filterCards() }
+        search.setOnEditorActionListener { _, action, event ->
+            val done = action == EditorInfo.IME_ACTION_DONE || event?.keyCode == KeyEvent.KEYCODE_ENTER
+            if (done) hideSoftKeyboard()
+            done
         }
     }
 
     private fun setupFormatSpinners() {
-        fun createCustomAdapter(displayItems: Array<String>, rawItems: Array<String>, colorRes: () -> Int): ArrayAdapter<String> {
-            val adapter = object : ArrayAdapter<String>(this, android.R.layout.simple_spinner_item, displayItems) {
-                override fun getView(position: Int, convertView: View?, parent: ViewGroup): View {
-                    val v = super.getView(position, convertView, parent) as TextView
-                    v.text = displayItems[position]
-                    v.setTextColor(colorRes())
-                    v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                    v.textSize = 14f
-                    v.gravity = android.view.Gravity.END or android.view.Gravity.CENTER_VERTICAL
-                    v.setPadding(0, 0, 0, 0)
-                    return v
-                }
-
-                override fun getDropDownView(position: Int, convertView: View?, parent: ViewGroup): View {
-                    val v = super.getDropDownView(position, convertView, parent) as TextView
-                    v.text = rawItems[position]
-                    v.setBackgroundColor(ThemePalette.bgSoft)
-                    v.setTextColor(ThemePalette.fgText)
-                    v.setTypeface(android.graphics.Typeface.MONOSPACE, android.graphics.Typeface.BOLD)
-                    v.textSize = 14f
-                    v.setPadding(16, 16, 16, 16)
-                    return v
-                }
-            }
-            adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item)
-            return adapter
-        }
-
-        spinnerFmtMode.adapter = createCustomAdapter(fmtModeItemsDisplay, fmtModeItems) { ThemePalette.orange }
-        spinnerFmtPrec.adapter = createCustomAdapter(fmtPrecItemsDisplay, fmtPrecItems) { ThemePalette.yellow }
-
+        spinnerFmtMode.adapter = spinnerAdapter(fmtModeItemsDisplay, spinnerFmtMode)
+        spinnerFmtPrec.adapter = spinnerAdapter(fmtPrecItemsDisplay, spinnerFmtPrec)
         spinnerFmtMode.setSelection(fmtMode.coerceIn(0, fmtModeItems.size - 1))
         spinnerFmtPrec.setSelection(fmtPrecision.coerceIn(0, fmtPrecItems.size - 1))
 
@@ -379,300 +533,139 @@ class MainActivity : AppCompatActivity() {
                 if (!isSubmitting) {
                     dismissErrorOverlay()
                 }
-                if (isHighlighting || s == null) return
+                if (isHighlighting || s == null || (s is Editable && highlighter.isApplying(s))) return
 
                 val currentText = s.toString()
-                // Intercept inserted newline in REPL mode when enter send mode is active
-                if (tabs[currentTabPosition] == "REPL" && isEnterSendMode && currentText.contains("\n")) {
-                    isHighlighting = true
-                    // Replace newlines with spaces so multiline expressions/scripts don't collapse words together
-                    val cleanText = currentText.replace("\r\n", " ").replace("\n", " ").replace(Regex("""\s+"""), " ")
-                    etInput.setText(cleanText)
-                    etInput.setSelection(cleanText.length)
-                    isHighlighting = false
-                    submitCurrentInput()
+                val composing = android.view.inputmethod.BaseInputConnection.getComposingSpanStart(etInput.editableText) >= 0
+
+                // Intercept single Enter key press from soft keyboard in REPL when enter-to-send is active.
+                // Pasted multiline text has count > 2 (or text without just a newline) and is preserved intact.
+                val isSingleNewline = !composing && (
+                    (count == 1 && start < currentText.length && (currentText[start] == '\n' || currentText[start] == '\r')) ||
+                    (count == 2 && start + 1 < currentText.length && currentText.substring(start, start + 2) == "\r\n")
+                )
+                if (tabs[currentTabPosition] == "REPL" && isEnterSendMode && isSingleNewline) {
+                    postInputEdit {
+                        if (isSubmitting) return@postInputEdit
+                        val text = etInput.editableText
+                        val lenToDelete = if (count == 2) 2 else 1
+                        if (start + lenToDelete <= text.length && text.subSequence(start, start + lenToDelete).any { it == '\n' || it == '\r' }) {
+                            isHighlighting = true
+                            try {
+                                text.delete(start, start + lenToDelete)
+                            } finally {
+                                isHighlighting = false
+                            }
+                        }
+                        submitCurrentInput()
+                    }
                     return
                 }
 
-                // Auto-brackets and auto-quotes insertion when typing a single character
-                if (isAutoPairEnabled && count == 1 && before == 0 && start < currentText.length) {
-                    val typedChar = currentText[start]
-                    val insertedPair = when (typedChar) {
-                        '(' -> ")"
-                        '[' -> "]"
-                        '{' -> "}"
-                        '"' -> "\""
-                        '\'' -> "'"
+                // A pasted multiline expression must remain intact. Enter actions
+                // are handled by the editor/key listeners above or the single newline interceptor.
+                if (isAutoPairEnabled && !composing && count == 1 && before == 0 && start < currentText.length) {
+                    val typed = currentText[start]
+                    val next = currentText.getOrNull(start + 1)
+                    val closing = when (typed) {
+                        '(' -> ')'
+                        '[' -> ']'
+                        '{' -> '}'
+                        '\"' -> '\"'
+                        '\'' -> '\''
                         else -> null
                     }
-                    if (insertedPair != null) {
-                        isHighlighting = true
-                        val newStr = currentText.substring(0, start + 1) + insertedPair + currentText.substring(start + 1)
-                        etInput.setText(newStr)
-                        etInput.setSelection(start + 1)
-                        isHighlighting = false
+                    if (next == typed && (typed == ')' || typed == ']' || typed == '}' || typed == '\"' || typed == '\'')) {
+                        postInputEdit {
+                            val text = etInput.editableText
+                            if (etInput.selectionStart == start + 1 && start + 1 < text.length && text[start] == typed && text[start + 1] == typed) {
+                                isHighlighting = true
+                                try { text.delete(start, start + 1); etInput.setSelection(start + 1) }
+                                finally { isHighlighting = false }
+                                highlighter.apply(text)
+                            }
+                        }
+                    } else if (closing != null) {
+                        postInputEdit {
+                            val text = etInput.editableText
+                            if (etInput.selectionStart == start + 1 && start < text.length && text[start] == typed && android.view.inputmethod.BaseInputConnection.getComposingSpanStart(text) < 0) {
+                                isHighlighting = true
+                                try { text.insert(start + 1, closing.toString()); etInput.setSelection(start + 1) }
+                                finally { isHighlighting = false }
+                                highlighter.apply(text)
+                            }
+                        }
                     }
                 }
             }
 
             override fun afterTextChanged(s: Editable?) {
-                if (isHighlighting || s == null) return
-                applySyntaxHighlighting(s)
+                if (isHighlighting || s == null || (s is Editable && highlighter.isApplying(s))) return
+                highlighter.apply(etInput.editableText)
             }
         })
     }
 
     private fun setupControlButtons() {
-        // Tab Autocomplete button & cursor insertion inside brackets
-        btnTab.setOnClickListener {
-            val fullText = etInput.text.toString()
-            val caret = etInput.selectionStart.coerceAtLeast(0)
-
-            // Detect conv( context: suggest units/resistor codes inside conv(...)
-            val convMatch = Regex("""conv\(([^)]*)$""").find(fullText.substring(0, caret))
-            if (convMatch != null) {
-                val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
-                val lastParenPos = fullText.lastIndexOf('(', caret - 1)
-                val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
-
-                val isContinuation = (convTabOrigPrefix != null && convTabSplitPos == splitPos && convTabCachedMatches != null)
-                if (isContinuation) {
-                    val cached = convTabCachedMatches!!
-                    if (cached.isNotEmpty()) {
-                        convTabMatchIdx++
-                        val match = cached[convTabMatchIdx % cached.size]
-
-                        val prefix = fullText.substring(0, splitPos).trimEnd()
-                        var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
-                        if (endArgPos == -1) endArgPos = fullText.length
-                        val suffix = fullText.substring(endArgPos)
-
-                        val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
-                        val newArg = "\"$match\""
-                        val newText = "$formattedPrefix$newArg$suffix"
-
-                        etInput.setText(newText)
-                        etInput.setSelection(formattedPrefix.length + newArg.length)
-                        return@setOnClickListener
-                    }
-                }
-
-                val argsContent = convMatch.groupValues[1]
-                val parts = argsContent.split(",")
-                val lastPartRaw = parts.last().trim()
-                val lastPart = lastPartRaw.trim('"', '\'')
-
-                // Detect source unit (fromUnit) if present in preceding arguments
-                val fromUnit: String? = when {
-                    parts.size >= 3 -> {
-                        val prevArg = parts[parts.size - 2].trim().trim('"', '\'')
-                        if (prevArg.isNotEmpty()) prevArg else null
-                    }
-                    parts.size == 2 -> {
-                        val firstArg = parts[0].trim().trim('"', '\'')
-                        // Check if first arg contains a number followed by a unit (e.g. "10 mm", "10mm", "100 ohm")
-                        val m = Regex("""^[\d.\s\+\-\*\/\^eE]+\s*([a-zA-Z][a-zA-Z\^\d_]*)$""").find(firstArg)
-                        m?.groupValues?.get(1)?.trim()
-                    }
-                    else -> null
-                }
-
-                convTabOrigPrefix = lastPart
-                convTabSplitPos = splitPos
-                convTabMatchIdx = 0
-
-                val matches = CardulatorEngine.nativeGetConvUnits(fromUnit ?: "", lastPart)
-                    .split("\n").filter { it.isNotEmpty() }
-
-                if (matches.isNotEmpty()) {
-                    convTabCachedMatches = matches
-                    val match = matches[0]
-
-                    val prefix = fullText.substring(0, splitPos).trimEnd()
-                    var endArgPos = fullText.indexOfAny(charArrayOf(',', ')'), caret)
-                    if (endArgPos == -1) {
-                        endArgPos = fullText.length
-                    }
-                    val suffix = fullText.substring(endArgPos)
-
-                    val formattedPrefix = if (prefix.endsWith("(") || prefix.endsWith(",")) "$prefix " else prefix
-                    val newArg = "\"$match\""
-                    val newText = "$formattedPrefix$newArg$suffix"
-
-                    etInput.setText(newText)
-                    etInput.setSelection(formattedPrefix.length + newArg.length)
-                    return@setOnClickListener
-                } else {
-                    convTabOrigPrefix = null
-                    convTabSplitPos = -1
-                    convTabMatchIdx = 0
-                    convTabCachedMatches = null
-                }
-            } else {
-                convTabOrigPrefix = null
-                convTabSplitPos = -1
-                convTabMatchIdx = 0
-                convTabCachedMatches = null
-            }
-
-            // Detect plot( context: suggest plot parameters/functions inside plot(...)
-            val plotMatch = Regex("""plot\(([^)]*)$""").find(fullText.substring(0, caret))
-            if (plotMatch != null) {
-                val argsContent = plotMatch.groupValues[1]
-                val parts = argsContent.split(",")
-                val lastPart = parts.last().trim().trim('"', '\'')
-                val plotCandidates = listOf(
-                    "sin(x)", "cos(x)", "tan(x)", "exp(x)", "log(x)", "sqrt(x)",
-                    "x^2", "x^3", "abs(x)", "xlim", "ylim", "title", "grid"
-                )
-                val match = if (lastPart.isEmpty()) {
-                    "sin(x)"
-                } else {
-                    plotCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) && !it.equals(lastPart, ignoreCase = true) }
-                        ?: plotCandidates.firstOrNull { it.startsWith(lastPart, ignoreCase = true) }
-                }
-                if (match != null) {
-                    val lastCommaPos = fullText.lastIndexOf(',', caret - 1)
-                    val lastParenPos = fullText.lastIndexOf('(', caret - 1)
-                    val splitPos = if (lastCommaPos > lastParenPos) lastCommaPos + 1 else lastParenPos + 1
-                    val prefix = fullText.substring(0, splitPos)
-                    val suffix = fullText.substring(caret)
-                    val newText = prefix + match + suffix
-                    etInput.setText(newText)
-                    etInput.setSelection(prefix.length + match.length)
-                    return@setOnClickListener
-                }
-            }
-
-            // Detect run( context: complete script name from userScripts
-            val runMatch = Regex("""run\("?([\w]*)"?\)?$""").find(fullText.substring(0, caret))
-            if (runMatch != null) {
-                val partial = runMatch.groupValues[1]
-                val match = userScripts.map { it.first }.firstOrNull { it.startsWith(partial, ignoreCase = true) }
-                if (match != null) {
-                    val runCallStart = fullText.lastIndexOf("run(", caret - 1)
-                    if (runCallStart != -1) {
-                        val baseText = fullText.substring(0, runCallStart)
-                        val replacement = "run(\"$match\")"
-                        val newText = baseText + replacement
-                        etInput.setText(newText)
-                        etInput.setSelection(newText.length)
-                        return@setOnClickListener
-                    }
-                }
-            }
-
-            // General autocomplete at caret position (preserves any text after caret e.g. closing bracket ')')
-            val outCursor = intArrayOf(caret)
-            val completedFull = CardulatorEngine.nativeAutocomplete(fullText, caret, outCursor)
-            if (completedFull.isNotEmpty() && completedFull != fullText) {
-                etInput.setText(completedFull)
-                val newCursorPos = outCursor[0].coerceIn(0, completedFull.length)
-                etInput.setSelection(newCursorPos.coerceIn(0, etInput.text.length))
+        btnTab.setToolbarClickListener {
+            selectAutocompleteEditor(etInput)
+            autocomplete.complete(etInput.text.toString(), etInput.selectionStart.coerceAtLeast(0))?.let { edit ->
+                etInput.setText(edit.text)
+                etInput.setSelection(edit.caret.coerceIn(0, edit.text.length))
             }
         }
 
-        // Clear button (Short click: clear input field; 800ms long press: clear history & variables)
-        val clearHandler = android.os.Handler(android.os.Looper.getMainLooper())
-        var isLongPressTriggered = false
-        val longPressRunnable = Runnable {
-            isLongPressTriggered = true
-            btnClear.performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-            clearSessionAndHistory()
+        btnClear.setToolbarClickListener {
+            etInput.setText("")
+            dismissErrorOverlay()
         }
-
-        btnClear.setOnTouchListener { _, event ->
-            when (event.action) {
-                android.view.MotionEvent.ACTION_DOWN -> {
-                    isLongPressTriggered = false
-                    clearHandler.postDelayed(longPressRunnable, 800)
-                }
-                android.view.MotionEvent.ACTION_UP -> {
-                    clearHandler.removeCallbacks(longPressRunnable)
-                    if (!isLongPressTriggered) {
-                        etInput.setText("")
-                        dismissErrorOverlay()
-                    }
-                }
-                android.view.MotionEvent.ACTION_CANCEL -> {
-                    clearHandler.removeCallbacks(longPressRunnable)
-                }
+        btnEnter.setToolbarClickListener {
+            if (tabs[currentTabPosition] == "REPL") {
+                submitCurrentInput()
+            }
+        }
+        btnClear.setOnLongClickListener {
+            val message = TextView(this).apply {
+                text = this@MainActivity.getString(R.string.ui_text_002)
+                setTextColor(ThemePalette.fgText)
+            }
+            dialogs.show(getString(R.string.clear_session_title), message, positiveText = getString(R.string.action_clear)) {
+                clearSessionAndHistory()
             }
             true
         }
 
         // Mode toggle (DEG / RAD)
-        tvMode.setOnClickListener {
+        tvMode.setToolbarClickListener {
             toggleDegRad()
         }
 
-        // Run Script button
-        btnRunScript.setOnClickListener {
-            val code = etInput.text.toString().trim()
-            if (code.isNotEmpty()) {
-                val log = CardulatorEngine.nativeRunScript(code)
-                appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
-                showScriptOutputDialog("Script Output", log)
-            } else {
-                Toast.makeText(this, "Script is empty", Toast.LENGTH_SHORT).show()
-            }
-        }
-
         // Add Item button (Var / Const / Script)
-        btnAddItem.setOnClickListener {
+        btnAddItem.setToolbarClickListener {
             showAddItemDialog()
         }
 
         // Delete All Items button (Red ✕)
-        btnDeleteAll.setOnClickListener {
+        btnDeleteAll.setToolbarClickListener {
             val activeTab = tabs[currentTabPosition]
             val fgColor = ThemePalette.fgText
             val tvMsg = TextView(this).apply {
-                text = "Are you sure you want to delete all $activeTab?"
+                text = if (activeTab == "Variables") getString(R.string.delete_all_variables)
+                    else getString(R.string.delete_all_confirm, tabTitle(activeTab))
                 setTextColor(fgColor)
                 textSize = 14f
                 typeface = android.graphics.Typeface.MONOSPACE
             }
-            showGruvboxCustomDialog("Delete All $activeTab", tvMsg, positiveText = "DELETE ALL") {
-                when (activeTab) {
-                    "Variables" -> {
-                        val varsRaw = CardulatorEngine.nativeGetVariables()
-                        val lines = varsRaw.split("\n").filter { it.contains("=") }
-                        for (line in lines) {
-                            val varName = line.split("=", limit = 2)[0].trim()
-                            CardulatorEngine.nativeDeleteVariable(varName)
-                        }
-                    }
-                    "Formulas" -> {
-                        val formulasRaw = CardulatorEngine.nativeGetFormulas()
-                        val lines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
-                        for (line in lines) {
-                            val fnName = line.split("=", limit = 2)[0].split("(")[0].trim()
-                            CardulatorEngine.nativeDeleteFormula(fnName)
-                        }
-                    }
-                    "Constants" -> {
-                        val constsRaw = CardulatorEngine.nativeGetConstants()
-                        val lines = constsRaw.split("\n").filter { it.contains("=") }
-                        for (line in lines) {
-                            val name = line.split("=", limit = 2)[0].trim()
-                            if (name != "pi" && name != "e") {
-                                CardulatorEngine.nativeDeleteConstant(name)
-                            }
-                        }
-                    }
-                    "Scripts" -> {
-                        userScripts.clear()
-                    }
-                }
-                saveUserDataToStorage()
+            dialogs.show(getString(R.string.delete_all_title, tabTitle(activeTab)), tvMsg, positiveText = getString(R.string.action_delete_all)) {
+                session.clearLibrary(activeTab)
+                session.saveUserData()
                 refreshTabContent(activeTab)
-                Toast.makeText(this, "All $activeTab deleted", Toast.LENGTH_SHORT).show()
+                Toast.makeText(this, getString(R.string.deleted_all, tabTitle(activeTab)), Toast.LENGTH_SHORT).show()
             }
         }
 
         // Toggle e-history variables button (#)
-        btnToggleEVars.setOnClickListener {
+        btnToggleEVars.setToolbarClickListener {
             showEVars = !showEVars
             getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
                 .edit()
@@ -684,7 +677,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun setupNavigationButtons() {
         // Left arrow: Move cursor left in input box
-        btnNavLeft.setOnClickListener {
+        btnNavLeft.setToolbarClickListener {
             val sel = etInput.selectionStart
             if (sel > 0) {
                 etInput.setSelection(sel - 1)
@@ -693,7 +686,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Right arrow: Move cursor right in input box
-        btnNavRight.setOnClickListener {
+        btnNavRight.setToolbarClickListener {
             val sel = etInput.selectionStart
             if (sel < etInput.text.length) {
                 etInput.setSelection(sel + 1)
@@ -702,7 +695,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Up arrow: Scroll history UP in REPL (Recalls previous command including ones with errors)
-        btnNavUp.setOnClickListener {
+        btnNavUp.setToolbarClickListener {
             if (tabs[currentTabPosition] == "REPL" && replHistory.isNotEmpty()) {
                 if (replHistoryIndex == -1) {
                     tempReplInput = etInput.text.toString()
@@ -719,7 +712,7 @@ class MainActivity : AppCompatActivity() {
         }
 
         // Down arrow: Scroll history DOWN in REPL
-        btnNavDown.setOnClickListener {
+        btnNavDown.setToolbarClickListener {
             if (tabs[currentTabPosition] == "REPL" && replHistoryIndex != -1) {
                 if (replHistoryIndex < replHistory.size - 1) {
                     replHistoryIndex++
@@ -761,7 +754,7 @@ class MainActivity : AppCompatActivity() {
                 R.id.rb_theme_light -> 2
                 else -> 0
             }
-            getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit().putInt("theme_mode", themeMode).apply()
+            themeSettings.mode = themeMode
             applyTheme()
         }
 
@@ -781,6 +774,15 @@ class MainActivity : AppCompatActivity() {
             getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit().putBoolean("auto_pair", isChecked).apply()
         }
 
+        findViewById<CheckBox>(R.id.cb_toolbar_haptics).apply {
+            isChecked = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
+                .getBoolean("toolbar_haptics", false)
+            setOnCheckedChangeListener { _, checked ->
+                getSharedPreferences("droidulator_prefs", MODE_PRIVATE).edit()
+                    .putBoolean("toolbar_haptics", checked).apply()
+            }
+        }
+
         btnSettingsEnterAction.setOnClickListener {
             toggleEnterAction()
         }
@@ -794,17 +796,13 @@ class MainActivity : AppCompatActivity() {
         }
 
         btnResetCustomTheme.setOnClickListener {
-            ThemePalette.resetToBuiltIn()
-            val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
-            prefs.edit().remove("custom_theme_json").apply()
+            themeSettings.resetCustomPalette()
             applyTheme()
-            Toast.makeText(this, "Reset to built-in Gruvbox theme", Toast.LENGTH_SHORT).show()
+            Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_003), Toast.LENGTH_SHORT).show()
         }
     }
 
     private fun updateFormatSettings() {
-        CardulatorEngine.nativeSetFormatSettings(fmtMode, fmtPrecision, isDigitGroupingActive)
-
         val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
         prefs.edit()
             .putInt("fmt_mode", fmtMode)
@@ -815,118 +813,13 @@ class MainActivity : AppCompatActivity() {
         rebuildReplOutput()
     }
 
-    private fun formatHighlightedReplEntry(input: String, res: String, isError: Boolean): android.text.SpannableStringBuilder {
-        val entrySsb = android.text.SpannableStringBuilder()
+    private fun rebuildReplOutput() = replOutput.rebuild()
 
-        // 1. Prompt prefix "> "
-        val promptStart = entrySsb.length
-        entrySsb.append("> ")
-        entrySsb.setSpan(
-            ForegroundColorSpan(ThemePalette.fgDim),
-            promptStart,
-            entrySsb.length,
-            Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-        )
+    private fun appendOutputEntry(entry: ReplDisplayItem) = replOutput.append(entry)
 
-        // 2. Input expression with full syntax highlighting
-        val exprStart = entrySsb.length
-        entrySsb.append(input)
-        applyExpressionSyntaxHighlighting(entrySsb, exprStart, input)
-
-        entrySsb.append("\n")
-
-        // 3. Output / Result line
-        val resStart = entrySsb.length
-        if (isError) {
-            entrySsb.append("= ").append(res).append("\n")
-            entrySsb.setSpan(
-                ForegroundColorSpan(ThemePalette.red),
-                resStart,
-                entrySsb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        } else {
-            if (input.startsWith("print(") || input.startsWith("plot(")) {
-                entrySsb.append("= ").append(res).append("\n")
-            } else {
-                entrySsb.append(res).append("\n")
-            }
-            entrySsb.setSpan(
-                ForegroundColorSpan(ThemePalette.green),
-                resStart,
-                entrySsb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        return entrySsb
-    }
-
-    private fun rebuildReplOutput() {
-        val ssb = android.text.SpannableStringBuilder()
-        if (!hideWelcomeMessage) {
-            val welcomeStart = ssb.length
-            ssb.append(WELCOME_MSG)
-            ssb.setSpan(
-                ForegroundColorSpan(ThemePalette.fgDim),
-                welcomeStart,
-                ssb.length,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        for (item in replDisplayItems) {
-            if (item.isRawText) {
-                ssb.append(item.rawOutput)
-            } else {
-                val res = if (item.hasNum) {
-                    item.prefix + CardulatorEngine.nativeFormatNumber(item.numVal) + item.suffix
-                } else {
-                    item.rawOutput
-                }
-                ssb.append(formatHighlightedReplEntry(item.input, res, item.isError))
-            }
-        }
-
-        tvOutput.text = ssb
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
-
-    private fun appendOutputEntry(input: String, res: String, isError: Boolean) {
-        val hasNum = !isError && CardulatorEngine.nativeHasLastNumeric()
-        replDisplayItems.add(
-            ReplDisplayItem(
-                input = input,
-                rawOutput = res,
-                isError = isError,
-                hasNum = hasNum,
-                numVal = if (hasNum) CardulatorEngine.nativeGetLastNumericVal() else 0.0,
-                prefix = if (hasNum) CardulatorEngine.nativeGetLastNumericPrefix() else "",
-                suffix = if (hasNum) CardulatorEngine.nativeGetLastNumericSuffix() else ""
-            )
-        )
-        val entrySsb = formatHighlightedReplEntry(input, res, isError)
-        val currentText = tvOutput.text
-        val ssb = android.text.SpannableStringBuilder(currentText)
-        ssb.append(entrySsb)
-        tvOutput.text = ssb
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
-
-    private fun appendRawOutput(text: String) {
-        replDisplayItems.add(ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true))
-        val currentText = tvOutput.text
-        val ssb = android.text.SpannableStringBuilder(currentText)
-        ssb.append(text)
-        tvOutput.text = ssb
-        scrollView.post {
-            scrollView.fullScroll(ScrollView.FOCUS_DOWN)
-        }
-    }
+    private fun appendRawOutput(text: String) = replOutput.append(
+        ReplDisplayItem(input = "", rawOutput = text, isError = false, isRawText = true)
+    )
 
     private fun toggleEnterAction() {
         isEnterSendMode = !isEnterSendMode
@@ -935,21 +828,41 @@ class MainActivity : AppCompatActivity() {
             .putBoolean("enter_send_mode", isEnterSendMode)
             .apply()
         updateEnterActionButtonText()
+        updateInputImeOptions()
     }
 
     private fun updateEnterActionButtonText() {
-        btnSettingsEnterAction.text = if (isEnterSendMode) {
-            "Enter Key: Send Command"
-        } else {
-            "Enter Key: New Line"
+        btnSettingsEnterAction.isChecked = isEnterSendMode
+        if (::btnEnter.isInitialized) {
+            btnEnter.visibility = if (isEnterSendMode) View.GONE else View.VISIBLE
         }
     }
 
+    private fun updateInputImeOptions() {
+        if (!::etInput.isInitialized) return
+        etInput.imeOptions = if (isEnterSendMode) {
+            EditorInfo.IME_ACTION_SEND or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        } else {
+            EditorInfo.IME_ACTION_NONE or EditorInfo.IME_FLAG_NO_ENTER_ACTION or EditorInfo.IME_FLAG_NO_FULLSCREEN
+        }
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        imm?.restartInput(etInput)
+    }
+
+    private fun hideSoftKeyboard() {
+        val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
+        val focusedView = currentFocus ?: etInput
+        focusedView.clearFocus()
+        imm?.hideSoftInputFromWindow(mainRoot.windowToken, 0)
+        mainRoot.requestFocus()
+    }
+
     private fun toggleDegRad() {
-        val isDeg = tvMode.text == "DEG"
+        val isDeg = session.angleMode()
         val nextDeg = !isDeg
-        CardulatorEngine.nativeSetDegRad(nextDeg)
+        session.setAngleMode(nextDeg)
         tvMode.text = if (nextDeg) "DEG" else "RAD"
+        tvMode.contentDescription = getString(R.string.angle_mode_accessibility, tvMode.text)
         getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
             .edit()
             .putBoolean("degrees_mode", nextDeg)
@@ -957,17 +870,18 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun clearSessionAndHistory() {
-        CardulatorEngine.nativeClearHistory()
+        replOutput.invalidate()
+        session.clearHistory()
         replHistory.clear()
         replDisplayItems.clear()
         replHistoryIndex = -1
         tempReplInput = ""
-        convTabCachedMatches = null
-        tvOutput.text = if (hideWelcomeMessage) "History & Session Cleared.\n" else "History & Session Cleared.\n$WELCOME_MSG"
+        autocomplete.reset()
+        tvOutput.text = if (hideWelcomeMessage) getString(R.string.history_cleared) else getString(R.string.history_cleared) + welcomeMessage
         etInput.setText("")
         dismissErrorOverlay()
-        saveUserDataToStorage()
-        Toast.makeText(this, "History and variables cleared", Toast.LENGTH_SHORT).show()
+        session.saveUserData()
+        Toast.makeText(this, this@MainActivity.getString(R.string.ui_text_004), Toast.LENGTH_SHORT).show()
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Variables" || activeTab == "Formulas" || activeTab == "Constants") {
             refreshTabContent(activeTab)
@@ -975,7 +889,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showErrorOverlay(errorMessage: String) {
-        tvErrorOverlay.text = "ERROR: $errorMessage\n(Tap to dismiss)"
+        tvErrorOverlay.text = getString(R.string.error_overlay, errorMessage)
         tvErrorOverlay.visibility = View.VISIBLE
     }
 
@@ -987,75 +901,76 @@ class MainActivity : AppCompatActivity() {
 
     private fun submitCurrentInput() {
         val input = etInput.text.toString().trim()
-        if (input.isEmpty()) return
-
+        if (input.isEmpty() || !queueCommand(input)) return
         isSubmitting = true
-        try {
-            val activeTab = tabs[currentTabPosition]
-            if (activeTab == "Scripts") {
-                val log = CardulatorEngine.nativeRunScript(input)
-                appendRawOutput("> SCRIPT OUTPUT:\n$log\n")
-                etInput.setText("")
-            } else {
-                etInput.setText("")
-
-                val res = CardulatorEngine.nativeEvaluate(input)
-                val isError = res.startsWith("ERROR: ")
-                if (isError) {
-                    val errDetails = res.substring(7)
-                    showErrorOverlay(errDetails)
-                } else {
-                    dismissErrorOverlay()
-                }
-                appendOutputEntry(input, res, isError)
-
-                // Always add to history (even if command had an error, so Up Arrow can recall it)
-                if (replHistory.isEmpty() || replHistory.last() != input) {
-                    replHistory.add(input)
-                }
-                replHistoryIndex = -1
-
-                if (!res.startsWith("ERROR: ")) {
-                    // Switch to Plot tab if a plot command was issued successfully
-                    if (input.startsWith("plot(") || input.startsWith("plot.")) {
-                        val plotIdx = tabs.indexOf("Plot")
-                        if (plotIdx != -1) {
-                            spinnerTabs.setSelection(plotIdx)
-                        }
-                    }
-                }
-            }
-        } finally {
-            isSubmitting = false
-        }
+        try { etInput.setText("") } finally { isSubmitting = false }
         etInput.requestFocus()
-        etInput.post {
-            etInput.requestFocus()
-            val imm = getSystemService(INPUT_METHOD_SERVICE) as? android.view.inputmethod.InputMethodManager
-            imm?.showSoftInput(etInput, android.view.inputmethod.InputMethodManager.SHOW_FORCED)
+    }
+
+    private fun queueCommand(input: String, scriptName: String? = null): Boolean {
+        val accepted = session.runCommand(input, scriptName)
+        if (accepted && (scriptName != null || tabs[currentTabPosition] != "REPL")) hideSoftKeyboard()
+        return accepted
+    }
+
+    // Keep engine controls from waiting on the worker's native lock while a
+    // mutating command is running. Rendering and system navigation stay free.
+    override fun dispatchTouchEvent(event: android.view.MotionEvent): Boolean =
+        if (readyForCommands && session.commandRunning) true else super.dispatchTouchEvent(event)
+
+
+    private var readyForCommands = false
+
+    private fun observeCommands() {
+        readyForCommands = true
+        session.commandResult.observe(this) { result ->
+            if (result == null) return@observe
+            session.commandResult.value = null
+            val entry = result.entry
+            val definition = result.definition
+            if (definition != null) {
+                definitionController.complete(definition, entry)
+                if (!entry.isError && tabs[currentTabPosition] == definition.tab) refreshTabContent(definition.tab)
+                return@observe
+            }
+            val script = result.scriptName
+            if (script != null && !entry.isError) {
+                val log = entry.rawOutput
+                appendRawOutput(getString(R.string.script_output_entry, script, log))
+                dialogs.showScriptOutput(getString(R.string.script_output_title, script), log)
+            } else {
+                appendOutputEntry(entry)
+                if (entry.isError) showErrorOverlay(entry.rawOutput.removePrefix("ERROR: "))
+                else dismissErrorOverlay()
+            }
+            replHistoryIndex = -1
+            if (result.showPlot) spinnerTabs.setSelection(tabs.indexOf("Plot"))
         }
     }
 
     private fun refreshTabContent(tabName: String) {
+        pendingPlot?.cancel(false)
+        pendingPlot = null
+        if (helpPanelDelegate.isInitialized()) helpPanel.cancel()
+        findViewById<View>(R.id.search_toggle).visibility = if (tabName in searchableTabs) View.VISIBLE else View.GONE
         dismissErrorOverlay()
-        btnRunScript.visibility = View.GONE
         btnAddItem.visibility = View.GONE
         btnDeleteAll.visibility = View.GONE
         btnToggleEVars.visibility = View.GONE
+        if (tabName != "REPL") {
+            hideSoftKeyboard()
+        }
 
         when (tabName) {
-            "REPL", "Help" -> {
+            "REPL" -> {
                 scrollSettings.visibility = View.GONE
                 scrollItems.visibility = View.GONE
                 plotView.visibility = View.GONE
                 scrollView.visibility = View.VISIBLE
                 etInput.visibility = View.VISIBLE
                 toolbarKeyboard.visibility = View.VISIBLE
-
-                if (tabName == "Help") {
-                    val help = CardulatorEngine.nativeGetHelp("")
-                    tvOutput.text = "\n--- Help & Functions ---\n$help\n"
-                }
+                updateInputImeOptions()
+                updateEnterActionButtonText()
             }
             "Plot" -> {
                 scrollView.visibility = View.GONE
@@ -1065,8 +980,13 @@ class MainActivity : AppCompatActivity() {
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
 
-                val rawData = CardulatorEngine.nativeGetPlotLines()
-                plotView.updatePlotData(rawData)
+                val generation = ++plotRefreshGeneration
+                pendingPlot = session.preparePlot { result ->
+                    if (isDestroyed || isFinishing || tabs[currentTabPosition] != "Plot" ||
+                        generation != plotRefreshGeneration
+                    ) return@preparePlot
+                    result.onSuccess { plotView.updatePlotData(it) }
+                }
             }
             "Settings" -> {
                 scrollView.visibility = View.GONE
@@ -1083,15 +1003,15 @@ class MainActivity : AppCompatActivity() {
                     else -> rbThemeAuto.isChecked = true
                 }
             }
-            "Variables", "Formulas", "Constants", "Scripts" -> {
+            "Variables", "Formulas", "Constants", "Scripts", "Help", "Units" -> {
                 scrollView.visibility = View.GONE
                 scrollSettings.visibility = View.GONE
                 plotView.visibility = View.GONE
                 scrollItems.visibility = View.VISIBLE
                 etInput.visibility = View.GONE
                 toolbarKeyboard.visibility = View.GONE
-                btnAddItem.visibility = View.VISIBLE
-                btnDeleteAll.visibility = View.VISIBLE
+                btnAddItem.visibility = if (tabName == "Help" || tabName == "Units") View.GONE else View.VISIBLE
+                btnDeleteAll.visibility = btnAddItem.visibility
                 if (tabName == "Variables") {
                     btnToggleEVars.visibility = View.VISIBLE
                 }
@@ -1101,1023 +1021,117 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun showConfirmDeleteDialog(itemName: String, onConfirmDelete: () -> Unit) {
-        val fgColor = ThemePalette.fgText
-        val tvMsg = TextView(this).apply {
-            text = "Are you sure you want to delete '$itemName'?"
-            setTextColor(fgColor)
-            textSize = 14f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        showGruvboxCustomDialog("Confirm Deletion", tvMsg, positiveText = "DELETE") {
-            onConfirmDelete()
-            Toast.makeText(this, "Deleted '$itemName'", Toast.LENGTH_SHORT).show()
-        }
-    }
-
     private fun renderDedicatedMenuList(tabName: String) {
+        if (tabName == "Units") {
+            renderUnits()
+            return
+        }
         itemsContainer.removeAllViews()
 
-        val cardBgColor = ThemePalette.bgCard
-        val textColor = ThemePalette.fgText
-        val dimColor = ThemePalette.fgDim
-
         when (tabName) {
-            "Variables" -> {
-                val varsRaw = CardulatorEngine.nativeGetVariables()
-                var lines = varsRaw.split("\n").filter { it.contains("=") }
-                if (!showEVars) {
-                    lines = lines.filter { line ->
-                        val varName = line.split("=", limit = 2)[0].trim()
-                        !(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })
-                    }
-                }
-
-                if (lines.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = "No user variables defined.\nClick '+ Add' above to create one."
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(16, 32, 16, 32)
-                    }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (line in lines) {
-                        val parts = line.split("=", limit = 2)
-                        val name = parts[0].trim()
-                        val value = if (parts.size > 1) parts[1].trim() else ""
-
-                        val cardView = createMenuItemCard(
-                            title = name,
-                            subtitle = "= $value",
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onEdit = {
-                                showDefinitionEditorDialog("Edit Variable '$name'", "$name = $value", "$name = $value") { newExpr ->
-                                    CardulatorEngine.nativeEvaluate(newExpr)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            },
-                            onDelete = {
-                                showConfirmDeleteDialog(name) {
-                                    CardulatorEngine.nativeDeleteVariable(name)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        itemsContainer.addView(cardView)
-                    }
-                }
-            }
-            "Constants" -> {
-                val constsRaw = CardulatorEngine.nativeGetConstants()
-                val lines = constsRaw.split("\n").filter { it.contains("=") }
-
-                for (line in lines) {
-                    val parts = line.split("=", limit = 2)
-                    val name = parts[0].trim()
-                    val value = if (parts.size > 1) parts[1].trim() else ""
-                    val isBuiltIn = (name == "pi" || name == "e")
-
-                    val cardView = createMenuItemCard(
-                        title = name,
-                        subtitle = "= $value ${if (isBuiltIn) "(Built-in Constant)" else ""}",
-                        cardBgColor = cardBgColor,
-                        textColor = textColor,
-                        dimColor = dimColor,
-                        onEdit = if (!isBuiltIn) {
-                            {
-                                showDefinitionEditorDialog("Edit Constant '$name'", "$name = $value", "$name = $value") { newExpr ->
-                                    val fullExpr = if (newExpr.startsWith("const ")) newExpr else "const $newExpr"
-                                    CardulatorEngine.nativeEvaluate(fullExpr)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        } else null,
-                        onDelete = if (!isBuiltIn) {
-                            {
-                                showConfirmDeleteDialog(name) {
-                                    CardulatorEngine.nativeDeleteConstant(name)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        } else null
-                    )
-                    itemsContainer.addView(cardView)
-                }
-            }
-            "Formulas" -> {
-                val formulasRaw = CardulatorEngine.nativeGetFormulas()
-                val lines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
-
-                if (lines.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = "No custom formulas defined.\nClick '+ Add' above to create a formula e.g. f(x) = x^2"
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(16, 32, 16, 32)
-                    }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (line in lines) {
-                        val parts = line.split("=", limit = 2)
-                        val name = parts[0].trim()
-                        val bodySubtitle = if (parts.size > 1) "= " + parts[1].trim() else line
-
-                        val cardView = createMenuItemCard(
-                            title = name,
-                            subtitle = bodySubtitle,
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onRun = {
-                                showRunFormulaDialog(line)
-                            },
-                            onEdit = {
-                                showDefinitionEditorDialog("Edit Formula '$name'", line, line) { newFormula ->
-                                    CardulatorEngine.nativeEvaluate(newFormula)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            },
-                            onDelete = {
-                                showConfirmDeleteDialog(name) {
-                                    val cleanName = name.split("(")[0].trim()
-                                    CardulatorEngine.nativeDeleteFormula(cleanName)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        itemsContainer.addView(cardView)
-                    }
-                }
-            }
-            "Scripts" -> {
-                if (userScripts.isEmpty()) {
-                    val emptyTv = TextView(this).apply {
-                        text = "No custom scripts available.\nClick '+ Add' above to create a new script."
-                        setTextColor(dimColor)
-                        textSize = 14f
-                        setPadding(16, 32, 16, 32)
-                    }
-                    itemsContainer.addView(emptyTv)
-                } else {
-                    for (i in userScripts.indices) {
-                        val script = userScripts[i]
-                        val scriptName = script.first
-                        val scriptCode = script.second
-
-                        val cardView = createScriptMenuItemCard(
-                            scriptName = scriptName,
-                            scriptCode = scriptCode,
-                            cardBgColor = cardBgColor,
-                            textColor = textColor,
-                            dimColor = dimColor,
-                            onRun = {
-                                val log = CardulatorEngine.nativeRunScript(scriptCode)
-                                appendRawOutput("> SCRIPT OUTPUT ($scriptName):\n$log\n")
-                                showScriptOutputDialog("Script Output: $scriptName", log)
-                            },
-                            onEdit = {
-                                showFullScriptEditorDialog(scriptName, scriptCode) { newName, newCode ->
-                                    userScripts[i] = Pair(newName, newCode)
-                                    CardulatorEngine.nativeRegisterScript(newName, newCode)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            },
-                            onDelete = {
-                                showConfirmDeleteDialog(scriptName) {
-                                    userScripts.removeAt(i)
-                                    saveUserDataToStorage()
-                                    refreshTabContent(tabName)
-                                }
-                            }
-                        )
-                        itemsContainer.addView(cardView)
-                    }
-                }
-            }
-        }
-    }
-
-    private fun createScriptMenuItemCard(
-        scriptName: String,
-        scriptCode: String,
-        cardBgColor: Int,
-        textColor: Int,
-        dimColor: Int,
-        onRun: () -> Unit,
-        onEdit: () -> Unit,
-        onDelete: () -> Unit
-    ): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cardBgColor)
-            setPadding(16, 12, 16, 12)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 0, 0, 12)
-            layoutParams = lp
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = scriptName
-            setTextColor(textColor)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-
-        val tvSubtitle = TextView(this).apply {
-            val preview = scriptCode.lines().firstOrNull()?.take(60) ?: ""
-            text = preview
-            setTextColor(dimColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        val btnBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 8, 0, 0)
-            layoutParams = lp
-        }
-
-        val btnRun = Button(this).apply {
-            text = "▶ Run"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            setOnClickListener { onRun() }
-        }
-
-        val btnEdit = Button(this).apply {
-            text = "✎ Edit"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.green)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(16, 0, 0, 0)
-            layoutParams = lp
-            setOnClickListener { onEdit() }
-        }
-
-        val btnDelete = Button(this).apply {
-            text = "✕ Delete"
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 12f
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.WRAP_CONTENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(16, 0, 0, 0)
-            layoutParams = lp
-            setOnClickListener { onDelete() }
-        }
-
-        btnBar.addView(btnRun)
-        btnBar.addView(btnEdit)
-        btnBar.addView(btnDelete)
-
-        container.addView(tvTitle)
-        container.addView(tvSubtitle)
-        container.addView(btnBar)
-
-        return container
-    }
-
-    private fun createMenuItemCard(
-        title: String,
-        subtitle: String,
-        cardBgColor: Int,
-        textColor: Int,
-        dimColor: Int,
-        onRun: (() -> Unit)? = null,
-        onEdit: (() -> Unit)?,
-        onDelete: (() -> Unit)?
-    ): View {
-        val container = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(cardBgColor)
-            setPadding(16, 12, 16, 12)
-            val lp = LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                LinearLayout.LayoutParams.WRAP_CONTENT
-            )
-            lp.setMargins(0, 0, 0, 12)
-            layoutParams = lp
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = title
-            setTextColor(textColor)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-        }
-
-        val tvSubtitle = TextView(this).apply {
-            text = subtitle
-            setTextColor(dimColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
-        }
-
-        container.addView(tvTitle)
-        container.addView(tvSubtitle)
-
-        if (onRun != null || onEdit != null || onDelete != null) {
-            val btnBar = LinearLayout(this).apply {
-                orientation = LinearLayout.HORIZONTAL
-                val lp = LinearLayout.LayoutParams(
-                    LinearLayout.LayoutParams.MATCH_PARENT,
-                    LinearLayout.LayoutParams.WRAP_CONTENT
-                )
-                lp.setMargins(0, 8, 0, 0)
-                layoutParams = lp
-            }
-
-            if (onRun != null) {
-                val btnRun = Button(this).apply {
-                    text = "▶ Eval"
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    setOnClickListener { onRun() }
-                }
-                btnBar.addView(btnRun)
-            }
-
-            if (onEdit != null) {
-                val btnEdit = Button(this).apply {
-                    text = "✎ Edit"
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.green)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    val lp = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    if (onRun != null) lp.setMargins(16, 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener { onEdit() }
-                }
-                btnBar.addView(btnEdit)
-            }
-
-            if (onDelete != null) {
-                val btnDelete = Button(this).apply {
-                    text = "✕ Delete"
-                    setTextColor(ThemePalette.bgDarkText)
-                    backgroundTintList = ColorStateList.valueOf(ThemePalette.red)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 12f
-                    val lp = LinearLayout.LayoutParams(
-                        LinearLayout.LayoutParams.WRAP_CONTENT,
-                        LinearLayout.LayoutParams.WRAP_CONTENT
-                    )
-                    lp.setMargins(16, 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener { onDelete() }
-                }
-                btnBar.addView(btnDelete)
-            }
-
-            container.addView(btnBar)
-        }
-
-        return container
-    }
-
-    private fun showGruvboxCustomDialog(
-        title: String,
-        contentView: View,
-        positiveText: String? = "SAVE",
-        showCancel: Boolean = true,
-        customButtons: List<View>? = null,
-        onPositive: (() -> Unit)? = null
-    ): Dialog {
-        val dialog = Dialog(this, androidx.appcompat.R.style.Theme_AppCompat_DayNight_NoActionBar)
-        val bgColor = ThemePalette.bg
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val btnAqua = ThemePalette.aqua
-        val borderColor = ThemePalette.borderColor
-
-        dialog.window?.apply {
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            val dialogDrawable = GradientDrawable().apply {
-                setColor(bgColor)
-                setStroke(2, borderColor)
-                cornerRadius = 16f
-            }
-            setBackgroundDrawable(dialogDrawable)
-            setDimAmount(0.6f)
-            addFlags(android.view.WindowManager.LayoutParams.FLAG_DIM_BEHIND)
-            statusBarColor = bgSoft
-            val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
-            controller.isAppearanceLightStatusBars = isLightThemeActive
-        }
-
-        val root = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-            setBackgroundColor(bgColor)
-            setPadding(36, 32, 36, 32)
-        }
-
-        val tvTitle = TextView(this).apply {
-            text = title
-            setTextColor(fgColor)
-            textSize = 16f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(0, 0, 0, 16)
-        }
-
-        root.addView(tvTitle)
-
-        val contentContainer = if (contentView.parent == null) {
-            contentView
-        } else {
-            contentView
-        }
-        root.addView(contentContainer)
-
-        val btnBar = LinearLayout(this).apply {
-            orientation = LinearLayout.HORIZONTAL
-            gravity = android.view.Gravity.END
-            setPadding(0, 20, 0, 0)
-        }
-
-        if (customButtons != null) {
-            for (btn in customButtons) {
-                if (btn.parent != null) {
-                    (btn.parent as ViewGroup).removeView(btn)
-                }
-                btnBar.addView(btn)
-            }
-        } else {
-            if (showCancel) {
-                val btnCancel = Button(this).apply {
-                    text = "Cancel"
-                    setTextColor(fgColor)
-                    setBackgroundColor(Color.TRANSPARENT)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 13f
-                    setOnClickListener { dialog.dismiss() }
-                }
-                btnBar.addView(btnCancel)
-            }
-
-            if (positiveText != null) {
-                val btnOk = Button(this).apply {
-                    text = positiveText
-                    setTextColor(ThemePalette.fgInverted)
-                    backgroundTintList = ColorStateList.valueOf(btnAqua)
-                    typeface = android.graphics.Typeface.MONOSPACE
-                    textSize = 13f
-                    setTypeface(typeface, android.graphics.Typeface.BOLD)
-                    val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                    if (showCancel) lp.setMargins(16, 0, 0, 0)
-                    layoutParams = lp
-                    setOnClickListener {
-                        onPositive?.invoke()
-                        dialog.dismiss()
-                    }
-                }
-                btnBar.addView(btnOk)
-            }
-        }
-
-        root.addView(btnBar)
-
-        dialog.setContentView(root)
-        dialog.show()
-        return dialog
-    }
-
-    private fun showScriptOutputDialog(title: String, logText: String) {
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val borderColor = ThemePalette.borderColor
-
-        val tvOut = TextView(this).apply {
-            text = if (logText.isBlank()) "(No output printed)" else logText
-            setTextColor(fgColor)
-            textSize = 13f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(20, 16, 20, 16)
-        }
-
-        val scrollContainer = ScrollView(this).apply {
-            val bgDrawable = GradientDrawable().apply {
-                setColor(bgSoft)
-                setStroke(2, borderColor)
-                cornerRadius = 6f
-            }
-            background = bgDrawable
-            isScrollbarFadingEnabled = false
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 400)
-            lp.setMargins(0, 8, 0, 8)
-            layoutParams = lp
-            addView(tvOut)
-        }
-
-        showGruvboxCustomDialog(title, scrollContainer, positiveText = "CLOSE", showCancel = false) {}
-    }
-
-    private fun showRunFormulaDialog(formulaLine: String) {
-        val formulaHeader = formulaLine.split("=", limit = 2)[0].trim()
-        val cleanName = if (formulaHeader.contains("(")) formulaHeader.substring(0, formulaHeader.indexOf("(")).trim() else formulaHeader
-
-        var params = emptyList<String>()
-        if (formulaHeader.contains("(") && formulaHeader.contains(")")) {
-            val paramStr = formulaHeader.substring(formulaHeader.indexOf("(") + 1, formulaHeader.indexOf(")")).trim()
-            if (paramStr.isNotEmpty()) {
-                params = paramStr.split(",").map { it.trim() }.filter { it.isNotEmpty() }
-            }
-        }
-
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val fgDim = ThemePalette.fgDim
-        val borderColor = ThemePalette.borderColor
-
-        val layout = LinearLayout(this).apply {
-            orientation = LinearLayout.VERTICAL
-        }
-
-        val inputFields = mutableListOf<Pair<String, EditText>>()
-
-        for (param in params) {
-            val et = EditText(this).apply {
-                hint = "Value for $param"
-                typeface = android.graphics.Typeface.MONOSPACE
-                setBackgroundColor(bgSoft)
-                setTextColor(fgColor)
-                setHintTextColor(fgDim)
-                setPadding(16, 12, 16, 12)
-                val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-                lp.setMargins(0, 0, 0, 12)
-                layoutParams = lp
-            }
-            layout.addView(et)
-            inputFields.add(Pair(param, et))
-        }
-
-        val tvResultLabel = TextView(this).apply {
-            text = "Result:"
-            setTextColor(fgDim)
-            textSize = 12f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setPadding(0, 8, 0, 4)
-        }
-
-        val tvResultValue = TextView(this).apply {
-            text = "="
-            setTextColor(fgColor)
-            textSize = 15f
-            typeface = android.graphics.Typeface.MONOSPACE
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            setPadding(20, 14, 20, 14)
-            val bgDrawable = GradientDrawable().apply {
-                setColor(bgSoft)
-                setStroke(2, borderColor)
-                cornerRadius = 6f
-            }
-            background = bgDrawable
-        }
-
-        var currentEvalExpr = ""
-        var currentRes = ""
-
-        fun updateLiveResult() {
-            val argValues = inputFields.map { it.second.text.toString().trim() }
-            val hasEmptyInput = argValues.any { it.isEmpty() }
-            if (hasEmptyInput && params.isNotEmpty()) {
-                currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
-                currentRes = "Enter arguments above"
-                tvResultValue.text = currentRes
-                return
-            }
-
-            currentEvalExpr = if (argValues.isEmpty()) "$cleanName()" else "$cleanName(${argValues.joinToString(", ")})"
-            // Preview: evaluate without modifying REPL history
-            val rawRes = CardulatorEngine.nativeEvaluatePreview(currentEvalExpr)
-
-            currentRes = if (rawRes.startsWith("ERROR")) rawRes else rawRes
-            tvResultValue.text = "$currentEvalExpr = $currentRes"
-        }
-
-        for (pair in inputFields) {
-            pair.second.addTextChangedListener(object : android.text.TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    updateLiveResult()
-                }
-                override fun afterTextChanged(s: android.text.Editable?) {}
-            })
-        }
-
-        layout.addView(tvResultLabel)
-        layout.addView(tvResultValue)
-
-        updateLiveResult()
-
-        val btnExport = Button(this).apply {
-            text = "EXPORT"
-            setTextColor(ThemePalette.fgInverted)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.aqua)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 13f
-            setTypeface(typeface, android.graphics.Typeface.BOLD)
-            val lp = LinearLayout.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, ViewGroup.LayoutParams.WRAP_CONTENT)
-            lp.setMargins(16, 0, 0, 0)
-            layoutParams = lp
-        }
-
-        var formulaDialog: Dialog? = null
-
-        val btnClose = Button(this).apply {
-            text = "CLOSE"
-            setTextColor(fgColor)
-            setBackgroundColor(Color.TRANSPARENT)
-            typeface = android.graphics.Typeface.MONOSPACE
-            textSize = 13f
-            setOnClickListener { formulaDialog?.dismiss() }
-        }
-
-        btnExport.setOnClickListener {
-            if (currentEvalExpr.isNotEmpty() && !currentRes.startsWith("Enter")) {
-                val res = CardulatorEngine.nativeEvaluate(currentEvalExpr)
-                val isErr = res.startsWith("ERROR: ")
-                appendOutputEntry(currentEvalExpr, res, isErr)
-                if (replHistory.isEmpty() || replHistory.last() != currentEvalExpr) {
-                    replHistory.add(currentEvalExpr)
-                }
-                saveUserDataToStorage()
-                Toast.makeText(this@MainActivity, "Exported to REPL", Toast.LENGTH_SHORT).show()
-                refreshTabContent(tabs[currentTabPosition])
-            }
-        }
-
-        formulaDialog = showGruvboxCustomDialog(
-            formulaLine,
-            layout,
-            customButtons = listOf(btnClose, btnExport)
-        )
-    }
-
-    private fun showDefinitionEditorDialog(title: String, initialExpr: String, hintText: String, onSave: (String) -> Unit) {
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val fgDim = ThemePalette.fgDim
-
-        val et = EditText(this).apply {
-            setText(initialExpr)
-            setSelection(initialExpr.length)
-            hint = hintText
-            typeface = android.graphics.Typeface.MONOSPACE
-            setBackgroundColor(bgSoft)
-            setTextColor(fgColor)
-            setHintTextColor(fgDim)
-            setPadding(20, 16, 20, 16)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!isHighlighting && s != null) {
-                        applySyntaxHighlighting(editableText)
-                    }
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
-        }
-
-        if (initialExpr.isNotEmpty()) {
-            et.post { applySyntaxHighlighting(et.editableText) }
-        }
-
-        showGruvboxCustomDialog(title, et, positiveText = "SAVE") {
-            val valStr = et.text.toString().trim()
-            if (valStr.isNotEmpty()) {
-                onSave(valStr)
-            }
-        }
-    }
-
-    private fun showFullScriptEditorDialog(initialName: String, initialCode: String, onSave: (String, String) -> Unit) {
-        val dialog = Dialog(this, R.style.GruvboxFullscreenDialog)
-        dialog.setContentView(R.layout.dialog_script_editor)
-
-        val root = dialog.findViewById<LinearLayout>(R.id.script_editor_root)
-        val btnCancel = dialog.findViewById<Button>(R.id.btn_script_cancel)
-        val btnTab = dialog.findViewById<Button>(R.id.btn_script_tab)
-        val btnRun = dialog.findViewById<Button>(R.id.btn_script_run)
-        val btnSave = dialog.findViewById<Button>(R.id.btn_script_save)
-        val etName = dialog.findViewById<EditText>(R.id.et_script_name)
-        val etCode = dialog.findViewById<EditText>(R.id.et_script_code)
-
-        val bgColor = ThemePalette.bg
-        val bgSoft = ThemePalette.bgSoft
-        val fgColor = ThemePalette.fgText
-        val fgDim = ThemePalette.fgDim
-        val btnAqua = ThemePalette.aqua
-
-        root.setBackgroundColor(bgColor)
-
-        etName.apply {
-            setText(initialName)
-            setBackgroundColor(bgSoft)
-            setTextColor(fgColor)
-            setHintTextColor(fgDim)
-        }
-
-        etCode.apply {
-            setText(initialCode)
-            setBackgroundColor(bgSoft)
-            setTextColor(fgColor)
-            setHintTextColor(fgDim)
-            addTextChangedListener(object : TextWatcher {
-                override fun beforeTextChanged(s: CharSequence?, start: Int, count: Int, after: Int) {}
-                override fun onTextChanged(s: CharSequence?, start: Int, before: Int, count: Int) {
-                    if (!isHighlighting && s != null) {
-                        applySyntaxHighlighting(editableText)
-                    }
-                }
-                override fun afterTextChanged(s: Editable?) {}
-            })
-        }
-
-        if (initialCode.isNotEmpty()) {
-            etCode.post { applySyntaxHighlighting(etCode.editableText) }
-        }
-
-        btnCancel.apply {
-            setTextColor(fgColor)
-            setOnClickListener { dialog.dismiss() }
-        }
-
-        btnTab.apply {
-            setTextColor(fgColor)
-            setOnClickListener {
-                val cursor = etCode.selectionStart.coerceAtLeast(0)
-                val fullText = etCode.text.toString()
-                var wordStart = cursor
-                while (wordStart > 0 && (fullText[wordStart - 1].isLetterOrDigit() || fullText[wordStart - 1] == '_')) {
-                    wordStart--
-                }
-                val prefix = fullText.substring(wordStart, cursor)
-                if (prefix.isNotEmpty()) {
-                    // Collect local variable names from script text (identifiers before '=')
-                    val localVars = Regex("""^\s*([a-zA-Z_][\w]*)\s*=""", RegexOption.MULTILINE)
-                        .findAll(fullText)
-                        .map { it.groupValues[1] }
-                        .filter { it.startsWith(prefix) && it != prefix }
-                        .toList()
-                    if (localVars.isNotEmpty()) {
-                        val match = localVars.first()
-                        etCode.text.replace(wordStart, cursor, match)
-                        etCode.setSelection((wordStart + match.length).coerceAtMost(etCode.text.length))
-                    } else {
-                        val outCursor = intArrayOf(prefix.length)
-                        val completed = CardulatorEngine.nativeAutocomplete(prefix, prefix.length, outCursor)
-                        if (completed != prefix) {
-                            etCode.text.replace(wordStart, cursor, completed)
-                            etCode.setSelection((wordStart + completed.length).coerceAtMost(etCode.text.length))
+            "Help" -> helpPanel.render(::filterCards)
+            "Variables", "Constants" -> {
+                val constants = tabName == "Constants"
+                libraryPanel.renderValues(
+                    values = session.libraryValues(constants),
+                    constants = constants,
+                    showHistory = showEVars,
+                    onEdit = { name, expression ->
+                        val title = if (constants) R.string.edit_constant else R.string.edit_variable
+                        definitionController.show(getString(title, name), expression, expression, tabName)
+                    },
+                    onDelete = { name ->
+                        dialogs.confirmDelete(name) {
+                            session.deleteValue(name, constants)
+                            session.saveUserData()
+                            refreshTabContent(tabName)
                         }
                     }
-                }
+                )
             }
-        }
-
-        btnRun.apply {
-            setTextColor(ThemePalette.bgDarkText)
-            backgroundTintList = ColorStateList.valueOf(ThemePalette.yellow)
-            setOnClickListener {
-                val newName = etName.text.toString().trim()
-                val newCode = etCode.text.toString().trim()
-                if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    onSave(newName, newCode)
-                    val log = CardulatorEngine.nativeRunScript(newCode)
-                    appendRawOutput("> SCRIPT OUTPUT ($newName):\n$log\n")
-                    showScriptOutputDialog("Script Output: $newName", log)
-                } else {
-                    Toast.makeText(this@MainActivity, "Name and code cannot be empty", Toast.LENGTH_SHORT).show()
+            "Formulas" -> libraryPanel.renderFormulas(
+                formulas = session.libraryFormulas(),
+                onRun = { formulaRunner.show(it) },
+                onEdit = { formula ->
+                    definitionController.show(getString(R.string.edit_formula, formula.signature), formula.expression, formula.expression, tabName)
+                },
+                onDelete = { formula ->
+                    dialogs.confirmDelete(formula.signature) {
+                        session.deleteFormula(formula.name)
+                        session.saveUserData()
+                        refreshTabContent(tabName)
+                    }
                 }
-            }
-        }
-
-        btnSave.apply {
-            setTextColor(ThemePalette.fgInverted)
-            backgroundTintList = ColorStateList.valueOf(btnAqua)
-            setOnClickListener {
-                val newName = etName.text.toString().trim()
-                val newCode = etCode.text.toString().trim()
-                if (newName.isNotEmpty() && newCode.isNotEmpty()) {
-                    onSave(newName, newCode)
-                    dialog.dismiss()
-                } else {
-                    Toast.makeText(this@MainActivity, "Name and code cannot be empty", Toast.LENGTH_SHORT).show()
+            )
+            "Scripts" -> libraryPanel.renderScripts(
+                scripts = userScripts,
+                onRun = { code, name -> queueCommand(code, name) },
+                onEdit = { openScriptEditor(it) },
+                onDelete = { name ->
+                    dialogs.confirmDelete(name) {
+                        scriptLibrary.remove(name)
+                        session.saveUserData()
+                        refreshTabContent(tabName)
+                    }
                 }
-            }
+            )
         }
+        filterCards()
+    }
 
-        dialog.show()
-
-        dialog.window?.apply {
-            setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-            setBackgroundDrawable(ColorDrawable(bgColor))
-            statusBarColor = bgSoft
-            val controller = androidx.core.view.WindowCompat.getInsetsController(this, decorView)
-            controller.isAppearanceLightStatusBars = isLightThemeActive
+    private fun openScriptEditor(originalName: String?) {
+        val draft = session.scriptDraft ?: ScriptDraft(
+            originalName, originalName.orEmpty(),
+            userScripts.firstOrNull { it.first == originalName }?.second.orEmpty()
+        ).also { session.scriptDraft = it }
+        val editor = ScriptEditor(
+            this, session, highlighter, ::applySystemInsets, ::selectAutocompleteEditor,
+            { code, name -> queueCommand(code, name) },
+            { dialog -> activeDialogs.add(dialog) },
+            { dialog ->
+                activeDialogs.remove(dialog)
+                if (!isChangingConfigurations && session.scriptDraft === draft) session.scriptDraft = null
+            }
+        )
+        editor.show(draft) { name, code ->
+            if (!scriptLibrary.save(draft.originalName, name, code)) {
+                Toast.makeText(this, R.string.ui_text_008, Toast.LENGTH_LONG).show()
+                return@show false
+            }
+            session.saveUserData()
+            if (tabs[currentTabPosition] == "Scripts") refreshTabContent("Scripts")
+            true
         }
     }
 
     private fun showAddItemDialog() {
         val activeTab = tabs[currentTabPosition]
         if (activeTab == "Scripts") {
-            showFullScriptEditorDialog("", "") { name, code ->
-                userScripts.add(Pair(name, code))
-                CardulatorEngine.nativeRegisterScript(name, code)
-                saveUserDataToStorage()
-                refreshTabContent("Scripts")
-            }
+            openScriptEditor(null)
             return
         }
 
-        val title = "Add $activeTab Item"
+        val title = getString(R.string.add_item_title, tabTitle(activeTab))
         val hintText = when (activeTab) {
             "Formulas" -> "f(x) = x^2 + 2*x"
             "Constants" -> "MY_CONST = 3.14159"
             else -> "x = 42"
         }
 
-        showDefinitionEditorDialog(title, "", hintText) { expr ->
-            when (activeTab) {
-                "Constants" -> {
-                    val fullExpr = if (expr.startsWith("const ")) expr else "const $expr"
-                    CardulatorEngine.nativeEvaluate(fullExpr)
-                }
-                else -> {
-                    CardulatorEngine.nativeEvaluate(expr)
-                }
-            }
-            saveUserDataToStorage()
-            refreshTabContent(activeTab)
-        }
+        definitionController.show(title, "", hintText, activeTab)
     }
-
-    private fun saveUserDataToStorage() {
-        try {
-            val file = java.io.File(filesDir, "user_data.json")
-            val json = org.json.JSONObject()
-
-            // Save variables
-            val varsRaw = CardulatorEngine.nativeGetVariables()
-            val varLines = varsRaw.split("\n").filter { it.contains("=") }
-            val varsArray = org.json.JSONArray()
-            for (l in varLines) {
-                val varName = l.split("=", limit = 2)[0].trim()
-                if (!(varName.length > 1 && varName[0] == 'e' && varName.substring(1).all { it.isDigit() })) {
-                    varsArray.put(l)
-                }
-            }
-            json.put("variables", varsArray)
-
-            // Save formulas
-            val formulasRaw = CardulatorEngine.nativeGetFormulas()
-            val formulaLines = formulasRaw.split("\n").filter { it.contains("=") || it.contains("(") }
-            val formulasArray = org.json.JSONArray()
-            for (l in formulaLines) {
-                formulasArray.put(l)
-            }
-            json.put("formulas", formulasArray)
-
-            // Save constants
-            val constsRaw = CardulatorEngine.nativeGetConstants()
-            val constLines = constsRaw.split("\n").filter { it.contains("=") }
-            val constsArray = org.json.JSONArray()
-            for (l in constLines) {
-                val name = l.split("=", limit = 2)[0].trim()
-                if (name != "pi" && name != "e") {
-                    constsArray.put(l)
-                }
-            }
-            json.put("constants", constsArray)
-
-            // Save scripts
-            val scriptsArray = org.json.JSONArray()
-            for (s in userScripts) {
-                val scriptObj = org.json.JSONObject()
-                scriptObj.put("name", s.first)
-                scriptObj.put("code", s.second)
-                scriptsArray.put(scriptObj)
-            }
-            json.put("scripts", scriptsArray)
-
-            file.writeText(json.toString())
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-    private fun loadUserDataFromStorage() {
-        try {
-            val file = java.io.File(filesDir, "user_data.json")
-            if (!file.exists()) return
-
-            val json = org.json.JSONObject(file.readText())
-
-            // Restore variables
-            if (json.has("variables")) {
-                val varsArray = json.getJSONArray("variables")
-                for (i in 0 until varsArray.length()) {
-                    val line = varsArray.getString(i)
-                    CardulatorEngine.nativeEvaluate(line)
-                }
-            }
-
-            // Restore formulas
-            if (json.has("formulas")) {
-                val formulasArray = json.getJSONArray("formulas")
-                for (i in 0 until formulasArray.length()) {
-                    val line = formulasArray.getString(i)
-                    CardulatorEngine.nativeEvaluate(line)
-                }
-            }
-
-            // Restore constants
-            if (json.has("constants")) {
-                val constsArray = json.getJSONArray("constants")
-                for (i in 0 until constsArray.length()) {
-                    val line = constsArray.getString(i)
-                    val parts = line.split("=", limit = 2)
-                    if (parts.size >= 2) {
-                        val name = parts[0].trim()
-                        val valStr = parts[1].trim()
-                        CardulatorEngine.nativeEvaluate("const $name = $valStr")
-                    }
-                }
-            }
-
-            // Restore scripts
-            if (json.has("scripts")) {
-                val scriptsArray = json.getJSONArray("scripts")
-                userScripts.clear()
-                for (i in 0 until scriptsArray.length()) {
-                    val obj = scriptsArray.getJSONObject(i)
-                    val name = obj.getString("name")
-                    val code = obj.getString("code")
-                    userScripts.add(Pair(name, code))
-                    // Register each script so run(name) can find it
-                    CardulatorEngine.nativeRegisterScript(name, code)
-                }
-            }
-        } catch (e: Exception) {
-            e.printStackTrace()
-        }
-    }
-
-
 
     private val customThemeLauncher = registerForActivityResult(androidx.activity.result.contract.ActivityResultContracts.GetContent()) { uri ->
         if (uri != null) {
             try {
-                contentResolver.openInputStream(uri)?.use { inputStream ->
-                    val jsonStr = inputStream.bufferedReader(Charsets.UTF_8).readText()
-                    if (ThemePalette.loadCustomThemeJson(jsonStr)) {
-                        val prefs = getSharedPreferences("droidulator_prefs", MODE_PRIVATE)
-                        prefs.edit().putString("custom_theme_json", jsonStr).apply()
-                        applyTheme()
-                        Toast.makeText(this, "Custom JSON theme loaded successfully!", Toast.LENGTH_SHORT).show()
-                    } else {
-                        Toast.makeText(this, "Invalid theme JSON format", Toast.LENGTH_LONG).show()
-                    }
+                if (themeSettings.importCustomPalette(uri)) {
+                    applyTheme()
+                    Toast.makeText(this, R.string.ui_text_020, Toast.LENGTH_SHORT).show()
+                } else {
+                    Toast.makeText(this, R.string.ui_text_021, Toast.LENGTH_LONG).show()
                 }
             } catch (e: Exception) {
-                Toast.makeText(this, "Failed to load file: ${e.message}", Toast.LENGTH_LONG).show()
+                Toast.makeText(this, getString(R.string.theme_load_failed, e.message.orEmpty()), Toast.LENGTH_LONG).show()
             }
         }
     }
@@ -2128,14 +1142,7 @@ class MainActivity : AppCompatActivity() {
 
     // --- Theme Management (Dark / Light / System Auto) ---
     private fun applyTheme() {
-        val currentNightMode = resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK
-        val isSystemDark = currentNightMode == Configuration.UI_MODE_NIGHT_YES
-
-        isLightThemeActive = when (themeMode) {
-            1 -> false // Dark
-            2 -> true  // Light
-            else -> !isSystemDark // Auto: Follow system
-        }
+        isLightThemeActive = themeSettings.isLight(resources.configuration, themeMode)
 
         ThemePalette.isDark = !isLightThemeActive
 
@@ -2143,12 +1150,40 @@ class MainActivity : AppCompatActivity() {
         val bgSoftColor = ThemePalette.bgSoft
         val fgColor = ThemePalette.fgText
         val fgDimColor = ThemePalette.fgDim
-        val spinnerTint = ThemePalette.green
+
 
         // Root & Top Bar
         mainRoot.setBackgroundColor(bgColor)
-        topHeaderBar.setBackgroundColor(bgSoftColor)
-        spinnerTabs.backgroundTintList = ColorStateList.valueOf(spinnerTint)
+        topHeaderBar.background = rounded(bgSoftColor)
+        window?.let { activityWindow ->
+            if (android.os.Build.VERSION.SDK_INT < 35) {
+                activityWindow.statusBarColor = bgColor
+                activityWindow.navigationBarColor = bgColor
+            }
+            val controller = androidx.core.view.WindowCompat.getInsetsController(activityWindow, activityWindow.decorView)
+            val lightBars = androidx.core.graphics.ColorUtils.calculateLuminance(bgColor) > 0.5
+            controller.isAppearanceLightStatusBars = lightBars
+            controller.isAppearanceLightNavigationBars = lightBars
+        }
+        val themedButtons = listOf(
+            btnAddItem to ThemePalette.yellow, btnDeleteAll to ThemePalette.red, btnToggleEVars to ThemePalette.aqua,
+            btnNavLeft to ThemePalette.blue, btnNavRight to ThemePalette.blue,
+            btnNavUp to ThemePalette.purple, btnNavDown to ThemePalette.purple,
+            btnTab to ThemePalette.yellow, btnClear to ThemePalette.red,
+            btnEnter to ThemePalette.green,
+            btnLoadCustomTheme to ThemePalette.aqua,
+            btnSettingsClearHistory to ThemePalette.red
+        )
+        val btnFg = ThemePalette.btnText
+        for ((button, color) in themedButtons) {
+            button.backgroundTintList = ColorStateList.valueOf(color)
+            button.setTextColor(btnFg)
+            (button as? com.google.android.material.button.MaterialButton)?.iconTint = ColorStateList.valueOf(btnFg)
+        }
+        for (spinner in listOf(spinnerTabs, spinnerFmtMode, spinnerFmtPrec)) {
+            spinner.background = rounded(spinnerColor(spinner))
+            spinner.setPopupBackgroundDrawable(rounded(bgSoftColor))
+        }
         (spinnerTabs.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
         (spinnerFmtMode.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
         (spinnerFmtPrec.adapter as? ArrayAdapter<*>)?.notifyDataSetChanged()
@@ -2156,6 +1191,20 @@ class MainActivity : AppCompatActivity() {
         // Scroll Views & Plot View
         scrollView.setBackgroundColor(bgColor)
         tvOutput.setTextColor(fgColor)
+        tvMode.background = rounded(ThemePalette.yellow)
+        tvMode.setTextColor(ThemePalette.btnText)
+        tvMode.typeface = android.graphics.Typeface.MONOSPACE
+        tvMode.textSize = 13f
+        searchField.apply {
+            background = rounded(ThemePalette.bgSoft)
+            setTextColor(ThemePalette.fgText)
+            setHintTextColor(ThemePalette.fgDim)
+            typeface = android.graphics.Typeface.MONOSPACE
+        }
+        findViewById<com.google.android.material.button.MaterialButton>(R.id.search_toggle).apply {
+            backgroundTintList = ColorStateList.valueOf(ThemePalette.aqua)
+            iconTint = ColorStateList.valueOf(ThemePalette.btnText)
+        }
         scrollSettings.setBackgroundColor(bgColor)
         scrollItems.setBackgroundColor(bgColor)
         plotView.setThemeMode(isLightThemeActive)
@@ -2164,156 +1213,40 @@ class MainActivity : AppCompatActivity() {
         tvSettingsSectionTheme.setTextColor(fgColor)
         tvSettingsSectionCustomTheme.setTextColor(fgColor)
         tvSettingsSectionDisplay.setTextColor(fgColor)
-        tvSettingsSectionEnterAction.setTextColor(fgColor)
 
-        rbThemeAuto.setTextColor(fgColor)
-        rbThemeDark.setTextColor(fgColor)
-        rbThemeLight.setTextColor(fgColor)
-
-        cbHideWelcome.setTextColor(fgColor)
-        cbAutoPair.setTextColor(fgColor)
-        cbDigitGrouping.setTextColor(fgColor)
+        val settingsTint = ColorStateList.valueOf(ThemePalette.aqua)
+        listOf(rbThemeAuto, rbThemeDark, rbThemeLight, cbHideWelcome, cbAutoPair,
+            cbDigitGrouping, btnSettingsEnterAction,
+            findViewById<CheckBox>(R.id.cb_toolbar_haptics)).forEach { control ->
+            control.setTextColor(fgColor)
+            control.buttonTintList = settingsTint
+        }
 
         btnResetCustomTheme.setTextColor(fgColor)
         btnResetCustomTheme.backgroundTintList = ColorStateList.valueOf(bgSoftColor)
 
         // Input Field & Keyboard Bar
-        etInput.setBackgroundColor(bgSoftColor)
+        etInput.background = rounded(bgSoftColor)
         etInput.setTextColor(fgColor)
         etInput.setHintTextColor(fgDimColor)
-        toolbarKeyboard.setBackgroundColor(bgSoftColor)
+        toolbarKeyboard.background = rounded(bgSoftColor)
 
         // Re-render menu cards under new theme if active tab is a menu list
         val currentTab = tabs[currentTabPosition]
-        if (currentTab in arrayOf("Variables", "Formulas", "Constants", "Scripts")) {
+        if (currentTab in arrayOf("Variables", "Formulas", "Constants", "Scripts", "Help", "Units")) {
             renderDedicatedMenuList(currentTab)
         }
         rebuildReplOutput()
 
         // Re-apply syntax highlighting for input field if non-empty
         if (etInput.text.isNotEmpty()) {
-            applySyntaxHighlighting(etInput.text)
+            highlighter.apply(etInput.text)
         }
-    }
-
-    // --- Syntax Highlighting & Bracket Matching ---
-    private fun applyExpressionSyntaxHighlighting(ssb: Spannable, startOffset: Int, text: String) {
-        val numColor = ThemePalette.purple
-        val funcColor = ThemePalette.aqua
-        val constColor = ThemePalette.yellow
-        val keywordColor = ThemePalette.red
-        val opColor = ThemePalette.orange
-        val errColor = ThemePalette.red
-
-        // 1. Highlight numbers
-        for (match in NUMBER_REGEX.findAll(text)) {
-            ssb.setSpan(
-                ForegroundColorSpan(numColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 2. Highlight control flow keywords
-        for (match in KEYWORD_REGEX.findAll(text)) {
-            ssb.setSpan(
-                ForegroundColorSpan(keywordColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 3. Highlight functions
-        for (match in FUNC_REGEX.findAll(text)) {
-            ssb.setSpan(
-                ForegroundColorSpan(funcColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 4. Highlight built-in constants & history variables
-        for (match in CONST_REGEX.findAll(text)) {
-            ssb.setSpan(
-                ForegroundColorSpan(constColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 5. Highlight operators
-        for (match in OP_REGEX.findAll(text)) {
-            ssb.setSpan(
-                ForegroundColorSpan(opColor),
-                startOffset + match.range.first,
-                startOffset + match.range.last + 1,
-                Spannable.SPAN_EXCLUSIVE_EXCLUSIVE
-            )
-        }
-
-        // 6. Rainbow Bracket Highlighting & Matching
-        val colors = ThemePalette.rainbowColors
-        val numColors = colors.size
-        var stackSize = 0
-        val maxStack = 64
-        val charStack = CharArray(maxStack)
-        val posStack = IntArray(maxStack)
-
-        for (i in text.indices) {
-            val c = text[i]
-            val absPos = startOffset + i
-            if (c == '(' || c == '[' || c == '{') {
-                val color = colors[stackSize % numColors]
-                ssb.setSpan(ForegroundColorSpan(color), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                if (stackSize < maxStack) {
-                    charStack[stackSize] = c
-                    posStack[stackSize] = absPos
-                    stackSize++
-                }
-            } else if (c == ')' || c == ']' || c == '}') {
-                if (stackSize > 0) {
-                    val topChar = charStack[stackSize - 1]
-                    stackSize--
-                    val matches = (topChar == '(' && c == ')') ||
-                                  (topChar == '[' && c == ']') ||
-                                  (topChar == '{' && c == '}')
-                    if (matches) {
-                        val color = colors[stackSize % numColors]
-                        ssb.setSpan(ForegroundColorSpan(color), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    } else {
-                        ssb.setSpan(ForegroundColorSpan(errColor), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                    }
-                } else {
-                    ssb.setSpan(ForegroundColorSpan(errColor), absPos, absPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-                }
-            }
-        }
-
-        while (stackSize > 0) {
-            stackSize--
-            val unclosedPos = posStack[stackSize]
-            ssb.setSpan(ForegroundColorSpan(errColor), unclosedPos, unclosedPos + 1, Spannable.SPAN_EXCLUSIVE_EXCLUSIVE)
-        }
-    }
-
-    private fun applySyntaxHighlighting(editable: Editable) {
-        isHighlighting = true
-
-        val existingSpans = editable.getSpans(0, editable.length, ForegroundColorSpan::class.java)
-        for (span in existingSpans) {
-            editable.removeSpan(span)
-        }
-
-        applyExpressionSyntaxHighlighting(editable, 0, editable.toString())
-
-        isHighlighting = false
     }
 
     override fun dispatchKeyEvent(event: KeyEvent): Boolean {
+        if (readyForCommands && session.commandRunning && event.keyCode != KeyEvent.KEYCODE_BACK)
+            return true
         if (event.action == KeyEvent.ACTION_DOWN) {
             dismissErrorOverlay()
         }

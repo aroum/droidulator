@@ -1,11 +1,11 @@
 #include "help_engine.h"
 
-bool preprocessHelp(const std::string& s, std::string& help_out) {
+static bool legacyHelp(const std::string& s, std::string& help_out) {
     std::string trimmed = s;
     trimmed.erase(0, trimmed.find_first_not_of(" \t"));
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
     if (trimmed == "help()" || trimmed == "help" || trimmed == "help( )") {
-        help_out = "=== Cardulator Help ===\n"
+        help_out = "=== Droidulator Help ===\n"
                    "Trig: sin, cos, tan, cot, sec, csc, tg, ctg\n"
                    "Arc-Trig: asin, acos, atan, acot, asec, acsc\n"
                    "Hyperbolic: sinh, cosh, tanh, coth, sech, csch\n"
@@ -22,7 +22,10 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
         std::string target = trimmed.substr(5, trimmed.size() - 6);
         target.erase(0, target.find_first_not_of(" \t\"'"));
         target.erase(target.find_last_not_of(" \t\"'") + 1);
-        if (target == "plot") {
+        if (target == "xor") {
+            help_out = "a xor b\nLogical exclusive OR. Zero is false and nonzero is true.\nExamples\n1 xor 0 = 1\n2 xor 3 = 0";
+        }
+        else if (target == "plot") {
             help_out = "=== plot() Help ===\n"
                        "Usage: plot(y) or plot(x, y, [col], [style])\n"
                        "Colors (col):\n"
@@ -54,6 +57,8 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
                        "  conv(30, \"dBm\", \"mW\")     -> 1000 mW\n"
                        "  conv(20, \"dB\", \"times\")   -> 100 times\n"
                        "  conv(24, \"AWG\", \"mm^2\")   -> 0.20473 mm^2\n\n"
+                       "Component markings must be quoted: conv(\"104\", \"pf\") decodes a capacitor marking;\n"
+                       "conv(104, \"pf\") means the numeric value 104 pF.\n\n"
                        "Supported Base Units by Category:\n"
                        "  - Length: m, mile, nmi (nauticalmile), inch (in), ft, yd, fathom, cable, marineleague, angstrom, lightyear, parsec, au\n"
                        "  - Mass: g, lb, oz, ton, tonne, grain, dram, stone, slug, amu\n"
@@ -132,7 +137,7 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
                        "sgn(x)  : Sign of x (-1, 0, 1)\n"
                        "floor(x): Round down to integer\n"
                        "ceil(x) : Round up to integer\n"
-                       "round(x): Round to nearest integer\n"
+                       "round(x, places = 0): Round to decimal places; negative places round tens, hundreds, etc.\n"
                        "trunc(x): Integer part towards zero";
         }
         else if (target == "mod") {
@@ -173,146 +178,44 @@ bool preprocessHelp(const std::string& s, std::string& help_out) {
     return false;
 }
 
-void getHelpPopupData(AppState state, bool script_edit_mode, std::string& out_title, std::vector<std::string>& out_lines) {
-    out_title = "HELP: ";
-    switch (state) {
-        case STATE_CALC:
-            out_title += "REPL Calculator";
-            out_lines = {
-                "Enter: Compute expression",
-                "Up/Down: Input history",
-                "Ctrl+Up/Down: Scroll viewport",
-                "G0 btn: Back / Reset REPL",
-                "Tab: Autocomplete words",
-                "Fn+V: Variables Manager",
-                "Fn+S: Script Manager",
-                "Fn+G: Plotting mode",
-                "Fn+B: Hotkey binds",
-                "Fn+F: Formulas library",
-                "Fn+P: System Parameters",
-                "Fn+C: Clear all memory"
-            };
-            break;
-        case STATE_VARS:
-            out_title += "Variables Manager";
-            out_lines = {
-                "Up/Down or ; . : Select var",
-                "Enter: Edit variable value",
-                "N: Create new variable",
-                "Del/Backspace: Delete var",
-                "Fn+C: Clear all variables",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        case STATE_BINDS:
-            out_title += "Hotkey Binds";
-            out_lines = {
-                "Up/Down or ; . : Select bind",
-                "N: Create hotkey bind",
-                "Alt+Key: Execute bind in REPL",
-                "Del/Backspace: Delete bind",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        case STATE_FORMULAS:
-            out_title += "Formulas Library";
-            out_lines = {
-                "Up/Down or ; . : Select formula",
-                "Enter: Run wizard (max 4 args)",
-                "N: Create custom formula",
-                "E: Edit formula string",
-                "Del/Backspace: Delete formula",
-                "Wizard: Up/Down nav, Esc/` exit",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        case STATE_SCRIPTS:
-            if (script_edit_mode) {
-                out_title += "Script Editor";
-                out_lines = {
-                    "Fn+Enter / Fn+R: Save & Run",
-                    "Enter: Insert new line",
-                    "Tab: Autocomplete words",
-                    "Ctrl+Left/Right: Jump word",
-                    "Ctrl+Home/End: Jump document",
-                    "Ctrl+C/X/V: Copy/Cut/Paste",
-                    "Esc: Exit (Save prompt modal)"
-                };
-            } else {
-                out_title += "Script Manager";
-                out_lines = {
-                    "Up/Down or ; . : Select script",
-                    "Enter: Run selected script",
-                    "E: Edit script in editor",
-                    "N: Create new script file",
-                    "Del/Backspace: Delete script",
-                    "Esc or [: Exit to REPL"
-                };
-            }
-            break;
-        case STATE_PLOT:
-            out_title += "Plot Controls";
-            out_lines = {
-                "plot(y), plot(x,y,col,style)",
-                ", / . : Zoom in / out",
-                "Arrows / WASD: Pan view",
-                "a / A: Auto-scale view",
-                "plot.hold(1): Overlay mode",
-                "plot.xlim([min, max])",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        case STATE_PARAMS:
-            out_title += "System Parameters";
-            out_lines = {
-                "Up/Down or ; . : Select param",
-                "Left/Right or Enter: Toggle/Edit",
-                "Screen Timeout: Off time (s)",
-                "Brightness: Backlight (0-255)",
-                "Thousands Sep: 1 000 000",
-                "Auto Brackets: Auto-close ()",
-                "Sticky Mod: Fn/Aa/Opt latch",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        case STATE_CONSTS:
-            out_title += "Constants Manager";
-            out_lines = {
-                "Up/Down or ; . : Select const",
-                "const a = 3: Create/update",
-                "Del/Backspace: Delete const",
-                "Esc or [: Exit to REPL"
-            };
-            break;
-        default:
-            out_title += "Cardulator";
-            out_lines = { "Fn+H: Context help popup", "Esc: Exit modal" };
-            break;
-    }
-}
+#include "help_catalog.h"
+#include <algorithm>
+#include <cctype>
 
-void getHelpViewData(std::string& out_title, std::vector<std::string>& out_left_col, std::vector<std::string>& out_right_col) {
-    out_title = "Cardulator | HELP";
-    out_left_col = {
-        "--- Controls ---",
-        "Up/Dn: History/Input",
-        "Ctrl+Up/Dn:Scroll view",
-        "G0 btn: Back / Clear",
-        "fn+V:Vars fn+C:Consts",
-        "fn+B:Binds fn+F:Forms",
-        "fn+S:Script fn+G:Plot",
-        "fn+P:Params fn+D:DegRad",
-        "fn+H: Help Overlay"
+bool preprocessHelp(const std::string& input, std::string& output) {
+    std::string request = input;
+    const auto first = request.find_first_not_of(" \t\r\n");
+    if (first == std::string::npos) return false;
+    request = request.substr(first, request.find_last_not_of(" \t\r\n") - first + 1);
+    if (request == "help" || request == "help()" || request == "help( )") {
+        output = "Droidulator Help\nUse help(topic) or search the Help section.\nTopics\n";
+        for (const auto& entry : helpEntries) output += std::string(entry.name) + "\n";
+        return true;
+    }
+    if (request.rfind("help(", 0) != 0 || request.back() != ')') return false;
+    std::string topic = request.substr(5, request.size() - 6);
+    const auto start = topic.find_first_not_of(" \t\"'");
+    topic = start == std::string::npos ? "" : topic.substr(start, topic.find_last_not_of(" \t\"'") - start + 1);
+    if (topic == "index") {
+        output.clear();
+        for (const auto& entry : helpEntries) output += std::string(entry.name) + "\n";
+        return true;
+    }
+    auto equalName = [](const std::string& a, const std::string& b) {
+        return a.size() == b.size() && std::equal(a.begin(), a.end(), b.begin(),
+            [](unsigned char x, unsigned char y) { return std::tolower(x) == std::tolower(y); });
     };
-    out_right_col = {
-        "--- Syntax ---",
-        "Tab: Auto-complete",
-        "help(): List funcs",
-        "help(print)",
-        "a=2*pi+1",
-        "f(x)=x^2",
-        "e1,e2: Prev results",
-        "1k=1000, 1M=1e6",
-        "print(\"x={x}\")"
-    };
+    for (const auto& entry : helpEntries) {
+        if (!equalName(topic, entry.name)) continue;
+        output = std::string(entry.description) + "\n\nSyntax\n" + entry.syntax +
+            "\n\nExamples\n" + entry.example;
+        if (entry.detail[0]) {
+            std::string reference;
+            legacyHelp("help(" + std::string(entry.detail) + ")", reference);
+            if (!reference.empty()) output += "\n\nReference\n" + reference;
+        }
+        return true;
+    }
+    output = "Unknown help topic '" + topic + "'. Use help() to list available topics.";
+    return true;
 }

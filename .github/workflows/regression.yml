@@ -1,0 +1,121 @@
+name: Full regression checks
+
+on:
+  workflow_call:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: regression-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  native:
+    name: Native, JNI, sanitizers and fuzzing
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - name: Native and checked JNI
+        run: |
+          mkdir -p test-artifacts
+          cmake -S tests/native -B /tmp/regression-native -DCMAKE_BUILD_TYPE=Release -DBUILD_JNI_TESTS=ON
+          cmake --build /tmp/regression-native --parallel 2
+          ctest --test-dir /tmp/regression-native --output-on-failure --output-junit "$GITHUB_WORKSPACE/test-artifacts/native.xml"
+      - name: ASan and UBSan engine checks
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          CC=clang CXX=clang++ cmake -S tests/native -B /tmp/regression-sanitized -DCMAKE_BUILD_TYPE=Debug \
+            '-DCMAKE_C_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_CXX_FLAGS=-fsanitize=address,undefined -fno-omit-frame-pointer' \
+            '-DCMAKE_EXE_LINKER_FLAGS=-fsanitize=address,undefined'
+          cmake --build /tmp/regression-sanitized --parallel 2
+          ctest --test-dir /tmp/regression-sanitized --output-on-failure --output-junit "$GITHUB_WORKSPACE/test-artifacts/sanitizers.xml"
+      - name: Fuzz conversion inputs
+        env:
+          ASAN_OPTIONS: detect_leaks=0
+          UBSAN_OPTIONS: halt_on_error=1
+        run: |
+          CC=clang CXX=clang++ cmake -S tests/native -B /tmp/regression-fuzz -DBUILD_UNITS_FUZZER=ON -DCMAKE_BUILD_TYPE=RelWithDebInfo
+          cmake --build /tmp/regression-fuzz --target units_fuzz --parallel 2
+          cp -R tests/native/corpus /tmp/regression-corpus
+          /tmp/regression-fuzz/units_fuzz /tmp/regression-corpus -runs=1000 -max_len=128 -seed=1
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-native-reports
+          path: |
+            test-artifacts/
+            /tmp/regression-native/Testing/Temporary/
+            /tmp/regression-sanitized/Testing/Temporary/
+          if-no-files-found: warn
+
+  android:
+    name: Android API ${{ matrix.api }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        api: [24, 36]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          submodules: recursive
+      - uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+      - uses: gradle/actions/setup-gradle@v3
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Test Android app and Kotlin suites
+        uses: reactivecircus/android-emulator-runner@v2
+        env:
+          TEST_OUTPUT_DIR: test-artifacts/android-${{ matrix.api }}
+        with:
+          api-level: ${{ matrix.api }}
+          target: google_apis
+          arch: x86_64
+          ram-size: 2048M
+          disable-animations: true
+          script: bash tools/run_android_regression.sh
+      - name: Verify release rejects missing credentials
+        env:
+          VERSION_CODE: 2
+          RELEASE_KEYSTORE_PATH: nonexistent-test-keystore.jks
+          RELEASE_KEYSTORE_PASSWORD: ''
+          RELEASE_KEY_ALIAS: ''
+          RELEASE_KEY_PASSWORD: ''
+        run: |
+          mkdir -p test-artifacts
+          if ./gradlew validateRelease --stacktrace > test-artifacts/release-validation.txt 2>&1; then
+            echo 'Unsigned release validation unexpectedly succeeded'
+            exit 1
+          fi
+          grep -F 'Release signing requires' test-artifacts/release-validation.txt
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: regression-android-${{ matrix.api }}
+          path: |
+            test-artifacts/
+            app/build/reports/androidTests/
+            app/build/outputs/androidTest-results/
+            app/build/reports/tests/
+            app/build/test-results/
+          if-no-files-found: warn

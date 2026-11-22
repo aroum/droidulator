@@ -1,48 +1,607 @@
 #include "script_engine.h"
 #include "math_funcs.h"
+#include "math_engine.h"
 #include "plot_engine.h"
 #include <iostream>
-#if defined(ARDUINO) || defined(ESP32) || defined(ESP_PLATFORM)
-#include <Arduino.h>
-#endif
-#if defined(ESP32) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
-#include <esp_task_wdt.h>
-#endif
+#include <string_view>
+#include <unordered_set>
 
 extern double evaluate(const std::string& expr_str, std::string& err);
 extern double evaluateInput(const std::string& input, std::string& err, bool& isDefinition);
-extern std::string preprocessArrayLookups(const std::string& expr, std::string& err);
 extern std::string formatPrintString(const std::string& str, std::string& err);
 extern bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr);
-extern bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2);
-extern std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err);
 extern std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-extern std::string preprocessLen(const std::string& s);
-extern std::string preprocessVectorStats(const std::string& s);
 
-double script_return_val = 0.0;
-bool script_has_returned = false;
-std::vector<double> script_return_vec;
-bool script_return_is_vec = false;
+
+// History values are read-only in every script assignment, including for headers.
+static bool writesHistoryVariable(const std::string& code) {
+    bool in_comment = false;
+    char quote = 0;
+    for (size_t i = 0; i < code.size(); ++i) {
+        const char c = code[i];
+        if (in_comment) { if (c == '\n') in_comment = false; continue; }
+        if (quote) {
+            if (c == '\\' && i + 1 < code.size()) ++i;
+            else if (c == quote) quote = 0;
+            continue;
+        }
+        if (c == '\'' || c == '"') { quote = c; continue; }
+        if (c == '#' || (c == '/' && i + 1 < code.size() && code[i + 1] == '/')) { in_comment = true; continue; }
+        if (c != 'e' || (i && (std::isalnum(static_cast<unsigned char>(code[i - 1])) || code[i - 1] == '_'))) continue;
+        size_t end = i + 1;
+        while (end < code.size() && std::isdigit(static_cast<unsigned char>(code[end]))) ++end;
+        if (end == i + 1 || (end < code.size() && (std::isalnum(static_cast<unsigned char>(code[end])) || code[end] == '_'))) continue;
+        size_t op = end;
+        while (op < code.size() && std::isspace(static_cast<unsigned char>(code[op]))) ++op;
+        if (op >= code.size()) continue;
+        if (code[op] == '=' && (op + 1 >= code.size() || code[op + 1] != '=')) return true;
+        if (op + 1 < code.size() && ((code[op] == '+' || code[op] == '-') && code[op + 1] == code[op])) return true;
+        if (op + 1 < code.size() && (code[op] == '+' || code[op] == '-' || code[op] == '*' || code[op] == '/') && code[op + 1] == '=') return true;
+    }
+    return false;
+}
+
+static std::string reservedAssignment(const std::string& code) {
+    char quote = 0;
+    bool comment = false;
+    for (size_t i = 0; i < code.size();) {
+        const char c = code[i];
+        if (comment) { if (c == '\n') comment = false; ++i; continue; }
+        if (quote) { if (c == '\\' && i + 1 < code.size()) i += 2; else { if (c == quote) quote = 0; ++i; } continue; }
+        if (c == '\'' || c == '"') { quote = c; ++i; continue; }
+        if (c == '#' || (c == '/' && i + 1 < code.size() && code[i + 1] == '/')) { comment = true; ++i; continue; }
+        if (!std::isalpha(static_cast<unsigned char>(c)) && c != '_') { ++i; continue; }
+        const size_t start = i++;
+        while (i < code.size() && (std::isalnum(static_cast<unsigned char>(code[i])) || code[i] == '_')) ++i;
+        const auto name = code.substr(start, i - start);
+        if (!isReservedName(name)) continue;
+        size_t op = i;
+        while (op < code.size() && std::isspace(static_cast<unsigned char>(code[op]))) ++op;
+        if (op >= code.size()) continue;
+        if (code[op] == '=' && (op + 1 >= code.size() || code[op + 1] != '=')) return name;
+        if (op + 1 < code.size() && ((code[op] == '+' || code[op] == '-') && code[op + 1] == code[op])) return name;
+        if (op + 1 < code.size() && (code[op] == '+' || code[op] == '-' || code[op] == '*' || code[op] == '/') && code[op + 1] == '=') return name;
+    }
+    return {};
+}
+
+static bool evaluateScriptCondition(const std::string& condition, std::string& error) {
+    const double value = evaluateScalar(condition, error, "Condition");
+    return error.empty() && !std::isnan(value) && value != 0.0;
+}
+
+static size_t afterScriptBlock(const std::vector<std::string>& lines, size_t start) {
+    const auto end = findMatchingBlockEnd(lines, start);
+    return end == std::string::npos ? lines.size() : end + 1;
+}
+
+static bool handleScriptFunctionDeclaration(
+    const std::vector<std::string>& lines, size_t sourceLine, size_t& ip
+) {
+    const auto& line = lines[ip];
+    size_t keywordLength;
+    if (line.rfind("fn ", 0) == 0) keywordLength = 3;
+    else if (line.rfind("def ", 0) == 0) keywordLength = 4;
+    else if (line.rfind("function ", 0) == 0) keywordLength = 9;
+    else return false;
+
+    const size_t open = line.find('(');
+    const size_t close = open == std::string::npos ? std::string::npos : expression::matchingGroupEnd(line, open);
+    if (open == std::string::npos || close == std::string::npos) {
+        engineState().script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: Invalid function signature");
+        const auto end = findMatchingBlockEnd(lines, ip);
+        ip = end == std::string::npos ? lines.size() : end + 1;
+        return true;
+    }
+
+    const auto trim = [](std::string text) {
+        text.erase(0, text.find_first_not_of(" \t"));
+        text.erase(text.find_last_not_of(" \t") + 1);
+        return text;
+    };
+    const auto name = trim(line.substr(keywordLength, open - keywordLength));
+    const auto parameterText = line.substr(open + 1, close - open - 1);
+    const auto params = expression::splitArguments(parameterText);
+
+
+    auto& state = engineState();
+    size_t end = findMatchingBlockEnd(lines, ip);
+    std::string error;
+    const auto suffix = expression::trim(std::string_view(line).substr(close + 1));
+    if (!suffix.empty() && suffix != "{") error = "Invalid function signature";
+    else if (!expression::trim(parameterText).empty() && params.empty()) error = "Invalid parameter list";
+    else if (!expression::isIdentifier(name)) error = "Invalid function name";
+    else if (std::any_of(params.begin(), params.end(), [&](const auto& param) { return !expression::isIdentifier(param); }))
+        error = "Invalid parameter name";
+    else if (std::unordered_set<std::string>(params.begin(), params.end()).size() != params.size())
+        error = "Duplicate parameter";
+    else if (isReservedName(name)) error = "Reserved name: " + name;
+    else if (std::any_of(params.begin(), params.end(), isReservedName)) error = "Reserved parameter";
+    if (!error.empty()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: " + error);
+        ip = end == std::string::npos ? lines.size() : end + 1;
+        return true;
+    }
+
+    // Declarations without braces can also terminate with an explicit end.
+    if (end == std::string::npos) {
+        end = ip + 1;
+        while (end < lines.size() && lines[end] != "end") ++end;
+    }
+    if (end == lines.size()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: Unclosed function body");
+        ip = lines.size();
+        return true;
+    }
+    std::vector<std::string> body(lines.begin() + ip + 1, lines.begin() + end);
+    ip = end + 1;
+    auto& functions = state.user_script_funcs;
+    functions.erase(std::remove_if(functions.begin(), functions.end(), [&](const CustomScriptFunc& function) {
+        return function.name == name;
+    }), functions.end());
+    functions.push_back({name, std::move(params), std::move(body)});
+    auto& words = state.autocomplete_words;
+    const auto completion = name + "(";
+    if (std::find(words.begin(), words.end(), completion) == words.end()) words.push_back(completion);
+    return true;
+}
+
+std::vector<double> evaluateScriptReturnValues(const std::string& text, bool& isArray, std::string& error) {
+    error.clear();
+    isArray = false;
+    const std::string expressionText = expression::trim(text).empty() ? "0" : std::string(expression::trim(text));
+    const auto parts = expression::splitArguments(expressionText);
+    if (parts.empty()) {
+        error = "Invalid return expression";
+        return {};
+    }
+    if (parts.size() > 1) {
+        isArray = true;
+        if (std::any_of(parts.begin(), parts.end(), [](const auto& part) { return part.empty(); })) {
+            error = "Empty return value";
+            return {};
+        }
+        std::vector<double> values;
+        values.reserve(parts.size());
+        for (const auto& part : parts) {
+            const double value = evaluateScalar(part, error, "Return tuple element");
+            if (!error.empty()) return {};
+            values.push_back(value);
+        }
+        return values;
+    }
+    const double value = evaluate(expressionText, error);
+    if (!error.empty()) return {};
+    isArray = engineState().g_last_eval_is_array;
+    return isArray ? engineState().g_last_eval_array : std::vector<double>{value};
+}
+
+static void evaluateScriptReturn(std::string expressionText, size_t sourceLine) {
+    auto& state = engineState();
+    std::string error;
+    bool isArray = false;
+    auto values = evaluateScriptReturnValues(expressionText, isArray, error);
+
+    state.script_return_val = values.empty() ? 0.0 : values.front();
+    state.script_return_vec = std::move(values);
+    state.script_return_is_vec = isArray;
+    state.script_has_returned = true;
+    if (!error.empty()) {
+        state.script_console_output.push_back("L:" + std::to_string(sourceLine) + " Err: " + error);
+    } else if (isArray) {
+        std::string formatted = "Return: [";
+        for (size_t i = 0; i < state.script_return_vec.size(); ++i) {
+            if (i != 0) formatted += ", ";
+            formatted += fmtNum(state.script_return_vec[i]);
+        }
+        state.script_console_output.push_back(formatted + "]");
+    } else {
+        state.script_console_output.push_back("Return: " + fmtNum(state.script_return_val));
+    }
+}
+
+static bool isScriptConstant(const std::string& name) {
+    const auto& constants = engineState().user_consts;
+    return std::any_of(constants.begin(), constants.end(), [&](const UserConst& value) {
+        return value.name == name;
+    });
+}
+
+static bool assignScriptTuple(const std::string& lhs, const std::string& rhs, std::string& error) {
+    const auto names = expression::splitArguments(lhs);
+    if (names.empty() || std::any_of(names.begin(), names.end(), [](const auto& name) {
+        return !expression::isIdentifier(name);
+    })) {
+        error = "Invalid tuple assignment";
+        return false;
+    }
+    if (std::unordered_set<std::string>(names.begin(), names.end()).size() != names.size()) {
+        error = "Duplicate tuple target";
+        return false;
+    }
+    for (const auto& name : names) {
+        if (isReservedName(name) || isScriptConstant(name)) {
+            error = "Const or reserved name";
+            return false;
+        }
+    }
+    std::vector<double> values;
+    bool calledFunction = false;
+    const size_t open = rhs.find('(');
+    if (open != std::string::npos && expression::matchingGroupEnd(rhs, open) == rhs.size() - 1) {
+        const std::string name(expression::trim(std::string_view(rhs).substr(0, open)));
+        const auto& functions = engineState().user_script_funcs;
+        const auto function = std::find_if(functions.begin(), functions.end(), [&](const auto& candidate) { return candidate.name == name; });
+        if (function != functions.end()) {
+            calledFunction = true;
+            const auto text = std::string_view(rhs).substr(open + 1, rhs.size() - open - 2);
+            const auto expressions = expression::splitArguments(text);
+            if (!expression::trim(text).empty() && expressions.empty()) {
+                error = "Invalid function arguments";
+                return false;
+            }
+            if (expressions.size() != function->params.size()) {
+                error = "Arg Count Mismatch";
+                return false;
+            }
+            std::vector<double> arguments;
+            arguments.reserve(expressions.size());
+            for (const auto& argument : expressions) {
+                if (argument.empty()) {
+                    error = "Empty function argument";
+                    return false;
+                }
+                arguments.push_back(evaluateScalar(argument, error, "Function argument"));
+                if (!error.empty()) return false;
+            }
+            executeScriptFunc(name, arguments, error, &values);
+        }
+    }
+    if (!calledFunction) {
+        bool array = false;
+        values = evaluateScriptReturnValues(rhs, array, error);
+    }
+    if (!error.empty()) return false;
+    auto& state = engineState();
+    for (size_t i = 0; i < names.size(); ++i) {
+        const auto& name = names[i];
+        const double value = i < values.size() ? values[i] : 0.0;
+        state.user_arrays.erase(name);
+        const auto target = std::find_if(state.user_args.begin(), state.user_args.end(), [&](const UserArg& argument) {
+            return argument.name == name;
+        });
+        if (target == state.user_args.end()) state.user_args.push_back({name, value});
+        else target->val = value;
+        if (std::find(state.autocomplete_words.begin(), state.autocomplete_words.end(), name) == state.autocomplete_words.end())
+            state.autocomplete_words.push_back(name);
+    }
+    return true;
+}
+
+bool executeScriptAssignments(const std::string& step, std::string& err) {
+    if (step.empty()) return true;
+    bool isDef = false;
+    std::vector<std::string> step_stmts = splitIntoStatements(step);
+    for (auto st : step_stmts) {
+        st.erase(0, st.find_first_not_of(" \t"));
+        st.erase(st.find_last_not_of(" \t") + 1);
+        if (st.size() > 2 && (st.substr(0, 2) == "++" || st.substr(0, 2) == "--")) {
+            st = std::string(expression::trim(std::string_view(st).substr(2))) + st.substr(0, 2);
+        }
+        std::string arrayName, indexExpression, valueExpression;
+        if (parseArrayElementAssignment(st, arrayName, indexExpression, valueExpression)) {
+            assignArrayElement(arrayName, indexExpression, valueExpression, err);
+        } else if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
+            std::string var_name = st.substr(0, st.size() - 2);
+            var_name.erase(0, var_name.find_first_not_of(" \t"));
+            var_name.erase(var_name.find_last_not_of(" \t") + 1);
+            if (!expression::isIdentifier(var_name)) {
+                err = "Invalid assignment name";
+                return false;
+            }
+            if (isReservedName(var_name)) {
+                err = "Reserved name: " + var_name;
+                return false;
+            }
+            if (isScriptConstant(var_name)) {
+                err = "Const Error";
+                return false;
+            }
+            engineState().user_arrays.erase(var_name);
+            char op = st[st.size() - 1];
+            bool found = false;
+            for (auto& arg : engineState().user_args) {
+                if (arg.name == var_name) {
+                    if (op == '+') arg.val += 1.0;
+                    else arg.val -= 1.0;
+                    found = true;
+                    break;
+                }
+            }
+            if (!found) {
+                engineState().user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
+            }
+        } else if (const size_t eq = expression::assignmentOffset(st, true); eq != std::string::npos) {
+            std::string lhs = st.substr(0, eq);
+            std::string rhs = st.substr(eq + 1);
+            if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
+                char op = lhs.back();
+                lhs = lhs.substr(0, lhs.size() - 1);
+                rhs = lhs + " " + std::string(1, op) + " (" + rhs + ")";
+            }
+            auto trim = [](std::string& s) {
+                s.erase(0, s.find_first_not_of(" \t"));
+                s.erase(s.find_last_not_of(" \t") + 1);
+            };
+            trim(lhs); trim(rhs);
+            if (!expression::isIdentifier(lhs)) {
+                err = "Invalid assignment name";
+                return false;
+            }
+            if (isReservedName(lhs)) {
+                err = "Reserved name: " + lhs;
+                return false;
+            }
+            if (isScriptConstant(lhs)) {
+                err = "Const Error";
+                return false;
+            }
+            double val = evaluateScalar(rhs, err, "Assignment");
+            if (err.empty()) {
+                engineState().user_arrays.erase(lhs);
+                bool found = false;
+                for (auto& a : engineState().user_args) {
+                    if (a.name == lhs) {
+                        a.val = val;
+                        found = true;
+                        break;
+                    }
+                }
+                if (!found) {
+                    engineState().user_args.push_back({lhs, val});
+                }
+            }
+        } else {
+            evaluateInput(st, err, isDef);
+        }
+        if (!err.empty()) return false;
+    }
+    return true;
+}
+
+double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err, std::vector<double>* returnValues, std::optional<std::vector<double>>* arrayResult, const std::vector<std::optional<std::vector<double>>>* arrayArguments) {
+    if (arrayResult) arrayResult->reset();
+    static thread_local unsigned depth = 0;
+    if (depth >= 64) { err = "Function recursion limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
+    struct DepthGuard { unsigned& value; explicit DepthGuard(unsigned& d) : value(d) { ++value; } ~DepthGuard() { --value; } } guard(depth);
+    auto it = std::find_if(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(), [&](const CustomScriptFunc& f) {
+        return f.name == name;
+    });
+    if (it == engineState().user_script_funcs.end()) {
+        err = "Func Not Found";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    const auto func = *it;
+    if (arg_vals.size() != func.params.size() || (arrayArguments && arrayArguments->size() != arg_vals.size())) {
+        err = "Arg Count Mismatch";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+
+    auto orig_args = engineState().user_args;
+    auto orig_arrays = engineState().user_arrays;
+    std::vector<std::pair<size_t, UserConst>> parameterConstants;
+    for (size_t i = 0; i < engineState().user_consts.size(); ++i) {
+        const auto& constant = engineState().user_consts[i];
+        if (std::find(func.params.begin(), func.params.end(), constant.name) != func.params.end())
+            parameterConstants.emplace_back(i, constant);
+    }
+    engineState().user_consts.erase(std::remove_if(engineState().user_consts.begin(), engineState().user_consts.end(),
+        [&](const UserConst& constant) {
+            return std::find(func.params.begin(), func.params.end(), constant.name) != func.params.end();
+        }), engineState().user_consts.end());
+
+    for (size_t i = 0; i < func.params.size(); ++i) {
+        engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
+            return a.name == func.params[i];
+        }), engineState().user_args.end());
+        if (arrayArguments && (*arrayArguments)[i]) engineState().user_arrays[func.params[i]] = *(*arrayArguments)[i];
+        else {
+            engineState().user_arrays.erase(func.params[i]);
+            engineState().user_args.push_back({func.params[i], arg_vals[i]});
+        }
+    }
+
+    double ret_val = 0.0;
+    bool has_returned = false;
+    int step_count = 0;
+    int max_steps = 1000000;
+    int loopIterations = 0;
+
+    const auto& lines = func.statements;
+    size_t ip = 0;
+    struct FnBlock {
+        std::string type;
+        bool condition_met;
+        size_t start_ip;
+        size_t end_ip;
+        std::string cond_str;
+        std::string step_str;
+    };
+    std::vector<FnBlock> blocks;
+
+    while (ip < lines.size() && step_count < max_steps) {
+        if (has_returned) break;
+        step_count++;
+        std::string line = lines[ip];
+        line.erase(0, line.find_first_not_of(" \t\r"));
+        line.erase(line.find_last_not_of(" \t\r") + 1);
+        if (line.empty() || line[0] == '#' || line.rfind("//", 0) == 0) { ip++; continue; }
+
+        if (line == "break" || line == "continue") {
+            auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const FnBlock& b) { return b.type == "for" || b.type == "while"; });
+            if (loop == blocks.rend()) { err = line + " outside loop"; break; }
+            const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
+            const size_t end = blocks[index].end_ip;
+            blocks.erase(blocks.begin() + index + 1, blocks.end());
+            if (line == "break") { blocks.erase(blocks.begin() + index); ip = end + 1; }
+            else ip = end;
+            continue;
+        }
+
+        if (line.rfind("return", 0) == 0 && (line.size() == 6 || std::isspace(static_cast<unsigned char>(line[6])))) {
+            bool array = false;
+            auto values = evaluateScriptReturnValues(line.substr(6), array, err);
+            if (!err.empty()) break;
+            ret_val = values.empty() ? 0.0 : values.front();
+            if (arrayResult && array) *arrayResult = values;
+            if (returnValues) *returnValues = std::move(values);
+            has_returned = true;
+            break;
+        }
+
+        if (line.rfind("print(", 0) == 0 && line.back() == ')') {
+            const auto text = formatPrintString(line.substr(6, line.size() - 7), err);
+            if (!err.empty()) break;
+            engineState().script_console_output.push_back(text);
+            ++ip; continue;
+        }
+
+        if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 || line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
+            const bool isFor = line.rfind("for", 0) == 0;
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            const size_t end = findMatchingBlockEnd(lines, ip);
+            if (open == std::string::npos || close == std::string::npos || end == std::string::npos) { err = "Mismatched loop"; break; }
+            auto existing = std::find_if(blocks.begin(), blocks.end(), [&](const FnBlock& b) { return b.start_ip == ip && (b.type == "for" || b.type == "while"); });
+            const bool active = existing != blocks.end();
+            std::string condition = line.substr(open + 1, close - open - 1), step;
+            if (isFor) {
+                const auto header = expression::splitArguments(condition, ';', 3);
+                if (header.size() != 3) { err = "Invalid for loop"; break; }
+                step = header[2];
+                condition = header[1];
+                if (!active && !executeScriptAssignments(header[0], err)) break;
+            }
+            const double value = condition.find_first_not_of(" \t") == std::string::npos ? 1.0 : evaluateScalar(condition, err, "Condition");
+            if (!err.empty()) break;
+            if (value != 0.0) {
+                if (++loopIterations > 10000) { err = "Function loop iteration limit reached"; break; }
+                if (!active) blocks.push_back({isFor ? "for" : "while", true, ip, end, condition, step});
+                ++ip;
+            } else {
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+            }
+            continue;
+        }
+
+        if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
+            size_t open_p = line.find('(');
+            const size_t close_p = findScriptHeaderClose(line, open_p);
+            size_t end_ip = findMatchingBlockEnd(lines, ip);
+            if (open_p != std::string::npos && close_p != std::string::npos && end_ip != std::string::npos) {
+                std::string cond_str = line.substr(open_p + 1, close_p - open_p - 1);
+                double cv = evaluateScalar(cond_str, err, "Condition");
+                if (!err.empty()) break;
+                bool cond_ok = (!std::isnan(cv) && cv != 0.0);
+                if (cond_ok) {
+                    blocks.push_back({"if", true, ip, end_ip, ""});
+                    ip++;
+                } else {
+                    blocks.push_back({"if", false, ip, end_ip, ""});
+                    size_t next_b = findMatchingBlockEnd(lines, ip, true);
+                    ip = (next_b != std::string::npos) ? next_b : end_ip;
+                }
+                continue;
+            }
+            err = "Mismatched if";
+            break;
+        } else if ((line.rfind("} else if", 0) == 0 || line.rfind("else if", 0) == 0 || line.rfind("} elif", 0) == 0 || line.rfind("elif", 0) == 0) && line.back() == '{') {
+            if (blocks.empty() || blocks.back().type != "if") { err = "Unmatched else if"; break; }
+            if (blocks.back().condition_met) { ip = blocks.back().end_ip; continue; }
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            if (open == std::string::npos || close == std::string::npos || close <= open) { err = "Invalid else if"; break; }
+            const double value = evaluateScalar(line.substr(open + 1, close - open - 1), err, "Condition");
+            if (!err.empty()) break;
+            if (value != 0.0) { blocks.back().condition_met = true; ++ip; }
+            else { const size_t next = findMatchingBlockEnd(lines, ip, true); ip = next == std::string::npos ? blocks.back().end_ip : next; }
+            continue;
+        } else if (line == "} else {" || line == "else {") {
+            if (!blocks.empty() && blocks.back().type == "if") {
+                if (blocks.back().condition_met) {
+                    ip = blocks.back().end_ip;
+                } else {
+                    blocks.back().condition_met = true;
+                    ip++;
+                }
+                continue;
+            }
+        } else if (isBlockEnd(line)) {
+            if (!blocks.empty()) {
+                auto& block = blocks.back();
+                if (block.type == "for" || block.type == "while") {
+                    if (block.type == "for" && block.step_str.find_first_not_of(" \t") != std::string::npos) {
+                        if (!executeScriptAssignments(block.step_str, err)) break;
+                    }
+                    ip = block.start_ip;
+                    continue;
+                }
+                blocks.pop_back();
+            }
+            ip++;
+            continue;
+        }
+
+        bool isDef = false;
+        evaluateInput(line, err, isDef);
+        if (!err.empty()) break;
+        ip++;
+    }
+
+    if (step_count >= max_steps && !has_returned && err.empty()) err = "Function statement limit reached";
+    engineState().user_args = std::move(orig_args);
+    engineState().user_arrays = std::move(orig_arrays);
+    for (const auto& [position, constant] : parameterConstants) {
+        auto& constants = engineState().user_consts;
+        constants.erase(std::remove_if(constants.begin(), constants.end(), [&](const UserConst& value) {
+            return value.name == constant.name;
+        }), constants.end());
+        constants.insert(constants.begin() + std::min(position, constants.size()), constant);
+    }
+
+    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
+    return ret_val;
+}
 
 void runScript(const std::string& code) {
-    script_console_output.clear();
-    plot_lines.clear();
-    plot_hold = false;
+    engineState().script_console_output.clear();
+    if (writesHistoryVariable(code)) {
+        engineState().script_console_output.push_back("History variables are read-only");
+        return;
+    }
+    if (auto name = reservedAssignment(code); !name.empty()) {
+        engineState().script_console_output.push_back("Reserved name: " + name);
+        return;
+    }
+    engineState().plot_lines.clear();
+    engineState().plot_hold = false;
     
-    auto original_args = user_args;
-    auto original_funcs = user_funcs;
-    auto original_autocomplete = autocomplete_words;
-    auto original_arrays = user_arrays;
-    user_args.reserve(256);
+    auto original_funcs = engineState().user_funcs;
+    auto original_autocomplete = engineState().autocomplete_words;
+    engineState().user_args.reserve(256);
     
-    std::vector<std::string> lines = splitIntoStatements(code);
+    std::vector<size_t> sourceLines;
+    std::vector<std::string> lines = splitIntoStatements(code, &sourceLines);
     
     size_t ip = 0;
-    int max_steps = 10000;
+    int max_steps = 1000000;
     int step_count = 0;
-    script_return_val = 0.0;
-    script_has_returned = false;
+    int loop_iterations = 0;
+    constexpr int max_loop_iterations = 10000;
+    engineState().script_return_val = 0.0;
+    engineState().script_has_returned = false;
     
     struct BlockState {
         std::string type;       // "if", "for", "while"
@@ -50,31 +609,14 @@ void runScript(const std::string& code) {
         size_t start_ip;        // For loops/conditionals: start of block header
         size_t end_ip;          // Ultimate end of the block (the matching end/endif/endfor/endwhile)
         
-        std::string var;
-        double end_val;
-        double step_val;
-        
-        std::string cond_str;
         std::string step_str;
     };
     std::vector<BlockState> blocks;
     
-    uint32_t last_wdt_yield = 0;
     while (ip < lines.size() && step_count < max_steps) {
-        if (script_has_returned) break;
+        if (engineState().script_has_returned) break;
         step_count++;
-        #if defined(ESP32) || defined(ESP_PLATFORM) || defined(ARDUINO_ARCH_ESP32)
-        uint32_t now_ms = millis();
-        if ((step_count & 63) == 0 || (now_ms - last_wdt_yield > 15)) {
-            esp_task_wdt_reset();
-            delay(1);
-            last_wdt_yield = now_ms;
-        }
-        #elif defined(ARDUINO)
-        if ((step_count & 63) == 0) {
-            delay(1);
-        }
-        #endif
+
         
         std::string line = lines[ip];
         line.erase(0, line.find_first_not_of(" \t\r"));
@@ -83,137 +625,31 @@ void runScript(const std::string& code) {
             ip++;
             continue;
         }
+        if (line == "break" || line == "continue") {
+            auto loop = std::find_if(blocks.rbegin(), blocks.rend(), [](const BlockState& block) { return block.type == "for" || block.type == "while"; });
+            if (loop == blocks.rend()) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + line + " outside loop"); ++ip; continue; }
+            const size_t index = static_cast<size_t>(std::distance(blocks.begin(), loop.base()) - 1);
+            const size_t end = blocks[index].end_ip;
+            blocks.erase(blocks.begin() + index + 1, blocks.end());
+            if (line == "break") { blocks.erase(blocks.begin() + index); ip = end + 1; }
+            else ip = end;
+            continue;
+        }
         
-        // return statement
         if (line.rfind("return", 0) == 0 && (line.size() == 6 || line[6] == ' ' || line[6] == '\t')) {
-            std::string ret_expr = (line.size() > 6) ? line.substr(6) : "0";
-            ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-            ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-            if (ret_expr.empty()) ret_expr = "0";
-            
-            // Check if return has multiple expressions separated by commas (outside brackets/quotes)
-            std::vector<std::string> ret_parts;
-            std::string current_part = "";
-            int p_depth = 0, b_depth = 0;
-            for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                char ch = ret_expr[c_i];
-                if (ch == '(') p_depth++;
-                else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                else if (ch == '[') b_depth++;
-                else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                
-                if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                    ret_parts.push_back(current_part);
-                    current_part = "";
-                } else {
-                    current_part += ch;
-                }
-            }
-            if (!current_part.empty()) ret_parts.push_back(current_part);
-            
-            if (ret_parts.size() > 1) {
-                script_return_is_vec = true;
-                script_return_vec.clear();
-                std::string out_str = "Return: [";
-                for (size_t r_i = 0; r_i < ret_parts.size(); ++r_i) {
-                    std::string part = ret_parts[r_i];
-                    part.erase(0, part.find_first_not_of(" \t"));
-                    part.erase(part.find_last_not_of(" \t") + 1);
-                    std::string eval_err;
-                    double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                    script_return_vec.push_back(v);
-                    out_str += fmtNum(v) + (r_i + 1 < ret_parts.size() ? ", " : "]");
-                }
-                script_return_val = script_return_vec[0];
-                script_console_output.push_back(out_str);
-            } else {
-                bool is_arr = false;
-                std::string parse_err;
-                std::vector<double> arr = parseArrayExpr(ret_expr, is_arr, parse_err);
-                if (is_arr && parse_err.empty()) {
-                    script_return_is_vec = true;
-                    script_return_vec = arr;
-                    script_return_val = arr.empty() ? 0.0 : arr[0];
-                    std::string out_str = "Return: [";
-                    for (size_t r_i = 0; r_i < arr.size(); ++r_i) {
-                        out_str += fmtNum(arr[r_i]) + (r_i + 1 < arr.size() ? ", " : "]");
-                    }
-                    script_console_output.push_back(out_str);
-                } else {
-                    std::string eval_err;
-                    script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
-                    script_return_is_vec = false;
-                    script_return_vec = {script_return_val};
-                    if (!eval_err.empty()) {
-                        script_console_output.push_back("Error: " + eval_err);
-                    } else {
-                        script_console_output.push_back("Return: " + fmtNum(script_return_val));
-                    }
-                }
-            }
-            script_has_returned = true;
+            evaluateScriptReturn(line.substr(6), sourceLines[ip]);
             break;
         }
 
-        // fn / def / function declaration
-        if (line.rfind("fn ", 0) == 0 || line.rfind("def ", 0) == 0 || line.rfind("function ", 0) == 0) {
-            size_t open_paren = line.find('(');
-            size_t close_paren = line.find(')', open_paren);
-            if (open_paren != std::string::npos && close_paren != std::string::npos) {
-                size_t kw_len = (line.rfind("fn ", 0) == 0) ? 3 : ((line.rfind("def ", 0) == 0) ? 4 : 9);
-                std::string fname = line.substr(kw_len, open_paren - kw_len);
-                fname.erase(0, fname.find_first_not_of(" \t"));
-                fname.erase(fname.find_last_not_of(" \t") + 1);
-                
-                std::string params_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                std::vector<std::string> params;
-                size_t p_pos = 0;
-                while (p_pos < params_str.size()) {
-                    size_t comma = params_str.find(',', p_pos);
-                    std::string p = (comma == std::string::npos) ? params_str.substr(p_pos) : params_str.substr(p_pos, comma - p_pos);
-                    p.erase(0, p.find_first_not_of(" \t"));
-                    p.erase(p.find_last_not_of(" \t") + 1);
-                    if (!p.empty()) params.push_back(p);
-                    if (comma == std::string::npos) break;
-                    p_pos = comma + 1;
-                }
+        if (handleScriptFunctionDeclaration(lines, sourceLines[ip], ip)) continue;
 
-                size_t end_ip = findMatchingBlockEnd(lines, ip);
-                std::vector<std::string> body_stmts;
-                if (end_ip != std::string::npos) {
-                    for (size_t k = ip + 1; k < end_ip && k < lines.size(); ++k) {
-                        body_stmts.push_back(lines[k]);
-                    }
-                    ip = end_ip + 1;
-                } else {
-                    // Fallback to searching for 'end' line if block doesn't use braces
-                    size_t k = ip + 1;
-                    while (k < lines.size() && lines[k] != "end") {
-                        body_stmts.push_back(lines[k]);
-                        k++;
-                    }
-                    ip = k + 1;
-                }
-
-                user_script_funcs.erase(std::remove_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f){
-                    return f.name == fname;
-                }), user_script_funcs.end());
-
-                user_script_funcs.push_back({fname, params, body_stmts});
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), fname + "(") == autocomplete_words.end()) {
-                    autocomplete_words.push_back(fname + "(");
-                }
-                continue;
-            }
-        }
-        
         // plot commands
         if (line.rfind("plot", 0) == 0) {
             std::string err;
             double result = 0.0;
             if (handlePlotCommands(line, err, result)) {
                 if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
                 }
                 ip++;
                 continue;
@@ -226,448 +662,177 @@ void runScript(const std::string& code) {
             std::string err;
             std::string output = formatPrintString(expr, err);
             if (!err.empty()) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
             } else {
-                script_console_output.push_back(output);
+                engineState().script_console_output.push_back(output);
             }
             ip++;
         }
 
         // sleep(ms)
         else if (line.rfind("sleep(", 0) == 0 && line.back() == ')') {
-            std::string ms_str = line.substr(6, line.size() - 7);
-            int ms = std::atoi(ms_str.c_str());
-            if (ms > 0) {
-                #if defined(ARDUINO) || defined(ESP32) || defined(ESP_PLATFORM)
-                delay(ms);
-                #endif
-            }
             ip++;
         }
         // if (cond) {
-        else if (line.rfind("if (", 0) == 0 && line.back() == '{') {
-            size_t open_paren = line.find('(');
-            size_t close_paren = line.rfind(')');
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                
-                size_t end_ip = findMatchingBlockEnd(lines, ip);
-                if (end_ip != std::string::npos) {
-                    std::string err;
-                    std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                    double cond_val = 0;
-                    if (err.empty()) {
-                        cond_val = evaluate(prep_cond, err);
-                    }
-                    bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
-
-                    
-                    if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                        ip = end_ip + 1;
-                    } else if (cond_bool) {
-                        blocks.push_back({ "if", true, ip, end_ip, "", 0.0, 0.0, "", "" });
-                        ip++;
-                    } else {
-                        blocks.push_back({ "if", false, ip, end_ip, "", 0.0, 0.0, "", "" });
-                        size_t next_branch = findMatchingBlockEnd(lines, ip, true);
-                        if (next_branch != std::string::npos) {
-                            ip = next_branch;
-                        } else {
-                            ip = end_ip;
-                        }
-                    }
-                } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched if");
-                    ip++;
-                }
+        else if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            const size_t end = findMatchingBlockEnd(lines, ip);
+            if (close == std::string::npos || end == std::string::npos) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched if");
+                ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            std::string error;
+            const bool condition = evaluateScriptCondition(line.substr(open + 1, close - open - 1), error);
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                ip = end + 1;
+                continue;
+            }
+            blocks.push_back({"if", condition, ip, end, ""});
+            if (condition) {
+                ++ip;
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched if");
-                ip++;
+                const size_t next = findMatchingBlockEnd(lines, ip, true);
+                ip = next == std::string::npos ? end : next;
             }
         }
         // } else if (cond) { / else if (cond) { / } elif (cond) { / elif (cond) {
-        else if ((line.rfind("} else if (", 0) == 0 || line.rfind("else if (", 0) == 0 ||
-                  line.rfind("} elif (", 0) == 0 || line.rfind("elif (", 0) == 0) && line.back() == '{') {
-            if (!blocks.empty() && blocks.back().type == "if") {
-                if (blocks.back().condition_met) {
-                    ip = blocks.back().end_ip;
-                } else {
-                    size_t open_paren = line.find('(');
-                    size_t close_paren = line.rfind(')');
-                    if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                        std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                        cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                        cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                        
-                        std::string err;
-                        std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                        double cond_val = 0;
-                        if (err.empty()) {
-                            cond_val = evaluate(prep_cond, err);
-                        }
-                        bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
-                        
-                        if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                            ip = blocks.back().end_ip;
-                        } else if (cond_bool) {
-                            blocks.back().condition_met = true;
-                            ip++;
-                        } else {
-                            size_t next_branch = findMatchingBlockEnd(lines, ip, true);
-                            if (next_branch != std::string::npos) {
-                                ip = next_branch;
-                            } else {
-                                ip = blocks.back().end_ip;
-                            }
-                        }
-                    } else {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched else if");
-                        ip++;
-                    }
-                }
+        else if ((line.rfind("} else if", 0) == 0 || line.rfind("else if", 0) == 0 ||
+                  line.rfind("} elif", 0) == 0 || line.rfind("elif", 0) == 0) && line.back() == '{') {
+            if (blocks.empty() || blocks.back().type != "if") {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else if");
+                ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            if (blocks.back().condition_met) {
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            if (close == std::string::npos) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched else if");
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            std::string error;
+            const bool condition = evaluateScriptCondition(line.substr(open + 1, close - open - 1), error);
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                ip = blocks.back().end_ip;
+                continue;
+            }
+            if (condition) {
+                blocks.back().condition_met = true;
+                ++ip;
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Unmatched else if");
-                ip++;
+                const size_t next = findMatchingBlockEnd(lines, ip, true);
+                ip = next == std::string::npos ? blocks.back().end_ip : next;
             }
         }
         // } else { / else {
         else if (line == "} else {" || line == "else {") {
-            if (!blocks.empty() && blocks.back().type == "if") {
-                if (blocks.back().condition_met) {
-                    ip = blocks.back().end_ip;
-                } else {
-                    blocks.back().condition_met = true;
-                    ip++;
-                }
+            if (blocks.empty() || blocks.back().type != "if") {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Unmatched else");
+                ip = afterScriptBlock(lines, ip);
+                continue;
+            }
+            if (blocks.back().condition_met) {
+                ip = blocks.back().end_ip;
             } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Unmatched else");
-                ip++;
+                blocks.back().condition_met = true;
+                ++ip;
             }
         }
-        // while (cond) {
-        else if ((line.rfind("while (", 0) == 0 || line.rfind("while(", 0) == 0) && line.back() == '{') {
-            bool found_block = false;
-            size_t block_idx = 0;
-            for (size_t b = 0; b < blocks.size(); ++b) {
-                if (blocks[b].start_ip == ip) {
-                    found_block = true;
-                    block_idx = b;
-                    break;
-                }
+        // Both loop forms share block tracking, limits and exit handling.
+        else if ((line.rfind("while(", 0) == 0 || line.rfind("while (", 0) == 0 ||
+                  line.rfind("for(", 0) == 0 || line.rfind("for (", 0) == 0) && line.back() == '{') {
+            const bool isFor = line.rfind("for", 0) == 0;
+            const std::string type = isFor ? "for" : "while";
+            const auto existing = std::find_if(blocks.begin(), blocks.end(), [ip](const BlockState& block) {
+                return block.start_ip == ip;
+            });
+            const bool active = existing != blocks.end();
+            const size_t open = line.find('(');
+            const size_t close = findScriptHeaderClose(line, open);
+            const size_t end = active ? existing->end_ip : findMatchingBlockEnd(lines, ip);
+            if (close == std::string::npos || end == std::string::npos) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched " + type);
+                ip = afterScriptBlock(lines, ip);
+                continue;
             }
-            
-            size_t open_paren = line.find('(');
-            size_t close_paren = line.rfind(')');
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string cond_str = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                cond_str.erase(0, cond_str.find_first_not_of(" \t"));
-                cond_str.erase(cond_str.find_last_not_of(" \t") + 1);
-                
-                size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
-                if (end_ip != std::string::npos) {
-                    std::string err;
-                    std::string prep_cond = preprocessArrayLookups(cond_str, err);
-                    double cond_val = 0;
-                    if (err.empty()) {
-                        cond_val = evaluate(prep_cond, err);
-                    }
-                    bool cond_bool = (err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
-                    
-                    if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                        if (found_block) blocks.erase(blocks.begin() + block_idx);
-                        ip = end_ip + 1;
-                    } else if (cond_bool) {
-                        if (!found_block) {
-                            blocks.push_back({ "while", true, ip, end_ip, "", 0.0, 0.0, cond_str, "" });
-                        }
-                        ip++;
-                    } else {
-                        if (found_block) {
-                            blocks.erase(blocks.begin() + block_idx);
-                        }
-                        ip = end_ip;
-                    }
-                } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched while");
-                    ip++;
+            std::string conditionText(expression::trim(std::string_view(line).substr(open + 1, close - open - 1)));
+            std::string step;
+            std::string error;
+            if (isFor) {
+                const auto header = expression::splitArguments(conditionText, ';', 3);
+                if (header.size() != 3) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Mismatched for syntax");
+                    ip = afterScriptBlock(lines, ip);
+                    continue;
                 }
-            } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched while");
-                ip++;
+                conditionText = header[1];
+                step = header[2];
+                if (!active) executeScriptAssignments(header[0], error);
             }
-        }
-        // for (init; cond; step) {
-        else if ((line.rfind("for (", 0) == 0 || line.rfind("for(", 0) == 0) && line.back() == '{') {
-            bool found_block = false;
-            size_t block_idx = 0;
-            for (size_t b = 0; b < blocks.size(); ++b) {
-                if (blocks[b].start_ip == ip) {
-                    found_block = true;
-                    block_idx = b;
-                    break;
-                }
+            const bool condition = error.empty() && ((isFor && conditionText.empty()) || evaluateScriptCondition(conditionText, error));
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+                continue;
             }
-
-            size_t open_paren = line.find('(');
-            size_t close_paren = line.rfind(')');
-            if (open_paren != std::string::npos && close_paren != std::string::npos && close_paren > open_paren) {
-                std::string inner = line.substr(open_paren + 1, close_paren - open_paren - 1);
-                size_t first_semi = inner.find(';');
-                size_t second_semi = inner.find(';', first_semi + 1);
-                if (first_semi != std::string::npos && second_semi != std::string::npos) {
-                    std::string init_str = inner.substr(0, first_semi);
-                    std::string cond_str = inner.substr(first_semi + 1, second_semi - first_semi - 1);
-                    std::string step_str = inner.substr(second_semi + 1);
-                    
-                    auto trim = [](std::string& s) {
-                        s.erase(0, s.find_first_not_of(" \t\r"));
-                        s.erase(s.find_last_not_of(" \t\r") + 1);
-                    };
-                    trim(init_str);
-                    trim(cond_str);
-                    trim(step_str);
-                    if (step_str.size() > 2 && step_str.substr(0, 2) == "++") {
-                        std::string var = step_str.substr(2);
-                        trim(var);
-                        step_str = var + " = " + var + " + 1";
-                    } else if (step_str.size() > 2 && step_str.substr(0, 2) == "--") {
-                        std::string var = step_str.substr(2);
-                        trim(var);
-                        step_str = var + " = " + var + " - 1";
-                    } else if (step_str.size() > 2 && step_str.substr(step_str.size() - 2) == "++") {
-                        std::string var = step_str.substr(0, step_str.size() - 2);
-                        trim(var);
-                        step_str = var + " = " + var + " + 1";
-                    } else if (step_str.size() > 2 && step_str.substr(step_str.size() - 2) == "--") {
-                        std::string var = step_str.substr(0, step_str.size() - 2);
-                        trim(var);
-                        step_str = var + " = " + var + " - 1";
-                    } else if (size_t plus_eq = step_str.find("+="); plus_eq != std::string::npos) {
-                        std::string var = step_str.substr(0, plus_eq);
-                        std::string val = step_str.substr(plus_eq + 2);
-                        trim(var); trim(val);
-                        step_str = var + " = " + var + " + (" + val + ")";
-                    } else if (size_t minus_eq = step_str.find("-="); minus_eq != std::string::npos) {
-                        std::string var = step_str.substr(0, minus_eq);
-                        std::string val = step_str.substr(minus_eq + 2);
-                        trim(var); trim(val);
-                        step_str = var + " = " + var + " - (" + val + ")";
-                    }
-                    
-                    size_t end_ip = found_block ? blocks[block_idx].end_ip : findMatchingBlockEnd(lines, ip);
-                    if (end_ip != std::string::npos) {
-                        std::string err;
-                        bool isDef = false;
-                        if (!found_block) {
-                            if (!init_str.empty()) {
-                                size_t eq = init_str.find('=');
-                                if (eq != std::string::npos) {
-                                    std::string lhs = init_str.substr(0, eq);
-                                    std::string rhs = init_str.substr(eq + 1);
-                                    auto trim = [](std::string& s) {
-                                        s.erase(0, s.find_first_not_of(" \t"));
-                                        s.erase(s.find_last_not_of(" \t") + 1);
-                                    };
-                                    trim(lhs); trim(rhs);
-                                    std::string init_err;
-                                    double val = evaluate(preprocessArrayLookups(rhs, init_err), init_err);
-                                    if (init_err.empty()) {
-                                        bool found = false;
-                                        for (auto& a : user_args) {
-                                            if (a.name == lhs) {
-                                                a.val = val;
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!found) {
-                                            user_args.push_back({lhs, val});
-                                        }
-                                    } else {
-                                        err = init_err;
-                                    }
-                                } else {
-                                    evaluateInput(preprocessArrayLookups(init_str, err), err, isDef);
-                                }
-                            }
-                        }
-                        
-                        if (!err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                            if (found_block) blocks.erase(blocks.begin() + block_idx);
-                            ip = end_ip + 1;
-                        } else {
-                            std::string cond_err;
-                            double cond_val = evaluate(preprocessArrayLookups(cond_str, cond_err), cond_err);
-                            bool cond_bool = (cond_err.empty() && !std::isnan(cond_val) && cond_val != 0.0);
-                            
-                            if (!cond_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + cond_err);
-                                if (found_block) blocks.erase(blocks.begin() + block_idx);
-                                ip = end_ip + 1;
-                            } else if (cond_bool) {
-                                if (!found_block) {
-                                    blocks.push_back({ "for", true, ip, end_ip, "", 0.0, 0.0, cond_str, step_str });
-                                }
-                                ip++;
-                            } else {
-                                if (found_block) {
-                                    blocks.erase(blocks.begin() + block_idx);
-                                }
-                                ip = end_ip + 1;
-                            }
-                        }
-                    } else {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for");
-                        ip++;
-                    }
-                } else {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for syntax");
-                    ip++;
-                }
-            } else {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Mismatched for");
-                ip++;
+            if (!condition) {
+                if (active) blocks.erase(existing);
+                ip = end + 1;
+                continue;
             }
+            if (++loop_iterations > max_loop_iterations) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Loop iteration limit reached");
+                break;
+            }
+            if (!active) blocks.push_back({type, true, ip, end, step});
+            ++ip;
         }
         else if (isBlockEnd(line)) {
-            if (!blocks.empty()) {
-                size_t match_idx = std::string::npos;
-                for (int b = (int)blocks.size() - 1; b >= 0; --b) {
-                    if (blocks[b].end_ip == ip) {
-                        match_idx = (size_t)b;
-                        break;
-                    }
-                }
-                if (match_idx != std::string::npos) {
-                    auto curr = blocks[match_idx];
-                    if (curr.type == "for" || curr.type == "while") {
-                        if (curr.type == "for" && !curr.step_str.empty()) {
-                            std::string err;
-                            bool isDef = false;
-                            std::vector<std::string> step_stmts = splitIntoStatements(curr.step_str);
-                            for (auto st : step_stmts) {
-                                st.erase(0, st.find_first_not_of(" \t"));
-                                st.erase(st.find_last_not_of(" \t") + 1);
-                                if (st.size() > 2 && (st.substr(st.size() - 2) == "++" || st.substr(st.size() - 2) == "--")) {
-                                    std::string var_name = st.substr(0, st.size() - 2);
-                                    var_name.erase(0, var_name.find_first_not_of(" \t"));
-                                    var_name.erase(var_name.find_last_not_of(" \t") + 1);
-                                    char op = st[st.size() - 1];
-                                    bool found = false;
-                                    for (auto& arg : user_args) {
-                                        if (arg.name == var_name) {
-                                            if (op == '+') arg.val += 1.0;
-                                            else arg.val -= 1.0;
-                                            found = true;
-                                            break;
-                                        }
-                                    }
-                                    if (!found) {
-                                        user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
-                                    }
-                                } else if (st.find('=') != std::string::npos) {
-                                    size_t eq = st.find('=');
-                                    std::string lhs = st.substr(0, eq);
-                                    std::string rhs = st.substr(eq + 1);
-                                    if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
-                                        char op = lhs.back();
-                                        lhs = lhs.substr(0, lhs.size() - 1);
-                                        rhs = lhs + " " + std::string(1, op) + " (" + rhs + ")";
-                                    }
-                                    auto trim = [](std::string& s) {
-                                        s.erase(0, s.find_first_not_of(" \t"));
-                                        s.erase(s.find_last_not_of(" \t") + 1);
-                                    };
-                                    trim(lhs); trim(rhs);
-                                    double val = evaluate(preprocessLen(preprocessArrayLookups(rhs, err)), err);
-                                    if (err.empty()) {
-                                        bool found = false;
-                                        for (auto& a : user_args) {
-                                            if (a.name == lhs) {
-                                                a.val = val;
-                                                found = true;
-                                                break;
-                                            }
-                                        }
-                                        if (!found) {
-                                            user_args.push_back({lhs, val});
-                                        }
-                                    }
-                                } else {
-                                    evaluateInput(preprocessLen(preprocessArrayLookups(st, err)), err, isDef);
-                                }
-                            }
-                        }
-                        ip = curr.start_ip;
-                    } else { // "if"
-                        blocks.erase(blocks.begin() + match_idx);
-                        if (isBlockEnd(line)) {
-                            ip++;
-                        }
-                    }
-                } else {
-                    ip++;
-                }
+            const auto block = std::find_if(blocks.rbegin(), blocks.rend(), [ip](const BlockState& candidate) {
+                return candidate.end_ip == ip;
+            });
+            if (block == blocks.rend()) {
+                ++ip;
+            } else if (block->type == "if") {
+                blocks.erase(std::prev(block.base()));
+                ++ip;
             } else {
-                ip++;
+                std::string stepError;
+                if (block->type == "for" && !executeScriptAssignments(block->step_str, stepError)) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[block->start_ip]) + " Err: " + stepError);
+                    break;
+                }
+                ip = block->start_ip;
             }
         }
         // Increment / Decrement: i++ or i--
-        else if (line.size() > 2 && (line.substr(line.size() - 2) == "++" || line.substr(line.size() - 2) == "--")) {
-            std::string var_name = line.substr(0, line.size() - 2);
-            var_name.erase(0, var_name.find_first_not_of(" \t"));
-            var_name.erase(var_name.find_last_not_of(" \t") + 1);
-            char op = line[line.size() - 1];
-            bool found = false;
-            for (auto& arg : user_args) {
-                if (arg.name == var_name) {
-                    if (op == '+') arg.val += 1.0;
-                    else arg.val -= 1.0;
-                    found = true;
-                    break;
-                }
+        else if (line.size() > 2 && (line.substr(line.size() - 2) == "++" || line.substr(line.size() - 2) == "--" ||
+                 line.substr(0, 2) == "++" || line.substr(0, 2) == "--")) {
+            std::string error;
+            if (!executeScriptAssignments(line, error)) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
             }
-            if (!found) {
-                user_args.push_back({var_name, op == '+' ? 1.0 : -1.0});
-            }
-            ip++;
+            ++ip;
         }
         // Array element assignment: A[idx] = expr
         else if (std::string name, idx_expr, val_expr; parseArrayElementAssignment(line, name, idx_expr, val_expr)) {
-            if (user_arrays.find(name) == user_arrays.end()) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Array " + name + " not defined");
-                ip++;
-            } else {
-                std::string err;
-                double idx_val = evaluate(preprocessArrayLookups(idx_expr, err), err);
-                if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                } else {
-                    err.clear();
-                    double val_val = evaluate(preprocessArrayLookups(val_expr, err), err);
-                    if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                    } else {
-                        int idx = (int)std::round(idx_val);
-                        auto& arr = user_arrays[name];
-                        if (idx < 1 || idx > (int)arr.size()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Index " + std::to_string(idx) + " out of bounds");
-                        } else {
-                            arr[idx - 1] = val_val;
-                        }
-                    }
-                }
-                ip++;
-            }
+            std::string err;
+            assignArrayElement(name, idx_expr, val_expr, err);
+            if (!err.empty())
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + err);
+            ++ip;
         }
         // standard assignment: name = expr or name op= expr
-        else if (size_t eq = line.find('='); eq != std::string::npos && (eq == 0 || line[eq-1] != '=') && (eq + 1 >= line.size() || line[eq+1] != '=') && (eq == 0 || (line[eq-1] != '<' && line[eq-1] != '>' && line[eq-1] != '!'))) {
+        else if (const size_t eq = expression::assignmentOffset(line, true); eq != std::string::npos) {
             std::string lhs = line.substr(0, eq);
             std::string rhs = line.substr(eq + 1);
             if (!lhs.empty() && (lhs.back() == '+' || lhs.back() == '-' || lhs.back() == '*' || lhs.back() == '/')) {
@@ -682,474 +847,69 @@ void runScript(const std::string& code) {
             
             // Check if LHS contains multiple variables separated by commas (tuple assignment e.g. x, y = fn())
             if (lhs.find(',') != std::string::npos) {
-                std::vector<std::string> lhs_vars;
-                size_t v_pos = 0;
-                while (v_pos < lhs.size()) {
-                    size_t comma = lhs.find(',', v_pos);
-                    std::string v = (comma == std::string::npos) ? lhs.substr(v_pos) : lhs.substr(v_pos, comma - v_pos);
-                    v.erase(0, v.find_first_not_of(" \t"));
-                    v.erase(v.find_last_not_of(" \t") + 1);
-                    if (!v.empty()) lhs_vars.push_back(v);
-                    if (comma == std::string::npos) break;
-                    v_pos = comma + 1;
+                std::string error;
+                if (!assignScriptTuple(lhs, rhs, error)) {
+                    engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
                 }
-                
-                // Evaluate RHS expression
-                bool is_arr = false;
-                std::string parse_err;
-                std::vector<double> vals;
-                
-                // Check if RHS is a custom script function call
-                size_t open_p = rhs.find('(');
-                bool executed_fn = false;
-                if (open_p != std::string::npos && rhs.back() == ')') {
-                    std::string fn_name = rhs.substr(0, open_p);
-                    fn_name.erase(0, fn_name.find_first_not_of(" \t"));
-                    fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    for (const auto& sf : user_script_funcs) {
-                        if (sf.name == fn_name) {
-                            std::string args_str = rhs.substr(open_p + 1, rhs.size() - open_p - 2);
-                            std::vector<std::string> arg_exprs;
-                            size_t a_pos = 0;
-                            while (a_pos < args_str.size()) {
-                                size_t comma = args_str.find(',', a_pos);
-                                std::string a_e = (comma == std::string::npos) ? args_str.substr(a_pos) : args_str.substr(a_pos, comma - a_pos);
-                                a_e.erase(0, a_e.find_first_not_of(" \t"));
-                                a_e.erase(a_e.find_last_not_of(" \t") + 1);
-                                if (!a_e.empty()) arg_exprs.push_back(a_e);
-                                if (comma == std::string::npos) break;
-                                a_pos = comma + 1;
-                            }
-                            
-                            std::vector<double> eval_arg_vals;
-                            for (size_t p_i = 0; p_i < sf.params.size() && p_i < arg_exprs.size(); ++p_i) {
-                                std::string eval_err;
-                                double val = evaluate(preprocessArrayLookups(arg_exprs[p_i], eval_err), eval_err);
-                                eval_arg_vals.push_back(val);
-                            }
-                            auto old_args = user_args;
-                            for (size_t p_i = 0; p_i < eval_arg_vals.size(); ++p_i) {
-                                bool found = false;
-                                for (auto& ua : user_args) {
-                                    if (ua.name == sf.params[p_i]) { ua.val = eval_arg_vals[p_i]; found = true; break; }
-                                }
-                                if (!found) user_args.push_back({sf.params[p_i], eval_arg_vals[p_i]});
-                            }
-                            
-                            for (const auto& stmt : sf.statements) {
-                                if (stmt.rfind("return", 0) == 0) {
-                                    std::string ret_expr = (stmt.size() > 6) ? stmt.substr(6) : "0";
-                                    ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-                                    ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-                                    
-                                    std::vector<std::string> ret_parts;
-                                    std::string current_part = "";
-                                    int p_depth = 0, b_depth = 0;
-                                    for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                                        char ch = ret_expr[c_i];
-                                        if (ch == '(') p_depth++;
-                                        else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                                        else if (ch == '[') b_depth++;
-                                        else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                                        
-                                        if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                                            ret_parts.push_back(current_part);
-                                            current_part = "";
-                                        } else {
-                                            current_part += ch;
-                                        }
-                                    }
-                                    if (!current_part.empty()) ret_parts.push_back(current_part);
-                                    
-                                    for (const auto& part : ret_parts) {
-                                        std::string eval_err;
-                                        double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                                        vals.push_back(v);
-                                    }
-                                    break;
-                                } else {
-                                    bool isDef = false;
-                                    std::string eval_err;
-                                    evaluateInput(preprocessArrayLookups(stmt, eval_err), eval_err, isDef);
-                                }
-                            }
-                            user_args = old_args;
-                            executed_fn = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!executed_fn) {
-                    vals = parseArrayExpr(rhs, is_arr, parse_err);
-                    if (!is_arr || !parse_err.empty()) {
-                        std::string eval_err;
-                        double single_v = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
-                        vals = {single_v};
-                    }
-                }
-                
-                for (size_t var_i = 0; var_i < lhs_vars.size(); ++var_i) {
-                    const std::string& var_name = lhs_vars[var_i];
-                    double val = (var_i < vals.size()) ? vals[var_i] : 0.0;
-                    user_arrays.erase(var_name);
-                    bool found = false;
-                    for (auto& a : user_args) {
-                        if (a.name == var_name) {
-                            a.val = val;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        user_args.push_back({var_name, val});
-                    }
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), var_name) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(var_name);
-                    }
-                }
-                if (script_has_returned) break;
+                if (engineState().script_has_returned) break;
                 ip++;
                 continue;
             }
             
-            bool is_const_assign = false;
-            for (const auto& cn : user_consts) {
-                if (cn.name == lhs) {
-                    is_const_assign = true;
-                    break;
-                }
-            }
-            if (is_const_assign) {
-                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: Const Error");
+            if (isReservedName(lhs)) { engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Reserved name: " + lhs); ip++; continue; }
+            if (isScriptConstant(lhs)) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: Const Error");
                 ip++;
                 continue;
             }
             
-            std::string op1, op, op2;
-            std::string err;
-            bool is_arr_op = false;
-            if (parseBinaryOp(rhs, op1, op, op2)) {
-                auto trim = [](std::string& s) {
-                    s.erase(0, s.find_first_not_of(" \t"));
-                    s.erase(s.find_last_not_of(" \t") + 1);
-                };
-                trim(op1); trim(op2);
-                bool is1_arr = false, is2_arr = false;
-                std::string dummy_err;
-                std::vector<double> a1 = parseArrayExpr(op1, is1_arr, dummy_err);
-                std::vector<double> a2 = parseArrayExpr(op2, is2_arr, dummy_err);
-                bool op1_is_scalar = false, op2_is_scalar = false;
-                for (const auto& ua : user_args) {
-                    if (ua.name == op1) op1_is_scalar = true;
-                    if (ua.name == op2) op2_is_scalar = true;
-                }
-                if (op == ".*" || op == "./" || (is1_arr && !a1.empty()) || (is2_arr && !a2.empty()) || (!op1_is_scalar && user_arrays.find(op1) != user_arrays.end() && !user_arrays[op1].empty()) || (!op2_is_scalar && user_arrays.find(op2) != user_arrays.end() && !user_arrays[op2].empty())) {
-                    is_arr_op = true;
-                }
+            bool definition = false;
+            std::string error;
+            evaluateInput(lhs + "=" + rhs, error, definition);
+            if (!error.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + error);
             }
-
-            if (is_arr_op) {
-                bool is_scalar = false;
-                double scalar_res = 0;
-                std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
-                if (!err.empty()) {
-                    script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                } else if (is_scalar) {
-                    user_arrays.erase(lhs);
-                    bool found = false;
-                    for (auto& a : user_args) {
-                        if (a.name == lhs) {
-                            a.val = scalar_res;
-                            found = true;
-                            break;
-                        }
-                    }
-                    if (!found) {
-                        user_args.push_back({lhs, scalar_res});
-                    }
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(lhs);
-                    }
-                } else {
-                    user_arrays[lhs] = res;
-                }
-            } else {
-                bool is_arr = false;
-                std::string parse_arr_err;
-                std::vector<double> arr = parseArrayExpr(rhs, is_arr, parse_arr_err);
-                if (is_arr && parse_arr_err.empty()) {
-                    user_arrays[lhs] = arr;
-                    user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
-                        return a.name == lhs;
-                    }), user_args.end());
-                } else {
-                    user_arrays.erase(lhs);
-                    // Pre-expand len() so that expressions like len(Y) become scalars
-                    // before we scan rhs for array variable references.
-                    std::string len_err;
-                    std::string rhs_prepped = preprocessVectorStats(preprocessArrayLookups(preprocessLen(rhs), len_err));
-                    // Check if rhs references a user array by name (e.g., "sin(x)" where x is array).
-                    // If so, evaluate the expression element-wise substituting each array value.
-                    std::string source_arr_name;
-                    const std::vector<double>* source_arr = nullptr;
-                    for (const auto& kv : user_arrays) {
-                        if (kv.second.empty()) continue;
-                        const std::string& aname = kv.first;
-                        // Skip if aname is also defined as a scalar variable in user_args
-                        bool is_scalar_var = false;
-                        for (const auto& arg : user_args) {
-                            if (arg.name == aname) { is_scalar_var = true; break; }
-                        }
-                        if (is_scalar_var) continue;
-
-                        size_t pos = rhs_prepped.find(aname);
-                        while (pos != std::string::npos) {
-                            bool pre_ok = (pos == 0 || (!std::isalnum((unsigned char)rhs_prepped[pos-1]) && rhs_prepped[pos-1] != '_'));
-                            size_t end = pos + aname.size();
-                            bool post_ok = (end >= rhs_prepped.size() || (!std::isalnum((unsigned char)rhs_prepped[end]) && rhs_prepped[end] != '_'));
-                            bool not_indexed = (end >= rhs_prepped.size() || rhs_prepped[end] != '[');
-                            if (pre_ok && post_ok && not_indexed) {
-                                source_arr_name = aname;
-                                source_arr = &kv.second;
-                                break;
-                            }
-                            pos = rhs_prepped.find(aname, pos + 1);
-                        }
-                        if (source_arr) break;
-                    }
-
-                    if (source_arr && !source_arr->empty()) {
-                        bool name_is_id = (!source_arr_name.empty() && (std::isalpha((unsigned char)source_arr_name[0]) || source_arr_name[0] == '_'));
-                        if (name_is_id) {
-                            for (char c : source_arr_name) {
-                                if (!std::isalnum((unsigned char)c) && c != '_') { name_is_id = false; break; }
-                            }
-                        }
-                        if (name_is_id) {
-                            int x_idx = -1;
-                            for (size_t k = 0; k < user_args.size(); ++k) {
-                                if (user_args[k].name == source_arr_name) { x_idx = (int)k; break; }
-                            }
-                            bool created_var = false;
-                            double old_val = 0.0;
-                            if (x_idx != -1) {
-                                old_val = user_args[x_idx].val;
-                            } else {
-                                user_args.push_back({source_arr_name, 0.0});
-                                x_idx = (int)user_args.size() - 1;
-                                created_var = true;
-                            }
-                            std::string prep_err;
-                            std::string prep_rhs = rhs_prepped;
-                            std::vector<double> elem_res;
-                            elem_res.reserve(source_arr->size());
-                            bool all_ok = true;
-                            std::string eval_err;
-                            for (double val : *source_arr) {
-                                user_args[x_idx].val = val;
-                                eval_err.clear();
-                                double y = evaluate(prep_rhs, eval_err);
-                                if (!eval_err.empty()) { all_ok = false; break; }
-                                elem_res.push_back(y);
-                            }
-                            if (created_var) user_args.pop_back();
-                            else user_args[x_idx].val = old_val;
-
-                            if (!all_ok) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
-                            } else {
-                                user_arrays[lhs] = elem_res;
-                                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
-                                    return a.name == lhs;
-                                }), user_args.end());
-                            }
-                        } else {
-                            std::string eval_err;
-                            double val = evaluate(preprocessArrayLookups(preprocessLen(rhs), eval_err), eval_err);
-                            if (!eval_err.empty()) {
-                                script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
-                            } else {
-                                user_arrays.erase(lhs);
-                                bool found = false;
-                                for (auto& a : user_args) {
-                                    if (a.name == lhs) {
-                                        a.val = val;
-                                        found = true;
-                                        break;
-                                    }
-                                }
-                                if (!found) {
-                                    user_args.push_back({lhs, val});
-                                }
-                                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                    autocomplete_words.push_back(lhs);
-                                }
-                            }
-                        }
-                    } else {
-                        std::string eval_err;
-                        std::string prep_rhs = preprocessArrayLookups(preprocessLen(rhs), eval_err);
-                        double val = evaluate(prep_rhs, eval_err);
-                        if (!eval_err.empty()) {
-                            script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
-                        } else {
-                            bool found = false;
-                            for (auto& a : user_args) {
-                                if (a.name == lhs) {
-                                    a.val = val;
-                                    found = true;
-                                    break;
-                                }
-                            }
-                            if (!found) {
-                                user_args.push_back({lhs, val});
-                            }
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
-                            }
-                        }
-                    }
-                }
-            }
-            if (script_has_returned) break;
+            if (engineState().script_has_returned) break;
             ip++;
             continue;
         }
         else {
-            if (line.rfind("plot", 0) == 0) {
-                std::string err;
-                double result = 0.0;
-                if (handlePlotCommands(line, err, result)) {
-                    if (!err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + err);
-                    }
-                }
-            } else {
-                // Check if line is a custom script function call: e.g., func(arg1, arg2)
-                size_t open_p = line.find('(');
-                bool executed_custom = false;
-                if (open_p != std::string::npos && line.back() == ')') {
-                    std::string fn_name = line.substr(0, open_p);
-                    fn_name.erase(0, fn_name.find_first_not_of(" \t"));
-                    fn_name.erase(fn_name.find_last_not_of(" \t") + 1);
-                    
-                    for (const auto& sf : user_script_funcs) {
-                        if (sf.name == fn_name) {
-                            std::string args_str = line.substr(open_p + 1, line.size() - open_p - 2);
-                            std::vector<std::string> arg_exprs;
-                            size_t a_pos = 0;
-                            while (a_pos < args_str.size()) {
-                                size_t comma = args_str.find(',', a_pos);
-                                std::string a_e = (comma == std::string::npos) ? args_str.substr(a_pos) : args_str.substr(a_pos, comma - a_pos);
-                                a_e.erase(0, a_e.find_first_not_of(" \t"));
-                                a_e.erase(a_e.find_last_not_of(" \t") + 1);
-                                if (!a_e.empty()) arg_exprs.push_back(a_e);
-                                if (comma == std::string::npos) break;
-                                a_pos = comma + 1;
-                            }
-                            
-                            std::vector<double> eval_arg_vals;
-                            for (size_t p_i = 0; p_i < sf.params.size() && p_i < arg_exprs.size(); ++p_i) {
-                                std::string eval_err;
-                                double val = evaluate(preprocessArrayLookups(arg_exprs[p_i], eval_err), eval_err);
-                                eval_arg_vals.push_back(val);
-                            }
-                            auto old_args = user_args;
-                            for (size_t p_i = 0; p_i < eval_arg_vals.size(); ++p_i) {
-                                bool found = false;
-                                for (auto& ua : user_args) {
-                                    if (ua.name == sf.params[p_i]) { ua.val = eval_arg_vals[p_i]; found = true; break; }
-                                }
-                                if (!found) user_args.push_back({sf.params[p_i], eval_arg_vals[p_i]});
-                            }
-                            
-                            for (const auto& stmt : sf.statements) {
-                                if (stmt.rfind("return", 0) == 0) {
-                                    std::string ret_expr = (stmt.size() > 6) ? stmt.substr(6) : "0";
-                                    ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-                                    ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-                                    
-                                    std::vector<std::string> ret_parts;
-                                    std::string current_part = "";
-                                    int p_depth = 0, b_depth = 0;
-                                    for (size_t c_i = 0; c_i < ret_expr.size(); ++c_i) {
-                                        char ch = ret_expr[c_i];
-                                        if (ch == '(') p_depth++;
-                                        else if (ch == ')') { if (p_depth > 0) p_depth--; }
-                                        else if (ch == '[') b_depth++;
-                                        else if (ch == ']') { if (b_depth > 0) b_depth--; }
-                                        
-                                        if (ch == ',' && p_depth == 0 && b_depth == 0) {
-                                            ret_parts.push_back(current_part);
-                                            current_part = "";
-                                        } else {
-                                            current_part += ch;
-                                        }
-                                    }
-                                    if (!current_part.empty()) ret_parts.push_back(current_part);
-                                    
-                                    if (ret_parts.size() > 1) {
-                                        script_return_is_vec = true;
-                                        script_return_vec.clear();
-                                        for (size_t r_i = 0; r_i < ret_parts.size(); ++r_i) {
-                                            std::string part = ret_parts[r_i];
-                                            part.erase(0, part.find_first_not_of(" \t"));
-                                            part.erase(part.find_last_not_of(" \t") + 1);
-                                            std::string eval_err;
-                                            double v = evaluate(preprocessArrayLookups(part, eval_err), eval_err);
-                                            script_return_vec.push_back(v);
-                                        }
-                                        script_return_val = script_return_vec[0];
-                                    } else {
-                                        bool is_arr = false;
-                                        std::string parse_err;
-                                        std::vector<double> arr = parseArrayExpr(ret_expr, is_arr, parse_err);
-                                        if (is_arr && parse_err.empty()) {
-                                            script_return_is_vec = true;
-                                            script_return_vec = arr;
-                                            script_return_val = arr.empty() ? 0.0 : arr[0];
-                                        } else {
-                                            std::string eval_err;
-                                            script_return_val = evaluate(preprocessArrayLookups(ret_expr, eval_err), eval_err);
-                                            script_return_is_vec = false;
-                                            script_return_vec = {script_return_val};
-                                        }
-                                    }
-                                    break;
-                                } else {
-                                    bool isDef = false;
-                                    std::string eval_err;
-                                    evaluateInput(preprocessArrayLookups(stmt, eval_err), eval_err, isDef);
-                                }
-                            }
-                            user_args = old_args;
-                            executed_custom = true;
-                            break;
-                        }
-                    }
-                }
-                
-                if (!executed_custom) {
-                    bool isDef = false;
-                    std::string eval_err;
-                    evaluateInput(preprocessArrayLookups(line, eval_err), eval_err, isDef);
-                    if (script_has_returned) break;
-                    if (!eval_err.empty()) {
-                        script_console_output.push_back("L:" + std::to_string(ip + 1) + " Err: " + eval_err);
-                    }
-                }
+            bool isDef = false;
+            std::string eval_err;
+            evaluateInput(line, eval_err, isDef);
+            if (!eval_err.empty()) {
+                engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[ip]) + " Err: " + eval_err);
             }
             ip++;
         }
     }
     
     if (step_count >= max_steps) {
-        script_console_output.push_back("Error: Loop limit reached");
+        engineState().script_console_output.push_back("L:" + std::to_string(sourceLines[std::min(ip, sourceLines.size() - 1)]) + " Err: Script statement limit reached");
     }
     
-    user_funcs = original_funcs;
-    autocomplete_words = original_autocomplete;
+    auto& state = engineState();
+    state.user_funcs = std::move(original_funcs);
+    state.autocomplete_words = std::move(original_autocomplete);
+    std::unordered_set<std::string_view> knownWords;
+    const auto maxWords = state.autocomplete_words.size() + state.user_args.size() + state.user_arrays.size() + state.user_script_funcs.size();
+    knownWords.reserve(maxWords);
+    // Keep the keys valid while appending completion words.
+    state.autocomplete_words.reserve(maxWords);
+    knownWords.insert(state.autocomplete_words.begin(), state.autocomplete_words.end());
+    for (const auto& arg : state.user_args) {
+        if (knownWords.insert(arg.name).second) state.autocomplete_words.push_back(arg.name);
+    }
+    for (const auto& array : state.user_arrays) {
+        if (knownWords.insert(array.first).second) state.autocomplete_words.push_back(array.first);
+    }
+    for (const auto& function : state.user_script_funcs) {
+        const auto completion = function.name + "(";
+        if (knownWords.find(completion) == knownWords.end()) {
+            state.autocomplete_words.push_back(completion);
+            knownWords.insert(state.autocomplete_words.back());
+        }
+    }
     // Note: user_arrays intentionally not restored — scripts may define arrays
     // that affect subsequent plot rendering (e.g., x, y1) or global state.
 }

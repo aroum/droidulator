@@ -117,6 +117,11 @@ object ThemePalette {
     val bgSoft: Int get() = getColor("bg_soft", DEFAULT_DARK_BG_SOFT, DEFAULT_LIGHT_BG_SOFT)
     val bgCard: Int get() = getColor("bg_card", DEFAULT_DARK_BG_SOFT, DEFAULT_LIGHT_BG_SOFT)
     val bgDarkText: Int get() = getColor("bg_dark_text", DEFAULT_DARK_BG_DARK_TEXT, DEFAULT_LIGHT_BG_DARK_TEXT)
+    val btnText: Int get() = getColor("btn_text",
+        customDarkColors?.get("bg_dark_text") ?: DEFAULT_DARK_BG_DARK_TEXT,
+        customLightColors?.get("bg_dark_text") ?: DEFAULT_LIGHT_BG_DARK_TEXT
+    )
+    val btnIconColor: Int get() = btnText
 
     // Foreground Text & Dim Colors
     val fgText: Int get() = getColor("fg_text", DEFAULT_DARK_FG, DEFAULT_LIGHT_FG)

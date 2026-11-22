@@ -1,12 +1,6 @@
 #include "plot_engine.h"
-#include "math_funcs.h"
+#include "math_engine.h"
 
-extern std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-extern double evaluate(const std::string& expr_str, std::string& err);
-extern bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2);
-extern std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err);
-extern std::string preprocessArrayLookups(const std::string& expr, std::string& err);
-extern std::string preprocessLen(const std::string& s);
 
 bool handlePlotCommands(const std::string& line, std::string& err, double& result) {
     std::string trimmed = line;
@@ -14,15 +8,14 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
     trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
     
     if (trimmed == "plot.show()" || trimmed == "plot.show( )") {
-        appState = STATE_PLOT;
         result = 0.0;
         return true;
     }
     if (trimmed == "plot.close()" || trimmed == "plot.close( )") {
-        plot_lines.clear();
-        plot_hold = false;
-        plot_manual_limits = false;
-        appState = STATE_CALC;
+        engineState().plot_lines.clear();
+        engineState().plot_hold = false;
+        engineState().plot_manual_limits = false;
+        engineState().plot_manual_x = engineState().plot_manual_y = false;
         result = 0.0;
         return true;
     }
@@ -31,9 +24,9 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         arg.erase(0, arg.find_first_not_of(" \t"));
         arg.erase(arg.find_last_not_of(" \t") + 1);
         if (arg == "1" || arg == "true") {
-            plot_hold = true;
+            engineState().plot_hold = true;
         } else {
-            plot_hold = false;
+            engineState().plot_hold = false;
         }
         result = 0.0;
         return true;
@@ -50,11 +43,13 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             std::string max_str = arg.substr(sep + 1);
             std::string eval_err;
             double min_v = evaluate(min_str, eval_err);
+            if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && !std::isnan(min_v) && !std::isnan(max_v)) {
-                plot_xlim_min = min_v;
-                plot_xlim_max = max_v;
-                plot_manual_limits = true;
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v && std::isfinite(max_v - min_v)) {
+                engineState().plot_xlim_min = min_v;
+                engineState().plot_xlim_max = max_v;
+                engineState().plot_manual_limits = true;
+                engineState().plot_manual_x = true;
             } else {
                 err = "Limit Eval Error";
             }
@@ -76,11 +71,13 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
             std::string max_str = arg.substr(sep + 1);
             std::string eval_err;
             double min_v = evaluate(min_str, eval_err);
+            if (!eval_err.empty()) { err = "Limit Eval Error"; result = 0; return true; }
             double max_v = evaluate(max_str, eval_err);
-            if (eval_err.empty() && !std::isnan(min_v) && !std::isnan(max_v)) {
-                plot_ylim_min = min_v;
-                plot_ylim_max = max_v;
-                plot_manual_limits = true;
+            if (eval_err.empty() && std::isfinite(min_v) && std::isfinite(max_v) && min_v < max_v && std::isfinite(max_v - min_v)) {
+                engineState().plot_ylim_min = min_v;
+                engineState().plot_ylim_max = max_v;
+                engineState().plot_manual_limits = true;
+                engineState().plot_manual_y = true;
             } else {
                 err = "Limit Eval Error";
             }
@@ -93,7 +90,7 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
     
     if (trimmed.rfind("plot(", 0) == 0 && trimmed.back() == ')') {
         std::string inner = trimmed.substr(5, trimmed.size() - 6);
-        std::vector<std::string> args = splitPlotArgs(inner);
+        std::vector<std::string> args = expression::splitArguments(inner);
         std::string x_str = "x";
         std::string y_str = "";
         std::string color_str = "green";
@@ -131,54 +128,34 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
         else if (color_str == "white" || color_str == "w") color_val = 0xFFFF;
         
         bool x_is_scalar = false;
-        for (const auto& ua : user_args) {
+        for (const auto& ua : engineState().user_args) {
             if (ua.name == x_str) { x_is_scalar = true; break; }
         }
         std::vector<double> x_vec;
-        if (!x_is_scalar && user_arrays.find(x_str) != user_arrays.end()) {
-            x_vec = user_arrays[x_str];
+        if (!x_is_scalar && engineState().user_arrays.find(x_str) != engineState().user_arrays.end()) {
+            x_vec = engineState().user_arrays[x_str];
         } else {
             bool is_arr = false;
             std::string parse_err;
             x_vec = parseArrayExpr(x_str, is_arr, parse_err);
-            if (!is_arr || !parse_err.empty() || x_vec.empty()) {
-                parse_err.clear();
-                std::string prep_x = preprocessArrayLookups(x_str, parse_err);
-                double val = evaluate(prep_x, parse_err);
-                if (parse_err.empty() && !std::isnan(val)) {
-                    x_vec = { val };
-                } else {
-                    err = "X vector parse error";
-                    return true;
-                }
+            if (!parse_err.empty() || x_vec.empty()) {
+                err = "X vector parse error";
+                return true;
             }
         }
         
         bool y_is_scalar = false;
-        for (const auto& ua : user_args) {
+        for (const auto& ua : engineState().user_args) {
             if (ua.name == y_str) { y_is_scalar = true; break; }
         }
         std::vector<double> y_vec;
-        if (!y_is_scalar && user_arrays.find(y_str) != user_arrays.end()) {
-            y_vec = user_arrays[y_str];
+        if (!y_is_scalar && engineState().user_arrays.find(y_str) != engineState().user_arrays.end()) {
+            y_vec = engineState().user_arrays[y_str];
         } else {
             bool is_arr = false;
             std::string parse_err;
             std::vector<double> candidate = parseArrayExpr(y_str, is_arr, parse_err);
-            std::string prep_y = preprocessArrayLookups(y_str, parse_err);
-            std::string op1, op, op2;
-            bool is_bin_op = parseBinaryOp(prep_y, op1, op, op2);
-            if (is_arr && parse_err.empty()) {
-                y_vec = candidate;
-            } else if (is_bin_op) {
-                bool is_scalar = false;
-                double scalar_res = 0;
-                std::string bin_err;
-                std::vector<double> bin_res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, bin_err);
-                if (bin_err.empty() && !is_scalar) {
-                    y_vec = bin_res;
-                }
-            }
+            if (is_arr && parse_err.empty()) y_vec = std::move(candidate);
             if (y_vec.empty()) {
                 y_vec.clear();
                 y_vec.reserve(x_vec.size());
@@ -192,10 +169,10 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                         if (!std::isalnum((unsigned char)c) && c != '_') { x_str_is_id = false; break; }
                     }
                 }
-                std::string x_var_name = (x_str_is_id || user_arrays.find(x_str) != user_arrays.end()) ? x_str : "x";
+                std::string x_var_name = (x_str_is_id || engineState().user_arrays.find(x_str) != engineState().user_arrays.end()) ? x_str : "x";
                 int x_idx = -1;
-                for (size_t k = 0; k < user_args.size(); ++k) {
-                    if (user_args[k].name == x_var_name) {
+                for (size_t k = 0; k < engineState().user_args.size(); ++k) {
+                    if (engineState().user_args[k].name == x_var_name) {
                         x_idx = (int)k;
                         break;
                     }
@@ -203,17 +180,19 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                 bool created_x = false;
                 double old_x = 0.0;
                 if (x_idx != -1) {
-                    old_x = user_args[x_idx].val;
+                    old_x = engineState().user_args[x_idx].val;
                 } else {
-                    user_args.push_back({x_var_name, 0.0});
-                    x_idx = (int)user_args.size() - 1;
+                    engineState().user_args.push_back({x_var_name, 0.0});
+                    x_idx = (int)engineState().user_args.size() - 1;
                     created_x = true;
                 }
 
                 for (double xv : x_vec) {
-                    user_args[x_idx].val = xv;
+                    auto current = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) { return a.name == x_var_name; });
+                    if (current == engineState().user_args.end()) { engineState().user_args.push_back({x_var_name, xv}); }
+                    else current->val = xv;
                     std::string eval_err;
-                    double yv = evaluate(preprocessLen(prep_y), eval_err);
+                    double yv = evaluateScalar(y_str, eval_err, "Plot value");
                     if (eval_err.empty() && !std::isnan(yv)) {
                         y_vec.push_back(yv);
                     } else {
@@ -221,28 +200,25 @@ bool handlePlotCommands(const std::string& line, std::string& err, double& resul
                     }
                 }
 
-                if (created_x) {
-                    user_args.pop_back();
-                } else {
-                    user_args[x_idx].val = old_x;
-                }
+                auto current = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) { return a.name == x_var_name; });
+                if (created_x) { if (current != engineState().user_args.end()) engineState().user_args.erase(current); }
+                else if (current != engineState().user_args.end()) current->val = old_x;
+                else engineState().user_args.push_back({x_var_name, old_x});
             }
         }
         
-        if (!plot_hold) {
-            plot_lines.clear();
+        if (!engineState().plot_hold) {
+            engineState().plot_lines.clear();
         }
-        if (plot_lines.size() >= 4) {
+        if (engineState().plot_lines.size() >= 4) {
             err = "Plot Limit Error";
             result = std::numeric_limits<double>::quiet_NaN();
             return true;
         }
         
-        plot_lines.push_back({ x_vec, y_vec, color_val, style_str });
-        plot_center_x = 0.0;
-        plot_center_y = 0.0;
-        plot_scale = 1.0;
-        plot_manual_limits = false;
+        engineState().plot_lines.push_back({ x_vec, y_vec, color_val, style_str });
+        engineState().plot_manual_limits = false;
+        engineState().plot_manual_x = engineState().plot_manual_y = false;
         result = 1.0;
         return true;
     }

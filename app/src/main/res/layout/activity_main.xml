@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="utf-8"?>
 <LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
     android:id="@+id/main_root"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
@@ -14,40 +15,58 @@
         android:orientation="horizontal"
         android:background="@color/gruvbox_bg_soft"
         android:gravity="center_vertical"
-        android:padding="4dp">
+        android:paddingHorizontal="@dimen/toolbar_gap"
+        android:paddingVertical="@dimen/toolbar_padding_vertical">
 
+        <HorizontalScrollView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:scrollbars="none" android:fillViewport="true">
+        <LinearLayout android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="horizontal" android:gravity="center_vertical">
         <!-- Top Dropdown Spinner Mode Switcher -->
         <Spinner
             android:id="@+id/spinner_tabs"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:contentDescription="@string/access_spinner_tabs"
+            android:layout_width="86dp"
+            android:layout_height="@dimen/toolbar_control_size"
             android:background="@null"
             android:spinnerMode="dropdown"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp" />
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp" />
 
-        <!-- Run Script Button (Visible in Scripts mode) -->
-        <Button
-            android:id="@+id/btn_run_script"
-            android:layout_width="wrap_content"
-            android:layout_height="36dp"
-            android:text="Run"
-            android:textColor="@color/gruvbox_bg"
-            android:backgroundTint="@color/gruvbox_aqua"
+        <EditText
+            android:id="@+id/search_query"
+            android:layout_width="86dp"
+            android:layout_height="@dimen/toolbar_control_size"
             android:fontFamily="monospace"
-            android:textSize="12sp"
-            android:textStyle="bold"
-            android:paddingStart="6dp"
-            android:paddingEnd="6dp"
+            android:textSize="13sp"
+            android:hint="@string/search"
+            android:singleLine="true"
+            android:inputType="text"
+            android:imeOptions="actionDone"
+            android:paddingHorizontal="4dp"
+            android:visibility="gone" />
+
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/search_toggle"
+            android:layout_marginStart="@dimen/toolbar_gap"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
+            android:padding="0dp"
+            android:contentDescription="@string/search"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            app:icon="@drawable/ic_search"
+            app:iconSize="@dimen/toolbar_icon_size"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp" />
 
         <!-- Add Item Button (+) -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_add_item"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:text="+"
+            android:contentDescription="@string/access_btn_add_item"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
             android:fontFamily="monospace"
@@ -55,14 +74,14 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" app:icon="@drawable/ic_add" app:iconSize="@dimen/toolbar_icon_size" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Delete All Items Button (Red ✕) -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_delete_all"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:text="✕"
+            android:contentDescription="@string/access_btn_delete_all"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_red"
             android:fontFamily="monospace"
@@ -70,14 +89,15 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" app:icon="@drawable/ic_close" app:iconSize="@dimen/toolbar_icon_size" app:iconGravity="textStart" app:iconPadding="0dp" app:iconTint="@color/gruvbox_bg" />
 
         <!-- Toggle e-history variables (#) -->
         <Button
             android:id="@+id/btn_toggle_evars"
-            android:layout_width="36dp"
-            android:layout_height="36dp"
-            android:text="#"
+            android:contentDescription="@string/access_btn_toggle_evars"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="@dimen/toolbar_control_size"
+            android:text="@string/ui_text_024"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_aqua"
             android:fontFamily="monospace"
@@ -85,47 +105,51 @@
             android:textStyle="bold"
             android:padding="0dp"
             android:visibility="gone"
-            android:layout_marginEnd="2dp" />
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <!-- Spacer View to push formatting options to the right -->
-        <View
-            android:layout_width="0dp"
-            android:layout_height="0dp"
-            android:layout_weight="1" />
 
+
+        <View android:layout_width="0dp" android:layout_height="1dp" android:layout_weight="1" />
         <!-- Format Mode Spinner (NORM, FLT, FIX, SCI, ENG) -->
         <Spinner
             android:id="@+id/spinner_fmt_mode"
+            android:contentDescription="@string/access_spinner_fmt_mode"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="@dimen/toolbar_control_size"
             android:background="@null"
             android:spinnerMode="dropdown"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:layout_marginEnd="2dp" />
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <!-- Precision Spinner (0dp .. 12dp) -->
         <Spinner
             android:id="@+id/spinner_fmt_prec"
+            android:contentDescription="@string/access_spinner_fmt_prec"
             android:layout_width="wrap_content"
-            android:layout_height="36dp"
+            android:layout_height="@dimen/toolbar_control_size"
             android:background="@null"
             android:spinnerMode="dropdown"
-            android:paddingStart="4dp"
-            android:paddingEnd="4dp"
-            android:layout_marginEnd="4dp" />
+            android:paddingStart="0dp"
+            android:paddingEnd="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <TextView
             android:id="@+id/tv_mode"
+            android:layout_marginStart="@dimen/toolbar_gap"
+            android:gravity="center"
             android:layout_width="wrap_content"
-            android:layout_height="wrap_content"
-            android:text="DEG"
+            android:layout_height="@dimen/toolbar_control_size"
+            android:text="@string/ui_text_025"
             android:textColor="@color/gruvbox_yellow"
             android:fontFamily="monospace"
             android:textSize="14sp"
             android:textStyle="bold"
             android:paddingStart="6dp"
             android:paddingEnd="6dp" />
+        </LinearLayout>
+        </HorizontalScrollView>
     </LinearLayout>
 
     <!-- Main Output / Terminal Log Area -->
@@ -147,7 +171,7 @@
             android:textSize="14sp"
             android:lineSpacingExtra="4dp"
             android:textIsSelectable="true"
-            android:text="Welcome to Droidulator Math REPL\nType expressions like '2+3*4' or 'sin(90)'\n" />
+            android:text="" />
     </ScrollView>
 
     <!-- Dedicated Plot View Container -->
@@ -180,7 +204,7 @@
                 android:id="@+id/tv_settings_section_theme"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Theme Mode:"
+                android:text="@string/ui_text_027"
                 android:textColor="@color/gruvbox_fg"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
@@ -197,7 +221,7 @@
                     android:id="@+id/rb_theme_auto"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Auto"
+                    android:text="@string/ui_text_028"
                     android:textColor="@color/gruvbox_fg"
                     android:buttonTint="@color/gruvbox_aqua"
                     android:fontFamily="monospace" />
@@ -206,7 +230,7 @@
                     android:id="@+id/rb_theme_dark"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Dark"
+                    android:text="@string/ui_text_029"
                     android:textColor="@color/gruvbox_fg"
                     android:buttonTint="@color/gruvbox_aqua"
                     android:fontFamily="monospace" />
@@ -215,7 +239,7 @@
                     android:id="@+id/rb_theme_light"
                     android:layout_width="wrap_content"
                     android:layout_height="wrap_content"
-                    android:text="Light"
+                    android:text="@string/ui_text_030"
                     android:textColor="@color/gruvbox_fg"
                     android:buttonTint="@color/gruvbox_aqua"
                     android:fontFamily="monospace" />
@@ -225,7 +249,7 @@
                 android:id="@+id/tv_settings_section_custom_theme"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Custom Theme Source:"
+                android:text="@string/ui_text_031"
                 android:textColor="@color/gruvbox_fg"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
@@ -242,7 +266,7 @@
                     android:layout_width="0dp"
                     android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="Load JSON Theme"
+                    android:text="@string/ui_text_032"
                     android:textColor="@color/gruvbox_bg"
                     android:backgroundTint="@color/gruvbox_aqua"
                     android:fontFamily="monospace"
@@ -255,7 +279,7 @@
                     android:layout_width="0dp"
                     android:layout_height="40dp"
                     android:layout_weight="1"
-                    android:text="Reset to Built-in"
+                    android:text="@string/ui_text_033"
                     android:textColor="@color/gruvbox_fg"
                     android:backgroundTint="@color/gruvbox_bg_soft"
                     android:fontFamily="monospace"
@@ -267,7 +291,7 @@
                 android:id="@+id/tv_settings_section_display"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Display &amp; Input Preferences:"
+                android:text="@string/ui_text_034"
                 android:textColor="@color/gruvbox_fg"
                 android:fontFamily="monospace"
                 android:textSize="14sp"
@@ -277,7 +301,17 @@
                 android:id="@+id/cb_hide_welcome"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Hide Welcome Message on Start"
+                android:text="@string/ui_text_035"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
+                android:fontFamily="monospace"
+                android:layout_marginBottom="4dp" />
+
+            <CheckBox
+                android:id="@+id/cb_toolbar_haptics"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/toolbar_haptics_checkbox"
                 android:textColor="@color/gruvbox_fg"
                 android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
@@ -287,7 +321,7 @@
                 android:id="@+id/cb_auto_pair"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Auto-Pair Brackets &amp; Quotes (( ), [ ], { }, &quot; &quot;)"
+                android:text="@string/ui_text_036"
                 android:textColor="@color/gruvbox_fg"
                 android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
@@ -297,38 +331,27 @@
                 android:id="@+id/cb_digit_grouping"
                 android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Digit Grouping (Spaces for 1 234 and 0.000 001)"
+                android:text="@string/ui_text_037"
                 android:textColor="@color/gruvbox_fg"
                 android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
-                android:layout_marginBottom="16dp" />
-
-            <TextView
-                android:id="@+id/tv_settings_section_enter_action"
-                android:layout_width="wrap_content"
-                android:layout_height="wrap_content"
-                android:text="Enter Key Action in REPL:"
-                android:textColor="@color/gruvbox_fg"
-                android:fontFamily="monospace"
-                android:textSize="14sp"
                 android:layout_marginBottom="4dp" />
 
-            <Button
+            <CheckBox
                 android:id="@+id/btn_settings_enter_action"
-                android:layout_width="match_parent"
+                android:layout_width="wrap_content"
                 android:layout_height="wrap_content"
-                android:text="Enter Key: Send Command"
-                android:textColor="@color/gruvbox_bg"
-                android:backgroundTint="@color/gruvbox_blue"
+                android:text="@string/enter_send_checkbox"
+                android:textColor="@color/gruvbox_fg"
+                android:buttonTint="@color/gruvbox_aqua"
                 android:fontFamily="monospace"
-                android:textStyle="bold"
                 android:layout_marginBottom="16dp" />
 
             <Button
                 android:id="@+id/btn_settings_clear_history"
                 android:layout_width="match_parent"
                 android:layout_height="wrap_content"
-                android:text="Clear History &amp; Reset Engine Session"
+                android:text="@string/ui_text_040"
                 android:textColor="@color/gruvbox_bg"
                 android:backgroundTint="@color/gruvbox_red"
                 android:fontFamily="monospace"
@@ -344,7 +367,7 @@
         android:layout_height="0dp"
         android:layout_weight="1"
         android:background="@color/gruvbox_bg"
-        android:padding="8dp"
+        android:paddingTop="3dp"
         android:visibility="gone">
 
         <LinearLayout
@@ -374,7 +397,7 @@
             android:maxLines="6"
             android:scrollbars="vertical"
             android:imeOptions="actionDone"
-            android:inputType="textMultiLine|textNoSuggestions|textVisiblePassword" />
+            android:inputType="textMultiLine|textNoSuggestions" />
 
         <TextView
             android:id="@+id/tv_error_overlay"
@@ -396,55 +419,79 @@
     <LinearLayout
         android:id="@+id/toolbar_keyboard"
         android:layout_width="match_parent"
-        android:layout_height="44dp"
+        android:layout_height="40dp"
         android:orientation="horizontal"
         android:background="@color/gruvbox_bg_soft"
         android:gravity="center_vertical"
-        android:layout_marginTop="4dp">
+        android:layout_marginTop="@dimen/toolbar_gap"
+        android:paddingStart="4dp"
+        android:paddingEnd="4dp"
+        android:paddingTop="2dp"
+        android:paddingBottom="2dp">
 
         <!-- Navigation Arrow Buttons -->
         <Button
             android:id="@+id/btn_nav_left"
+            android:contentDescription="@string/access_btn_nav_left"
             android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:text="◀"
+            android:text="@string/ui_text_041"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_blue"
             android:textSize="12sp"
-            android:padding="0dp" />
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp" />
 
         <Button
             android:id="@+id/btn_nav_right"
+            android:contentDescription="@string/access_btn_nav_right"
             android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:text="▶"
+            android:text="@string/ui_text_042"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_blue"
             android:textSize="12sp"
             android:padding="0dp"
-            android:layout_marginStart="2dp" />
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <Button
             android:id="@+id/btn_nav_up"
+            android:contentDescription="@string/access_btn_nav_up"
             android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:text="▲"
+            android:text="@string/ui_text_043"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_purple"
             android:textSize="12sp"
             android:padding="0dp"
-            android:layout_marginStart="2dp" />
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <Button
             android:id="@+id/btn_nav_down"
+            android:contentDescription="@string/access_btn_nav_down"
             android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:text="▼"
+            android:text="@string/ui_text_044"
             android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_purple"
             android:textSize="12sp"
             android:padding="0dp"
-            android:layout_marginStart="2dp" />
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <View
             android:layout_width="0dp"
@@ -452,22 +499,28 @@
             android:layout_weight="1" />
 
         <!-- Tab Autocomplete Button -->
-        <Button
+        <com.google.android.material.button.MaterialButton
             android:id="@+id/btn_tab"
-            android:layout_width="wrap_content"
+            android:contentDescription="@string/btn_tab"
+            android:layout_width="40dp"
             android:layout_height="match_parent"
-            android:text="@string/btn_tab"
-            android:textColor="@color/gruvbox_bg"
             android:backgroundTint="@color/gruvbox_yellow"
-            android:fontFamily="monospace"
-            android:textSize="13sp"
-            android:textStyle="bold"
-            android:layout_marginStart="2dp"
-            android:layout_marginEnd="12dp" />
+            app:icon="@drawable/ic_tab"
+            app:iconGravity="textStart"
+            app:iconPadding="0dp"
+            app:iconSize="@dimen/toolbar_icon_size"
+            app:iconTint="@color/gruvbox_bg"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
 
         <!-- Clear Input / History Button -->
         <Button
             android:id="@+id/btn_clear"
+            android:contentDescription="@string/access_btn_clear"
             android:layout_width="40dp"
             android:layout_height="match_parent"
             android:text="@string/btn_clear"
@@ -476,7 +529,34 @@
             android:fontFamily="monospace"
             android:textSize="14sp"
             android:textStyle="bold"
-            android:padding="0dp" />
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap" />
+
+        <!-- Enter / Send Command Button (2u width, visible when Enter-to-send is disabled) -->
+        <com.google.android.material.button.MaterialButton
+            android:id="@+id/btn_enter"
+            android:contentDescription="@string/access_btn_enter"
+            android:layout_width="@dimen/toolbar_control_size"
+            android:layout_height="match_parent"
+            app:icon="@drawable/ic_enter" app:iconGravity="textStart" app:iconPadding="0dp" app:iconSize="@dimen/toolbar_icon_size"
+            android:textColor="@color/gruvbox_bg"
+            android:backgroundTint="@color/gruvbox_green"
+            android:fontFamily="sans-serif"
+            android:textSize="26sp"
+            android:textStyle="bold"
+            android:includeFontPadding="false"
+            android:gravity="center"
+            android:padding="0dp"
+            android:insetTop="0dp"
+            android:insetBottom="0dp"
+            android:insetLeft="0dp"
+            android:insetRight="0dp"
+            android:layout_marginStart="@dimen/toolbar_gap"
+            android:visibility="gone" />
     </LinearLayout>
 
 </LinearLayout>

@@ -1,0 +1,8 @@
+# Precious metals prices from Packetizer (services.packetizer.com/spotprices)
+
+!message Precious metals prices from packetizer.com on 2026-04-01
+
+silverprice        70 US$/troyounce
+goldprice          4511.77 US$/troyounce
+platinumprice      1908.22 US$/troyounce
+

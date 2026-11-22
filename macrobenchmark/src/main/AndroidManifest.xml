@@ -1,0 +1,6 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <queries>
+        <package android:name="com.cardputer.cardulator.benchmark" />
+    </queries>
+    <application android:label="Droidulator performance checks" />
+</manifest>

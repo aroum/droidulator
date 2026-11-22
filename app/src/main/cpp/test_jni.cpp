@@ -5,8 +5,10 @@
 #include <cassert>
 #include <cmath>
 #include <cstdint>
+#include <thread>
+#include <atomic>
+extern "C" int bridge_test_fatal();
 
-#define UNIT_TEST 1
 
 #include "engine/app_state.h"
 #include "engine/help_engine.h"
@@ -24,8 +26,131 @@
 #include "engine/app_state.cpp"
 
 int main() {
+    // Exercise the same index and topic renderer used by the Android Help screen.
+    std::string helpIndex;
+    assert(preprocessHelp("help(index)", helpIndex));
+    for (const auto& entry : helpEntries) {
+        std::string rendered;
+        assert(helpIndex.find(std::string(entry.name) + "\n") != std::string::npos);
+        assert(preprocessHelp("help(\"" + std::string(entry.name) + "\")", rendered));
+        assert(rendered.find("\n\nSyntax\n") != std::string::npos);
+        assert(rendered.find("\n\nExamples\n") != std::string::npos);
+        assert(rendered.find("General math function/variable") == std::string::npos);
+    }
+    std::string xorHelp;
+    assert(preprocessHelp("help(XOR)", xorHelp));
+    assert(xorHelp.find("2 xor 3 = 0") != std::string::npos);
     std::cout << "[Droidulator Native Test] Initializing..." << std::endl;
     std::string err;
+    EngineContext firstSession;
+    EngineContext secondSession;
+    {
+        EngineContextScope first(firstSession);
+        bool defined = false;
+        evaluateInput("isolated_var=42", err, defined);
+        assert(defined && err.empty());
+        appendHistory(7);
+        engineState().degreesMode = false;
+        {
+            EngineContextScope second(secondSession);
+            assert(engineState().degreesMode && engineState().history.empty());
+            evaluate("isolated_var", err);
+            assert(!err.empty());
+            err.clear();
+            evaluateInput("isolated_var=3", err, defined);
+            assert(defined && err.empty());
+        }
+        assert(evaluate("isolated_var", err) == 42);
+        assert(engineState().history.size() == 1 && engineState().history[0] == 7);
+        assert(evaluate("isolated_var * 2 + e1", err) == 91 && err.empty());
+        engineState().user_arrays["ast_samples"] = {2, 4, 8};
+        assert(expression::ArithmeticExpression::evaluate("ast_samples[1+1] * 2", err,
+            lookupScalar, lookupUnary, lookupArray) == 8 && err.empty());
+        assert(expression::ArithmeticExpression::evaluate("len(ast_samples) + ast_samples[2]", err,
+            lookupScalar, lookupUnary, lookupArray) == 7 && err.empty());
+        engineState().user_arrays["ast_empty"] = {};
+        assert(evaluate("len(ast_empty)", err) == 0 && err.empty());
+        assert(std::isnan(evaluate("ast_samples[1.4]", err)) && err.find("out of bounds") != std::string::npos);
+        err.clear();
+        assert(evaluate("-(isolated_var + e1)", err) == -49 && err.empty());
+    }
+    {
+        EngineContextScope second(secondSession);
+        assert(evaluate("isolated_var", err) == 3);
+    }
+    assert(findAssignmentOperator("x >= 2") == std::string::npos);
+    assert(findAssignmentOperator("x += 2") == std::string::npos);
+    assert(findAssignmentOperator("x = f(1, 2)") == 2);
+    assert(findAssignmentOperator(R"(print("a = b"))") == std::string::npos);
+    assert(expression::callBody(R"(conv (max(1, 2), "m", "cm"))", "conv").has_value());
+    assert(!expression::callBody("conv(1, m) + f(2)", "conv"));
+    assert(!expression::callBody("conv([1), m)", "conv"));
+    std::string arrayName, indexExpression, assignedValue;
+    assert(parseArrayElementAssignment("a[b[1] + 1] = 7", arrayName, indexExpression, assignedValue));
+    assert(arrayName == "a" && indexExpression == "b[1] + 1" && expression::trim(assignedValue) == "7");
+    assert(!parseArrayElementAssignment("a[1] == 7", arrayName, indexExpression, assignedValue));
+    assert(!parseArrayElementAssignment("a[1) = 7", arrayName, indexExpression, assignedValue));
+    {
+        EngineContext arrays;
+        EngineContextScope scope(arrays);
+        arrays.user_arrays["a"] = {10, 20};
+        arrays.user_arrays["b"] = {1};
+        bool defined = false;
+        assert(evaluateInput("a[b[1]+1] = 7", err, defined) == 7 && defined && err.empty());
+        assert(arrays.user_arrays.at("a")[1] == 7);
+        evaluateInput("a[1.4] = 9", err, defined);
+        assert(!defined && !err.empty() && arrays.user_arrays.at("a")[0] == 10);
+        runScript("a[b[1]+1] = 8");
+        assert(arrays.user_arrays.at("a")[1] == 8);
+        err.clear();
+    }
+    const auto arguments = expression::splitArguments(R"(max(1, 2), 'm, x', [1,2])");
+    assert((arguments == std::vector<std::string>{"max(1, 2)", "'m, x'", "[1,2]"}));
+    assert(expression::splitArguments("x, [1, 2)").empty());
+    const std::pair<const char*, double> arithmeticCases[] = {
+        {"2+3*4", 14}, {"(2+3)*4", 20}, {"2^3^2", 64}, {"-2^2", 4},
+        {"2^-3", 0.125}, {"-(1+.5e+1)", -6},
+        {"2+3 >= 5 and 2 != 3", 1}, {"0 or 2 xor 3", 0}, {"1 || 0 && 0", 1},
+        {"0 < 1 < 2", 1}, {"1 == 2 < 3", 1}
+    };
+    for (const auto& [text, expected] : arithmeticCases) {
+        assert(expression::ArithmeticExpression::evaluate(text, err) == expected);
+        assert(evaluate(text, err) == expected && err.empty());
+    }
+    assert(expression::ArithmeticExpression::evaluate("abs(-sqrt(9))+fact(3)", err,
+        lookupScalar, lookupUnary) == 9 && err.empty());
+    assert(evaluate("sin(30)+cos(60)", err) > 0.999999 && err.empty());
+    assert(std::isnan(evaluate("sqrt(-1)", err)) && err.find("Domain Error") != std::string::npos);
+    err.clear();
+    assert(expression::ArithmeticExpression::evaluate("-3! + (2+1)! * 2!", err,
+        lookupScalar, lookupUnary) == 6 && err.empty());
+    assert(evaluate("3!!", err) == 720 && err.empty());
+    assert(evaluate("2^3!", err) == 64 && err.empty());
+    assert(std::isnan(evaluate("(-3)!", err)) && err.find("Domain Error") != std::string::npos);
+    err.clear();
+    assert(expression::ArithmeticExpression::evaluate("logb(8,2)+C(5,2)+mod(7,3)", err,
+        lookupScalar, lookupUnary, lookupArray, lookupBinary) == 14 && err.empty());
+    assert(evaluate("dot(3,4)+P(3,2)", err) == 18 && err.empty());
+    assert(std::isnan(evaluate("mod(1,0)", err)) && err == "Division by Zero");
+    err.clear();
+    assert(expression::ArithmeticExpression::evaluate("sum(1,mean(2,4),gcd(8,12,16))", err,
+        lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic) == 8 && err.empty());
+    assert(evaluate("sum(ast_index, 1, 3, ast_index^2)", err) == 14 && err.empty());
+    assert(evaluate("sum(ast_index, 1, 3, ast_index^2) > 10 and 0 != 1", err) == 1 && err.empty());
+    assert(!expression::ArithmeticExpression::evaluate("sin(0)", err));
+    assert(std::isnan(evaluate("1 / (2-2)", err)) && err == "Division by Zero");
+    err.clear();
+    const std::pair<const char*, double> rkmCases[] = {
+        {"4k7", 4700}, {"4k70", 4700}, {"4k75", 4750}, {"1k50", 1500},
+        {"2m20", 0.0022}, {"4k075", 4075}, {"1 / 4k75", 1.0 / 4750}
+    };
+    for (const auto& [expression, expected] : rkmCases) {
+        const auto decimal = expression::ArithmeticExpression::evaluate(expression, err);
+        assert(decimal && std::abs(*decimal - expected) < 1e-9);
+        assert(std::abs(evaluate(expression, err) - expected) < 1e-9);
+        assert(err.empty());
+    }
+
     bool isDef = false;
 
     // 1. Basic math test
@@ -38,6 +163,941 @@ int main() {
     std::cout << "1k + 500 = " << res2 << std::endl;
     assert(res2 == 1500.0);
 
+    auto expectNumber = [](const std::string& expression, double expected) {
+        std::string error;
+        double actual = evaluate(expression, error);
+        if (!error.empty() || std::abs(actual - expected) > std::max(1e-10, std::abs(expected) * 1e-9)) {
+            std::cerr << "Unexpected result: " << expression << " = " << actual << "; " << error << std::endl;
+            assert(false);
+        }
+    };
+    expectNumber("1 / 1e5", 1e-5);
+    expectNumber("1 / 10k", 1e-4);
+    {
+        std::string error; bool isDefinition = false;
+        engineState().user_script_funcs.push_back({"recursive_test", {"x"}, {"return recursive_test(x)"}});
+        evaluate("recursive_test(1)", error);
+        assert(error.find("recursion limit") != std::string::npos);
+        engineState().user_script_funcs.clear();
+        evaluateInput("x=3", error, isDefinition); assert(error.empty());
+        evaluateInput("flag=(x==3)", error, isDefinition); assert(error.empty());
+        expectNumber("flag", 1);
+        evaluateInput("ok=x>=2", error, isDefinition); assert(error.empty());
+        expectNumber("ok", 1);
+        evaluateInput("q(x)=x>=0", error, isDefinition); assert(error.empty());
+        expectNumber("q(2)", 1); expectNumber("q(-2)", 0);
+        evaluateInput("a=[1,2,4]", error, isDefinition); assert(error.empty());
+        bool isArray = false;
+        auto nested = parseArrayExpr("[atan2(1,1), 2]", isArray, error);
+        assert(error.empty() && isArray && nested.size() == 2);
+        assert(std::abs(nested[1] - 2) < 1e-12);
+        auto range = parseArrayExpr("[0:0.1:1]", isArray, error); assert(error.empty() && isArray && range.size() == 11);
+        auto inverse = parseArrayExpr("1 ./ a", isArray, error); assert(error.empty() && isArray && inverse.size() == 3 && inverse[2] == .25);
+        auto scaled = parseArrayExpr("a * -2", isArray, error); assert(error.empty() && isArray && scaled[1] == -4);
+        scaled = parseArrayExpr("1e-3 * a", isArray, error); assert(error.empty() && isArray && std::abs(scaled[1] - .002) < 1e-12);
+        scaled = parseArrayExpr("a * 1e-3", isArray, error); assert(error.empty() && isArray && std::abs(scaled[1] - .002) < 1e-12);
+        evaluate("a[1.4]", error); assert(!error.empty());
+        formatPrintString("\"x = {zzz} ok\"", error); assert(!error.empty());
+        error.clear(); formatPrintString("\"a\" + \"b\"", error); assert(!error.empty());
+        evaluateInput("empty(x)=", error, isDefinition); assert(!error.empty());
+        evaluate("rNor(0,-1)", error); assert(!error.empty());
+        std::string modError, percentError;
+        evaluate("mod(1,0)", modError); evaluate("1%0", percentError);
+        assert(modError == "Division by Zero" && percentError == modError);
+        assert(evaluate("17%5*2", percentError) == 4 && percentError.empty());
+        assert(evaluate("17%(2+3)", percentError) == 2 && percentError.empty());
+        assert(evaluate("-17%5", percentError) == -2 && percentError.empty());
+        assert(evaluate("200+10%", percentError) == 220 && percentError.empty());
+        assert(std::abs(evaluate("17%-5", percentError) + 4.83) < 1e-12 && percentError.empty());
+        assert(evaluate("not 0", percentError) == 1 && percentError.empty());
+        assert(evaluate("!1", percentError) == 0 && percentError.empty());
+        assert(evaluate("not not 3", percentError) == 1 && percentError.empty());
+        assert(evaluate("-not 0", percentError) == -1 && percentError.empty());
+        assert(evaluate("!3!", percentError) == 0 && percentError.empty());
+        assert(evaluate("not 0 and 2", percentError) == 1 && percentError.empty());
+        engineState().user_args.clear(); engineState().user_arrays.clear(); engineState().user_funcs.clear();
+    }
+    {
+        runScript("print(\"a+=b\")");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "a+=b");
+        runScript("print(\"a\\\"+=b\")");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "a\"+=b");
+        runScript("if(1){ print(1) }else{ print(2) }");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "1");
+        runScript("if(0){ print(1) }else{ print(2) }");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "2");
+        runScript("fn script_once(x) { return x*2 }; print(7)");
+        assert(engineState().script_console_output.size() == 1 && engineState().script_console_output[0] == "7");
+        runScript("fn sign_test(x) { if(x < 0) { return -1 } else { return 1 } }; a, b = sign_test(-5)");
+        auto a = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(a != engineState().user_args.end() && a->val == -1);
+        runScript("fn loop_test(x) { y=0; for(i=0; i<x; i+=1) { y=y+i }; print(y); return y }; loop_test(4)");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front() == "6");
+        runScript("fn branch_test(x) { if(x<0) { return -1 } else if(x==0) { return 0 } else { return 1 } }; a,b=branch_test(0)");
+        auto branch = std::find_if(engineState().user_args.begin(), engineState().user_args.end(), [](const UserArg& x) { return x.name == "a"; });
+        assert(branch != engineState().user_args.end() && branch->val == 0);
+        runScript("init_count_test=0; for(init_count_test+=1; init_count_test<3; init_count_test++) {}");
+        std::string initError;
+        assert(evaluate("init_count_test", initError) == 3 && initError.empty());
+        runScript("step_count_test=0; for(i=0; i<2; i++; i==1) { step_count_test+=1 }");
+        std::string stepError;
+        assert(evaluate("step_count_test", stepError) == 2 && stepError.empty());
+        const auto tokenizedHeader = expression::splitArguments("x=mean(1,2);x<3;x++;print(\";\")", ';', 3);
+        assert(tokenizedHeader == std::vector<std::string>({"x=mean(1,2)", "x<3", "x++;print(\";\")"}));
+        assert(expression::splitArguments(";;", ';', 3) == std::vector<std::string>({"", "", ""}));
+        assert(expression::splitArguments("x=(1;0;x++", ';', 3).empty());
+        runScript("fn fn_multiple_steps(x) { n=0; for(i=0;i<x;i++;n++) {}; return n }");
+        assert(evaluate("fn_multiple_steps (3)", stepError) == 3 && stepError.empty());
+        runScript("empty_for_count=0; for(;;) { empty_for_count++; if(empty_for_count==3) { break } }");
+        assert(evaluate("empty_for_count", stepError) == 3 && stepError.empty());
+        runScript("mixed_loop_count=0; for(i=0;i<3;i++) { j=0; while(j<4) { j++; if(j==2) { continue }; if(j==4) { break }; mixed_loop_count+=1 } }");
+        assert(evaluate("mixed_loop_count", stepError) == 6 && stepError.empty());
+        assert(evaluate("i", stepError) == 3 && stepError.empty());
+        runScript("while(0) { mixed_loop_count=999 }; after_false_while=7");
+        assert(evaluate("mixed_loop_count", stepError) == 6 && stepError.empty());
+        assert(evaluate("after_false_while", stepError) == 7 && stepError.empty());
+        runScript("invalid_for_body=0; for(i=0;i<3) { invalid_for_body=1 }; after_invalid_for=7");
+        assert(evaluate("invalid_for_body", stepError) == 0 && stepError.empty());
+        assert(evaluate("after_invalid_for", stepError) == 7 && stepError.empty());
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("Err: Mismatched for syntax") != std::string::npos; }));
+        for (const auto& header : {"if(1) {", "while(1) {"}) {
+            runScript(std::string("unclosed_block_body=0; ") + header + " unclosed_block_body=1");
+            assert(evaluate("unclosed_block_body", stepError) == 0 && stepError.empty());
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err: Mismatched") != std::string::npos; }));
+        }
+        for (const auto& header : {"if(1) ignored {", "while(1) ignored {", "for(;;) ignored {"}) {
+            runScript(std::string("invalid_header_body=0; ") + header + " invalid_header_body=1 }; after_header_error=7");
+            assert(evaluate("invalid_header_body", stepError) == 0 && stepError.empty());
+            assert(evaluate("after_header_error", stepError) == 7 && stepError.empty());
+            runScript(std::string("fn fn_invalid_block(x) { ") + header + " print(999) }; return x }");
+            engineState().script_console_output.clear();
+            evaluate("fn_invalid_block (1)", stepError);
+            assert(!stepError.empty());
+            assert(engineState().script_console_output.empty());
+        }
+        for (const auto& branch : {"else {", "elif(1) {", "if(0) {} elif(1) ignored {"}) {
+            runScript(std::string("invalid_branch_body=0; ") + branch + " invalid_branch_body=1 }; after_branch_error=7");
+            assert(evaluate("invalid_branch_body", stepError) == 0 && stepError.empty());
+            assert(evaluate("after_branch_error", stepError) == 7 && stepError.empty());
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        }
+        runScript("for(i=0; i<2; i=unknown_step_value) { print(i) }");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("fn completion_check(x) { return x }");
+        assert(std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(),
+            "completion_check(") != engineState().autocomplete_words.end());
+        runScript("fn duplicate_params(x,x) { return x }");
+        assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+            [](const CustomScriptFunc& function) { return function.name == "duplicate_params"; }));
+        runScript("fn unfinished_function(x) { return x");
+        assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+            [](const CustomScriptFunc& function) { return function.name == "unfinished_function"; }));
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err: Unclosed function body") != std::string::npos; }));
+        for (const auto& header : {"fn invalid_header {", "fn invalid_header(x) extra {"}) {
+            runScript(std::string(header) + " invalid_body_ran=1 }");
+            assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+                [](const UserArg& arg) { return arg.name == "invalid_body_ran"; }));
+            assert(std::none_of(engineState().user_script_funcs.begin(), engineState().user_script_funcs.end(),
+                [](const CustomScriptFunc& function) { return function.name == "invalid_header"; }));
+            assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+                [](const std::string& line) { return line.find("L:1 Err: Invalid function signature") != std::string::npos; }));
+        }
+        runScript("step_array=[1]; for(i=0; i<2; i=step_array[99]) {}");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("return step_array[99]");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("preserved_assignment=42; preserved_assignment=step_array[99]");
+        std::string assignmentError;
+        assert(evaluate("preserved_assignment", assignmentError) == 42 && assignmentError.empty());
+        std::string signatureError;
+        bool signatureDefinition = false;
+        evaluateInput("invalid-name(x) = x", signatureError, signatureDefinition);
+        assert(!signatureError.empty());
+        signatureError.clear();
+        evaluateInput("invalid_signature(x) extra = x", signatureError, signatureDefinition);
+        assert(!signatureError.empty());
+        evaluateInput("scaled_parameter(k)=1k+k", signatureError, signatureDefinition);
+        assert(signatureError.empty());
+        assert(evaluate("scaled_parameter(2)", signatureError) == 1002 && signatureError.empty());
+        // Whitespace in calls exercises AST dispatch rather than legacy text expansion.
+        assert(evaluate("scaled_parameter (2)", signatureError) == 1002 && signatureError.empty());
+        evaluateInput("formula_scope_value=10", signatureError, signatureDefinition);
+        evaluateInput("formula_inner(y)=formula_scope_value+y", signatureError, signatureDefinition);
+        evaluateInput("formula_outer(formula_scope_value)=formula_inner(2)+formula_scope_value", signatureError, signatureDefinition);
+        assert(evaluate("formula_outer (3)", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("formula_scope_value", signatureError) == 10 && signatureError.empty());
+        evaluateInput("formula_failure(formula_scope_value)=1/(formula_scope_value-3)", signatureError, signatureDefinition);
+        evaluate("formula_failure (3)", signatureError);
+        assert(signatureError == "Division by Zero");
+        assert(evaluate("formula_scope_value", signatureError) == 10 && signatureError.empty());
+        evaluateInput("formula_no_args()=42", signatureError, signatureDefinition);
+        assert(evaluate("formula_no_args ()+1", signatureError) == 43 && signatureError.empty());
+        evaluate("formula_inner ()", signatureError);
+        assert(signatureError == "Arg Count Mismatch");
+        evaluateInput("formula_unused_argument(x)=42", signatureError, signatureDefinition);
+        evaluate("formula_unused_argument (sqrt(-1))", signatureError);
+        assert(!signatureError.empty());
+        runScript("ast_call_array=[7,9]; fn ast_script_call(x) { return x*2 }");
+        assert(evaluate("ast_script_call (3)+ast_call_array[2]", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("ast_call_array[1]+ast_script_call (3)+ast_call_array[2]", signatureError) == 22 && signatureError.empty());
+        runScript("fn ast_script_global(y) { return formula_scope_value+y }");
+        evaluateInput("ast_formula_script(formula_scope_value)=ast_script_global(2)+formula_scope_value", signatureError, signatureDefinition);
+        assert(evaluate("ast_formula_script (3)", signatureError) == 15 && signatureError.empty());
+        evaluate("ast_script_call ()", signatureError);
+        assert(signatureError == "Arg Count Mismatch");
+        evaluateInput("ast_reduction=99", signatureError, signatureDefinition);
+        assert(evaluate("sum(ast_reduction,1,3,ast_reduction)", signatureError) == 6 && signatureError.empty());
+        runScript("fn ast_print_once(x) { print(x); return x }");
+        engineState().script_console_output.clear();
+        assert(evaluate("if(0,ast_print_once(1),2)", signatureError) == 2 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("if(1,2,ast_call_array[99])", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("if (1,2,unknown_unselected_name)", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("sum (spaced_loop_index,1,3,spaced_loop_index)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("scaled_parameter (2)*50%", signatureError) == 501 && signatureError.empty());
+        assert(evaluate("ast_script_call (1)*50%", signatureError) == 1 && signatureError.empty());
+        assert(evaluate("if (1,2,1/0)", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("if (0,ast_print_once(1),if (1,4,1/0))", signatureError) == 4 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("iff (0,ast_print_once(1),1,5,1/0)", signatureError) == 5 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("if (1e-13,1,2)", signatureError) == 2 && signatureError.empty());
+        assert(evaluate("if (1,ast_print_once(3),ast_print_once(4))", signatureError) == 3 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        engineState().script_console_output.clear();
+        std::string nestedConditional = "7";
+        for (int depth = 0; depth < 48; ++depth) nestedConditional = "if (1," + nestedConditional + ",1/0)";
+        assert(evaluate(nestedConditional, signatureError) == 7 && signatureError.empty());
+        std::string longArithmetic = "1";
+        for (int term = 0; term < 4096; ++term) longArithmetic += "+1";
+        assert(evaluate(longArithmetic, signatureError) == 4097 && signatureError.empty());
+        assert(evaluate("iff(0,ast_print_once(1),1,3,ast_call_array[99])", signatureError) == 3 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluate("sum(loop_ast_index,1,3,ast_print_once(loop_ast_index))", signatureError) == 6 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
+        engineState().script_console_output.clear();
+        evaluateInput("scoped_reduction(x)=sum(x,1,3,x)+x", signatureError, signatureDefinition);
+        assert(evaluate("scoped_reduction(10)", signatureError) == 16 && signatureError.empty());
+        evaluateInput("inherited_reduction(x)=sum(local_idx,1,3,x*local_idx)", signatureError, signatureDefinition);
+        assert(evaluate("inherited_reduction(10)", signatureError) == 60 && signatureError.empty());
+        engineState().user_consts.push_back({"reduction_constant", 99});
+        assert(evaluate("sum(reduction_constant,1,3,reduction_constant)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
+        assert(evaluate("sum(reduction_constant,1,2,sum(reduction_constant,1,3,reduction_constant)+reduction_constant)", signatureError) == 15 && signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
+        evaluate("sum(reduction_constant,1,3,1/(reduction_constant-2))", signatureError);
+        assert(!signatureError.empty());
+        assert(evaluate("reduction_constant", signatureError) == 99 && signatureError.empty());
+        evaluate("ast_print_once(3)+unknown_ast_name", signatureError);
+        assert(!signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluate("ast_call_array[ast_script_call (1)]*50%", signatureError) == 4.5 && signatureError.empty());
+        evaluateInput("ast_shadow_array(ast_call_array)=sum(ast_call_array)*50%", signatureError, signatureDefinition);
+        const double shadowResult = evaluate("ast_shadow_array (2)", signatureError);
+        assert(shadowResult == 1 && signatureError.empty());
+        runScript("fn fn_header_array(x) { local_header_array=[0]; for(local_header_array[1]=0; local_header_array[1]<x; local_header_array[1]=local_header_array[1]+1) {}; return local_header_array[1] }");
+        assert(evaluate("fn_header_array (3)", signatureError) == 3 && signatureError.empty());
+        assert(engineState().user_arrays.find("local_header_array") == engineState().user_arrays.end());
+        engineState().user_consts.push_back({"fn_header_constant", 7});
+        runScript("fn fn_header_const_check(x) { for(fn_header_constant=0; 0; x++) {}; return x }");
+        evaluate("fn_header_const_check (3)", signatureError);
+        assert(signatureError == "Const Error");
+        assert(evaluate("fn_header_constant", signatureError) == 7 && signatureError.empty());
+        assert(!executeScriptAssignments("pi=0", signatureError));
+        assert(signatureError == "Reserved name: pi");
+        runScript("fn fn_tab_return(x) { return\tx+1 }");
+        assert(evaluate("fn_tab_return (2)", signatureError) == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        bool returnArray = false;
+        const auto scalarReturn = evaluateScriptReturnValues("sum([ast_print_once(1),2])", returnArray, signatureError);
+        assert(scalarReturn == std::vector<double>({3}) && !returnArray && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        evaluateScriptReturnValues("1,", returnArray, signatureError);
+        assert(signatureError == "Empty return value");
+        runScript("tuple_probe_a,tuple_probe_b=1,2");
+        assert(evaluate("tuple_probe_a", signatureError) == 1 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 2 && signatureError.empty());
+        runScript("tuple_probe_a,tuple_probe_b=sum([ast_print_once(1),2])");
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
+        runScript("assignment_preserved=[1,2]; assignment_preserved=unknown_assignment_value");
+        assert(engineState().user_arrays.at("assignment_preserved") == std::vector<double>({1,2}));
+        runScript("assignment_preserved=sum(assignment_preserved)");
+        assert(evaluate("assignment_preserved", signatureError) == 3 && signatureError.empty());
+        assert(engineState().user_arrays.count("assignment_preserved") == 0);
+        runScript("script_map_source=[1,4,9]; script_map_source=sqrt(script_map_source)");
+        assert(engineState().user_arrays.at("script_map_source") == std::vector<double>({1,2,3}));
+        runScript("script_map_formula(x)=x*x; script_map_result=script_map_formula(script_map_source)");
+        assert(engineState().user_arrays.at("script_map_result") == std::vector<double>({1,4,9}));
+        runScript("assignment_once=sum([ast_print_once(1),2])");
+        assert(evaluate("assignment_once", signatureError) == 3 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        runScript("array_assignment_once=[ast_print_once(1)]+[ast_print_once(2)]");
+        assert(engineState().user_arrays.at("array_assignment_once") == std::vector<double>({3}));
+        assert(engineState().script_console_output.size() == 2);
+        runScript("array_scalar_once=[1,2]*sum([ast_print_once(1),2])");
+        assert(engineState().user_arrays.at("array_scalar_once") == std::vector<double>({3,6}));
+        assert(engineState().script_console_output.size() == 1);
+        runScript("scalar_array_once=sum([ast_print_once(1),2])*[1,2]");
+        assert(engineState().user_arrays.at("scalar_array_once") == std::vector<double>({3,6}));
+        assert(engineState().script_console_output.size() == 1);
+        runScript("empty_array_result=[]+[]");
+        assert(engineState().user_arrays.count("empty_array_result") == 1);
+        assert(engineState().user_arrays.at("empty_array_result").empty());
+        engineState().user_arrays["ast_statistics"] = {1,2,2,5};
+        const std::vector<std::pair<std::string, double>> statistics = {
+            {"sum",10}, {"prod",20}, {"mean",2.5}, {"min",1}, {"max",5},
+            {"median",2}, {"mode",2}, {"var",3}, {"std",std::sqrt(3.0)}
+        };
+        for (const auto& [name, expected] : statistics) {
+            const auto result = expression::ArithmeticExpression::evaluate(name + " (ast_statistics)", signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+            assert(std::abs(evaluate(name + "([1,2,2,5])", signatureError) - expected) < 1e-12 && signatureError.empty());
+            assert(evaluate(name + "(empty_array_result)", signatureError) == 0 && signatureError.empty());
+        }
+        assert(engineState().user_arrays.at("ast_statistics") == std::vector<double>({1,2,2,5}));
+        assert(evaluate("ast_script_call(1)+sum(ast_statistics)", signatureError) == 12 && signatureError.empty());
+        engineState().user_arrays["ast_dot_right"] = {2,3,4,5};
+        const auto astDot = expression::ArithmeticExpression::evaluate("dot (ast_statistics,ast_dot_right)", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+        assert(astDot && *astDot == 41 && signatureError.empty());
+        assert(evaluate("dot([1,2,2,5],[2,3,4,5])", signatureError) == 41 && signatureError.empty());
+        assert(evaluate("dot(empty_array_result,empty_array_result)", signatureError) == 0 && signatureError.empty());
+        assert(evaluate("dot([],[])", signatureError) == 0 && signatureError.empty());
+        evaluate("dot(ast_statistics,empty_array_result)", signatureError);
+        assert(signatureError == "Array size mismatch (4 vs 0)");
+        assert(evaluate("dot(2,3)", signatureError) == 6 && signatureError.empty());
+        assert(evaluate("ast_script_call(1)+dot(ast_statistics,ast_dot_right)", signatureError) == 43 && signatureError.empty());
+        const auto evaluateLiteralAst = [&](const std::string& source) {
+            signatureError.clear();
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction);
+        };
+        assert(evaluateLiteralAst("sum([1,2]+[3,4])") == 10 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(2*[1,2]-1)") == 4 && signatureError.empty());
+        assert(evaluateLiteralAst("dot([1,2]+1,[3,4])") == 18 && signatureError.empty());
+        assert(evaluateLiteralAst("([2,4]./[1,2])[2]") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(1./[2,4])") == 0.75 && signatureError.empty());
+        assert(evaluateLiteralAst("[1,2]*[3,4]") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([1,2].*[3,4])") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("len([]+[])") == 0 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,sum([1,2]./[0,0]),9)") == 9 && signatureError.empty());
+        const auto mismatchedArray = evaluateLiteralAst("sum([1]+[1,2])");
+        assert(mismatchedArray && std::isnan(*mismatchedArray) && signatureError == "Array size mismatch (1 vs 2)");
+        const auto invalidArrayDivision = evaluateLiteralAst("sum([1]/[1])");
+        assert(invalidArrayDivision && std::isnan(*invalidArrayDivision) && signatureError == "Invalid operator: /");
+        const auto zeroArrayDivision = evaluateLiteralAst("sum(1./[0])");
+        assert(zeroArrayDivision && std::isnan(*zeroArrayDivision) && signatureError == "Division by zero");
+        for (const auto& [name, expected] : statistics) {
+            const auto result = evaluateLiteralAst(name + "([1,2,2,5])");
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateLiteralAst("len([1,2+3,4])") == 3 && signatureError.empty());
+        assert(evaluateLiteralAst("dot([1,2], [3,4])") == 11 && signatureError.empty());
+        assert(evaluateLiteralAst("dot(ast_statistics, [2,3,4,5])") == 41 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([mean([2,4]),sum([1,2])])") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,sum([1,2]),sum([1/0]))") == 3 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([])+len([])+dot([],[])") == 0 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("sum([ast_print_once(1),ast_print_once(2)])") == 3 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 2);
+        assert(!evaluateLiteralAst("[1,2]"));
+        assert(!evaluateLiteralAst("sum([[1,2]])"));
+        std::optional<std::vector<double>> typedArray;
+        const auto typedArithmetic = expression::ArithmeticExpression::evaluate("[1,2]+[3,4]", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedArithmetic == 4 && typedArray == std::vector<double>({4,6}) && signatureError.empty());
+        const auto typedEmpty = expression::ArithmeticExpression::evaluate("[]", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedEmpty == 0 && typedArray && typedArray->empty() && signatureError.empty());
+        const auto typedScalar = expression::ArithmeticExpression::evaluate("2+3", signatureError,
+            lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        assert(typedScalar == 5 && !typedArray && signatureError.empty());
+        evaluateInput("script_map_formula(x)=x*x", signatureError, signatureDefinition);
+        assert(signatureError.empty());
+        const auto evaluateArrayAst = [&](const std::string& source) {
+            signatureError.clear();
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray);
+        };
+        assert(evaluateArrayAst("sqrt([1,4,9])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula([1,2,3])") && typedArray == std::vector<double>({1,4,9}) && signatureError.empty());
+        assert(evaluateArrayAst("ast_script_call([1,2,3])") && typedArray == std::vector<double>({2,4,6}) && signatureError.empty());
+        assert(evaluateArrayAst("sqrt([])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateLiteralAst("cbrt(27)+floor(2.9)+ceil(1.1)+round(1.5)+exp(0)") == 10 && signatureError.empty());
+        assert(evaluateArrayAst("cbrt([1,8,27])") && typedArray && typedArray->size() == 3 && signatureError.empty());
+        for (size_t i = 0; i < typedArray->size(); ++i)
+            assert(std::abs((*typedArray)[i] - static_cast<double>(i + 1)) < 1e-12);
+        signatureError.clear();
+        bool unknownMap = false;
+        parseArrayExpr("unknown_empty_mapping([])", unknownMap, signatureError);
+        assert(signatureError == "Math Error");
+        signatureError.clear();
+        bool fallbackMap = false;
+        assert(parseArrayExpr("script_map_formula([2,3])", fallbackMap, signatureError) == std::vector<double>({4,9}));
+        assert(fallbackMap && signatureError.empty());
+        evaluateInput("two_map_arguments(x,y)=x+y", signatureError, signatureDefinition);
+        runScript("fn two_script_arguments(x,y) { print(x); return x+y }");
+        for (const auto& source : {"two_map_arguments([])", "two_map_arguments([1])", "two_script_arguments([])", "two_script_arguments([1])"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Arg Count Mismatch");
+        }
+        assert(engineState().script_console_output.empty());
+        for (const auto& source : {"two_script_arguments(ast_print_once(1))", "two_map_arguments(ast_print_once(1))"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Arg Count Mismatch");
+            assert(engineState().script_console_output.empty());
+        }
+        assert(evaluateLiteralAst("if(0,two_map_arguments(ast_print_once(1)),7)") == 7 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+
+        assert(evaluateArrayAst("1:3") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(evaluateArrayAst("[3:-1:1]") && typedArray == std::vector<double>({3,2,1}) && signatureError.empty());
+        assert(evaluateArrayAst("[1:2:5].*[1:2:5]") && typedArray == std::vector<double>({1,9,25}) && signatureError.empty());
+        assert(evaluateArrayAst("3:1") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateLiteralAst("sum(1:3)") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("[1:3][2]") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("len([1:2+1:7])") == 3 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,sum(1:0:3),7)") == 7 && signatureError.empty());
+        evaluateArrayAst("1:0:3");
+        assert(signatureError == "Invalid range bounds or step");
+        evaluateArrayAst("0:1:100000");
+        assert(signatureError == "Overflow Error: array range limit exceeded");
+        bool malformedRange = false;
+        parseArrayExpr("1:2:3:4", malformedRange, signatureError);
+        assert(signatureError == "Invalid range syntax");
+        for (const auto& malformed : {"[1,,2]", "[,1]", "[1,]"}) {
+            signatureError.clear();
+            bool array = false;
+            parseArrayExpr(malformed, array, signatureError);
+            assert(array && signatureError == "Empty array element");
+        }
+        engineState().script_console_output.clear();
+        signatureError.clear();
+        bool invalidLiteral = false;
+        parseArrayExpr("[ast_print_once(1),]", invalidLiteral, signatureError);
+        assert(signatureError == "Empty array element" && engineState().script_console_output.empty());
+        signatureError.clear();
+        bool emptyLiteral = false;
+        assert(parseArrayExpr("[ ]", emptyLiteral, signatureError).empty() && emptyLiteral && signatureError.empty());
+        std::string oversizedLiteral = "[0";
+        for (size_t i = 0; i < 100000; ++i) oversizedLiteral += ",0";
+        oversizedLiteral += ']';
+        parseArrayExpr(oversizedLiteral, invalidLiteral, signatureError);
+        assert(signatureError == "Overflow Error: array literal limit exceeded");
+        for (const auto& source : {"[[1,2]]", "[1,[2,3]]", "ast_statistics[[1,2]]", "sum(coercion_index,[1,2],3,coercion_index)"}) {
+            evaluate(source, signatureError);
+            assert(!signatureError.empty());
+        }
+        runScript("scalar_element_guard=[7,8]; scalar_element_guard[[1,2]]=9; scalar_element_guard[1]=[9,10]");
+        assert(engineState().user_arrays.at("scalar_element_guard") == std::vector<double>({7,8}));
+        for (const auto& source : {"if([1],2,3)", "iff([1],2,3)"}) {
+            evaluate(source, signatureError);
+            assert(signatureError == "Condition must be scalar");
+        }
+        runScript("condition_guard=0; if([1]) { condition_guard=1 }; while([1]) { condition_guard=2 }");
+        assert(evaluate("condition_guard", signatureError) == 0 && signatureError.empty());
+        assert(evaluateLiteralAst("mean([1e308,1e308])") == 1e308 && signatureError.empty());
+        assert(evaluateLiteralAst("median([1e308,1e308])") == 1e308 && signatureError.empty());
+        const auto largeDeviation = evaluateLiteralAst("std([-1e200,1e200])");
+        assert(largeDeviation && std::abs(*largeDeviation / 1e200 - std::sqrt(2.0)) < 1e-12 && signatureError.empty());
+        const auto offsetVariance = evaluateLiteralAst("var([1e12+1,1e12+2,1e12+3])");
+        assert(offsetVariance && std::abs(*offsetVariance - 1) < 1e-12 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[1,2],1/0)") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,1/0,[3,4])") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,7,[1/0])") == 7 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[1/0],9)") == 9 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,[1/0],1,11,[])") == 11 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,if(0,[1/0],13),[2])") == 13 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[2],iff(0,1/0,1,[4,5],7))") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,if(1,[1/0],2),1,if(1,17,[1/0]),[])") == 17 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,2,[1/0])+3") == 5 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("3+if(0,1/0,[4,5])") && typedArray == std::vector<double>({7,8}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,2,[1,2])*if(1,[3,4],7)") == 11 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,2,[1,2])*if(1,[3,4],7)") && typedArray == std::vector<double>({6,8}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,8,[1,2])/if(1,2,[3,4])") == 4 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,if(1,2,[1,2])+3,[4])") == 5 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("(if(1,2,[1,2])+3)*2") == 10 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("sqrt(if(1,9,[1/0]))") == 3 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("sqrt(if(0,1/0,[4,9]))") && typedArray == std::vector<double>({2,3}) && signatureError.empty());
+        assert(evaluateLiteralAst("sum(if(1,7,[1/0]))") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("std(if(1,7,[1/0]))") == 0 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(sqrt(if(0,1/0,[4,9])))") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("len(if(0,1/0,[4,9]))") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,1/0,[4,9])[2]") == 9 && signatureError.empty());
+        assert(evaluateLiteralAst("dot(if(0,1/0,[1,2]),[3,4])") == 11 && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula(if(1,2,[1/0]))") == 4 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula(if(0,1/0,[2,3]))") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        for (const auto& source : {"len(if(1,7,[1]))", "if(1,7,[1])[1]", "dot(if(1,7,[1]),[2])",
+                "if(1,2,[1])/if(1,0,[2])", "if(0,2,[1,2])*if(0,3,[4])"}) {
+            const auto result = evaluateArrayAst(source);
+            assert(result && std::isnan(*result) && !signatureError.empty());
+        }
+        assert(evaluateLiteralAst("mod(if(1,7,[3]),3)") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("max(1,if(1,7,[3]),4)") == 7 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("if(1,19,if(if(1,[ast_print_once(1)],2),3,4))") == 19 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        assert(evaluateLiteralAst("if(1,2,[3])^3") == 8 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,7,[3])%3") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,7,[3])>=2") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("not if(1,0,[3])") == 1 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,3,[2])!") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("if(if(1,1,[2]),3,1/0)") == 3 && signatureError.empty());
+        assert(evaluateArrayAst("[if(1,2,[3]),4]") && typedArray == std::vector<double>({2,4}) && signatureError.empty());
+        assert(evaluateArrayAst("[1:if(1,2,[3]):5]") && typedArray == std::vector<double>({1,3,5}) && signatureError.empty());
+        assert(evaluateLiteralAst("[4,9][if(1,2,[3])]") == 9 && signatureError.empty());
+        for (const auto& source : {"if(0,2,[3])^3", "not if(0,0,[3])", "[if(0,2,[3]),4]",
+                "if(if(0,1,[2]),3,4)", "[4,9][if(0,2,[3])]", "mod(if(0,7,[3]),3)",
+                "max(1,if(0,7,[3]),4)"}) {
+            const auto result = evaluateArrayAst(source);
+            assert(result && std::isnan(*result) && !signatureError.empty());
+        }
+        evaluateInput("ast_pair(x)=[x,x+1]", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("ast_pair_sum(x)=sum(ast_pair(x))", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair(3)") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair(3)+1") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateLiteralAst("sum(ast_pair(3))") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_pair(3)[2]") == 4 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_pair(3)*ast_pair(4)") == 32 && signatureError.empty());
+        assert(evaluateArrayAst("ast_pair_sum(3)") == 7 && !typedArray && signatureError.empty());
+        assert(evaluateArrayAst("if(1,ast_pair(3),1/0)") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        const auto scalarArrayCall = evaluateLiteralAst("ast_pair(3)");
+        assert(scalarArrayCall && std::isnan(*scalarArrayCall) && !signatureError.empty());
+        runScript("ast_pair_saved=ast_pair(5); ast_pair_total=sum(ast_pair(5))");
+        assert(engineState().user_arrays.at("ast_pair_saved") == std::vector<double>({5,6}));
+        assert(evaluate("ast_pair_total", signatureError) == 11 && signatureError.empty());
+        runScript("fn ast_script_pair(x) { local_pair=[x,x+1]; return local_pair }; fn ast_script_empty() { return [] }; fn ast_script_tuple(x) { return x,x+2 }");
+        assert(evaluateArrayAst("ast_script_pair(3)") && typedArray == std::vector<double>({3,4}) && signatureError.empty());
+        assert(engineState().user_arrays.count("local_pair") == 0);
+        assert(evaluateArrayAst("ast_script_empty()") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateArrayAst("ast_script_tuple(3)") && typedArray == std::vector<double>({3,5}) && signatureError.empty());
+        assert(evaluateLiteralAst("sum(ast_script_pair(3))") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_script_pair(3)[2]") == 4 && signatureError.empty());
+        assert(evaluateLiteralAst("ast_script_pair(3)*ast_script_pair(4)") == 32 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,ast_script_pair(3),1/0)+1") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        runScript("script_pair_saved=ast_script_pair(5); script_pair_total=sum(ast_script_pair(5)); tuple_left,tuple_right=ast_script_tuple(7)");
+        assert(engineState().user_arrays.at("script_pair_saved") == std::vector<double>({5,6}));
+        assert(evaluate("script_pair_total", signatureError) == 11 && signatureError.empty());
+        assert(evaluate("tuple_left+tuple_right", signatureError) == 16 && signatureError.empty());
+        assert(evaluateArrayAst("sqrt(ast_script_pair(3))") && typedArray && typedArray->size() == 2 && signatureError.empty());
+        assert(std::abs((*typedArray)[0] - std::sqrt(3.0)) < 1e-12 && (*typedArray)[1] == 2);
+        const auto nestedScriptArray = evaluateArrayAst("ast_script_pair([1,2])");
+        assert(nestedScriptArray && std::isnan(*nestedScriptArray) && !signatureError.empty());
+        std::optional<std::vector<double>> explicitScriptArray = std::vector<double>{99};
+        assert(executeScriptFunc("ast_script_pair", {5}, signatureError, nullptr, &explicitScriptArray) == 5 && signatureError.empty());
+        assert(explicitScriptArray == std::vector<double>({5,6}));
+        assert(executeScriptFunc("ast_script_call", {5}, signatureError, nullptr, &explicitScriptArray) == 10 && signatureError.empty());
+        assert(!explicitScriptArray);
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"200+10%",220}, {"200-10%",180}, {"200+10%+10%",242}, {"200+10*2%",240},
+                {"2*50%",1}, {"17%-5",-4.83}, {"(200+10)%",2.1}, {"200+(10%)",200.1},
+                {"200+(-10)%",180}, {"2+50%*2",6}, {"200+10%%",2.2}, {"2%%",0.0002},
+                {"max(200+10%,100)",220}, {"200+10%>200",1}, {"17%5",2}, {"2%3%",0.02}, {"1e-3%",0.00001}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateArrayAst("[100,200]+10%") && typedArray == std::vector<double>({110,220}) && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("ast_print_once(200)+10%") == 220 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluateLiteralAst("if(1,200+10%,1/0)") == 220 && signatureError.empty());
+        assert(evaluateArrayAst("ast_script_pair(100)+10%") && typedArray && typedArray->size() == 2 && signatureError.empty());
+        assert(std::abs((*typedArray)[0] - 110) < 1e-12 && std::abs((*typedArray)[1] - 111.1) < 1e-12);
+        assert(evaluateLiteralAst("sum([100,200]+10%)") == 330 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[100,200],1/0)+10%") && typedArray == std::vector<double>({110,220}) && signatureError.empty());
+        assert(evaluate("sum(typed_reduction_index,1,3,typed_reduction_index^2)", signatureError) == 14 && signatureError.empty());
+        assert(evaluate("prod(typed_reduction_index,1,4,typed_reduction_index)", signatureError) == 24 && signatureError.empty());
+        assert(evaluate("min(typed_reduction_index,3,1,typed_reduction_index)", signatureError) == 0 && signatureError.empty());
+        evaluate("sum(typed_reduction_index,1,3,[typed_reduction_index])", signatureError);
+        assert(signatureError == "Loop body must be scalar");
+        assert(engineState().user_args.end() == std::find_if(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& value) { return value.name == "typed_reduction_index"; }));
+        assert(evaluate("2+2", signatureError) == 4 && signatureError.empty());
+        const auto reductionAst = [&](const std::string& source) {
+            signatureError.clear();
+            loopIterationsRemaining = 100000;
+            return expression::ArithmeticExpression::evaluate(source, signatureError,
+                lookupScalar, lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &typedArray, &indexedReduction);
+        };
+        assert(reductionAst("sum(ast_loop_i,1,3,ast_loop_i^2)") == 14 && signatureError.empty());
+        assert(reductionAst("prod(ast_loop_i,1,4,ast_loop_i)") == 24 && signatureError.empty());
+        assert(reductionAst("sum(ast_loop_i,1,2,sum(ast_loop_i,1,2,ast_loop_i)+ast_loop_i)") == 9 && signatureError.empty());
+        assert(reductionAst("max(ast_loop_i,3,1,1/0)") == 0 && signatureError.empty());
+        assert(reductionAst("len([sum(ast_loop_i,1,3,ast_loop_i),4])") == 2 && signatureError.empty());
+        assert(reductionAst("sum(ast_loop_i,if(1,1,[2]),3,ast_loop_i)") == 6 && signatureError.empty());
+        assert(std::abs(*reductionAst("sum(ast_loop_i,1,3,ast_loop_i)+10%") - 6.6) < 1e-12 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(reductionAst("if(0,sum(ast_loop_i,1,3,ast_print_once(ast_loop_i)),7)") == 7 && signatureError.empty());
+        assert(engineState().script_console_output.empty());
+        const auto excessiveReduction = reductionAst("sum(ast_loop_i,1,100001,ast_print_once(ast_loop_i))");
+        assert(excessiveReduction && std::isnan(*excessiveReduction) && signatureError.find("loop limit") != std::string::npos);
+        assert(engineState().script_console_output.empty());
+        evaluateInput("ast_reduction_formula(x)=sum(ast_loop_i,1,3,x*ast_loop_i)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("ast_reduction_formula(4)", signatureError) == 24 && signatureError.empty());
+        evaluateInput("cache_reduction_index=5", signatureError, signatureDefinition);
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 11 && signatureError.empty());
+        engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& value) { return value.name == "cache_reduction_index"; }), engineState().user_args.end());
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 6 && signatureError.empty());
+        evaluateInput("cache_reduction_index=5", signatureError, signatureDefinition);
+        assert(evaluate("sum(cache_reduction_index,1,2,3)", signatureError) == 11 && signatureError.empty());
+        evaluateInput("cache_formula(x)=x+1", signatureError, signatureDefinition);
+        assert(evaluate("cache_formula(3)+1", signatureError) == 5 && signatureError.empty());
+        evaluateInput("cache_formula(x)=x+2", signatureError, signatureDefinition);
+        assert(evaluate("cache_formula(3)+1", signatureError) == 6 && signatureError.empty());
+        engineState().user_arrays["cache_type_value"] = {1,2};
+        assert(evaluateArrayAst("cache_type_value+1") && typedArray == std::vector<double>({2,3}) && signatureError.empty());
+        evaluateInput("cache_type_value=4", signatureError, signatureDefinition);
+        assert(evaluateArrayAst("cache_type_value+1") == 5 && !typedArray && signatureError.empty());
+        std::string cacheEvictionFunction = "fn cache_evict(x) { ";
+        for (size_t i = 0; i < 40; ++i) cacheEvictionFunction += "x=x+" + std::to_string(i) + ";";
+        cacheEvictionFunction += "return x }";
+        runScript(cacheEvictionFunction);
+        for (size_t i = 0; i < 2; ++i)
+            assert(evaluate("cache_evict(1)+cache_evict(2)", signatureError) == 1563 && signatureError.empty());
+        expression::ArithmeticExpression::PreparedExpression pinnedSyntax;
+        assert(evaluateAst("cache_type_value+1", signatureError, &pinnedSyntax) == 5 && signatureError.empty());
+        const auto originalPinnedSyntax = pinnedSyntax;
+        for (size_t i = 0; i < 40; ++i)
+            assert(evaluate(std::to_string(i) + "+42", signatureError) == i + 42 && signatureError.empty());
+        evaluateInput("cache_type_value=6", signatureError, signatureDefinition);
+        assert(evaluateAst("cache_type_value+1", signatureError, &pinnedSyntax) == 7 && signatureError.empty());
+        assert(pinnedSyntax == originalPinnedSyntax);
+        assert(evaluateAst("cache_type_value+2", signatureError, &pinnedSyntax) == 8 && signatureError.empty());
+        assert(pinnedSyntax != originalPinnedSyntax);
+        assert(evaluate("sum(pinned_loop_i,1,2,cache_evict(pinned_loop_i))", signatureError) == 1563 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluate("sum(pinned_loop_i,1,3,ast_print_once(pinned_loop_i))", signatureError) == 6 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
+        assert(evaluateLiteralAst("print(7)+1") == 8 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,23,unknown_inactive_ast_name)") == 23 && signatureError.empty());
+        assert(evaluateLiteralAst("iff(0,unknown_inactive_ast_name,1,29,another_inactive_ast_name)") == 29 && signatureError.empty());
+        const auto unknownActiveName = evaluateLiteralAst("if(0,23,unknown_active_ast_name)");
+        assert(unknownActiveName && std::isnan(*unknownActiveName) && signatureError.find("unknown_active_ast_name") != std::string::npos);
+        engineState().script_console_output.clear();
+        const auto invalidArrayArity = evaluateArrayAst("two_script_arguments([ast_print_once(1)])");
+        assert(invalidArrayArity && std::isnan(*invalidArrayArity) && signatureError == "Arg Count Mismatch");
+        assert(engineState().script_console_output.empty());
+        signatureError.clear();
+        assert(evaluateAst("sum(cache_reduction_index,1,2,3)", signatureError) == 11 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("if(1,31,unknown_ast_call([ast_print_once(1)]))") == 31 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,37,two_script_arguments([ast_print_once(1)]))") == 37 && signatureError.empty());
+        const auto unknownActiveCall = evaluateArrayAst("unknown_ast_call([ast_print_once(1)])");
+        assert(unknownActiveCall && std::isnan(*unknownActiveCall) && signatureError == "Math Error");
+        assert(engineState().script_console_output.empty());
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"pow(2,3)",8}, {"power(2,4)",16}, {"clamp(5,1,3)",3}, {"average(1,2,3)",2},
+                {"bitand(6,3)",2}, {"bitxor(6,3)",5}, {"combin(5,2)",10}, {"permut(5,2)",20},
+                {"isnan(nan)",1}, {"iserr(nan())",1}, {"iserror(2)",0},
+                {"even(3)",4}, {"odd(2)",3}, {"sign(-2)",-1}, {"sqr(3)",9}, {"true()",1}, {"false()",0}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && *result == expected && signatureError.empty());
+            te_parser legacyBuiltin;
+            assert(legacyBuiltin.evaluate(source) == expected);
+        }
+        assert(evaluateLiteralAst("true+false") == 1 && signatureError.empty());
+        const auto bareRandom = evaluateLiteralAst("rand");
+        assert(bareRandom && *bareRandom >= 0 && *bareRandom <= 1 && signatureError.empty());
+        assert(evaluateArrayAst("sqr([2,3])") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,41,pow(1/0,2))") == 41 && signatureError.empty());
+        const auto inheritedArityError = evaluateLiteralAst("clamp(1,2)");
+        assert(inheritedArityError && std::isnan(*inheritedArityError) && signatureError == "Arg Count Mismatch");
+        evaluateInput("typed_mix(a,b)=a+b", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("typed_reduce(a,b)=sum(typed_i,1,len(a),a[typed_i]*b)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("typed_nested(a,b)=typed_mix(a,b)*2", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix([1,2],3)") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix(3,[1,2])") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix([1,2],[3,4])") && typedArray == std::vector<double>({4,6}) && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix([],[])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateLiteralAst("typed_reduce([1,2,3],2)") == 12 && signatureError.empty());
+        assert(evaluateArrayAst("typed_nested([1,2],3)") && typedArray == std::vector<double>({8,10}) && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix(if(1,[1,2],1/0),3)") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        runScript("typed_input=[1,2]; fn typed_mutate(a,b) { a[1]=a[1]+b; return a }; fn typed_call(a,b) { return typed_mix(a,b) }");
+        assert(evaluateArrayAst("typed_mutate(typed_input,5)") && typedArray == std::vector<double>({6,2}) && signatureError.empty());
+        assert(engineState().user_arrays.at("typed_input") == std::vector<double>({1,2}));
+        assert(evaluateArrayAst("typed_call([1,2],3)") && typedArray == std::vector<double>({4,5}) && signatureError.empty());
+        assert(evaluateArrayAst("typed_mix([1,2],[3])") && !signatureError.empty());
+        assert(evaluateLiteralAst("typed_mix(2,3)") == 5 && signatureError.empty());
+        assert(evaluateArrayAst("script_map_formula([2,3])") && typedArray == std::vector<double>({4,9}) && signatureError.empty());
+        engineState().script_console_output.clear();
+        evaluateInput("syntax_only(x)=ast_print_once(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty() && engineState().script_console_output.empty());
+        evaluateInput("syntax_later(x)=not_yet_defined(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluateInput("syntax_preserved(x)=x+1", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        for (const auto& body : {"x+", "sin(,x)", "[x,]", "sum(i,1,3,i+)"}) {
+            evaluateInput(std::string("syntax_preserved(x)=") + body, signatureError, signatureDefinition);
+            assert(!signatureError.empty());
+            assert(evaluate("syntax_preserved(3)", signatureError) == 4 && signatureError.empty());
+        }
+        evaluateInput("syntax_recursive(x)=if(x<=1,1,x*syntax_recursive(x-1))", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("syntax_recursive(5)", signatureError) == 120 && signatureError.empty());
+        evaluateInput("syntax_infinite(x)=syntax_infinite(x)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        evaluate("syntax_infinite(1)", signatureError);
+        assert(signatureError == "Function recursion limit exceeded");
+        assert(evaluate("2+2", signatureError) == 4 && signatureError.empty());
+        for (const auto& builtin : te_parser::builtin_functions()) {
+            assert(helpIndex.find(builtin.m_name + "\n") != std::string::npos);
+            if (unaryFunctions().contains(builtin.m_name) || binaryFunctions().contains(builtin.m_name) ||
+                variadicFunctions().contains(builtin.m_name)) continue;
+            const auto adapter = lookupInheritedBuiltin(builtin.m_name);
+            assert(adapter);
+            std::visit([&](const auto function) {
+                using Function = std::decay_t<decltype(function)>;
+                if constexpr (te_is_function_v<Function>) {
+                    constexpr size_t arity = te_function_arity<Function>;
+                    assert(adapter.arity == arity);
+                    const bool variadic = (builtin.m_type & TE_VARIADIC) != 0;
+                    for (size_t count = 0; count <= arity + 1; ++count)
+                        assert(adapter.acceptsArity(count) == (variadic ? count >= 1 && count <= arity : count == arity));
+                } else assert(false);
+            }, builtin.m_value);
+        }
+        for (const auto& [source, expected] : std::vector<std::pair<std::string, double>>{
+                {"round(2.65,1)",2.7}, {"round(-2.65,1)",-2.7}, {"round(125,-1)",130},
+                {"round(2.5)",3}, {"round(-2.5)",-3}, {"round(1.234,2)",1.23}}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+        }
+        assert(evaluateArrayAst("round([1.2,2.8,-2.5])") && typedArray == std::vector<double>({1,3,-3}) && signatureError.empty());
+        bool roundFallbackArray = false;
+        assert(parseArrayExpr("round([1.2,2.8,-2.5])", roundFallbackArray, signatureError) == std::vector<double>({1,3,-3}));
+        assert(roundFallbackArray && signatureError.empty());
+        std::string roundHelp;
+        assert(preprocessHelp("help(round)", roundHelp) && roundHelp.find("round(2.65, 1) = 2.7") != std::string::npos);
+        for (const auto& source : {"sin 0", "sqrt 9+1", "sqr -3", "abs -2^2", "2**3+1", "6&3", "1|2&4", "2&3+1", "1,2+3", "(1,2)+3", "abs abs -3", "~0"}) {
+            te_parser reference;
+            const double expected = reference.evaluate(source);
+            assert(std::isfinite(expected));
+            signatureError.clear();
+            const auto result = evaluateAst(source, signatureError);
+            if (!result || std::abs(*result - expected) >= 1e-12 || !signatureError.empty()) std::cerr << source << " expected=" << expected << " actual=" << (result ? *result : -999) << " error=" << signatureError << std::endl;
+            assert(result && std::abs(*result - expected) < 1e-12 && signatureError.empty());
+            assert(expression::ArithmeticExpression::validateSyntax(source, &indexedReduction));
+        }
+        for (int value = 1; value <= 100; ++value) {
+            const auto literal = std::to_string(value);
+            const auto source = "((" + literal + "+3)*2-5)/(" + literal + "+1)+sqr(2)";
+            te_parser reference;
+            signatureError.clear();
+            const auto result = evaluateAst(source, signatureError);
+            assert(result && std::abs(*result-reference.evaluate(source)) < 1e-12 && signatureError.empty());
+        }
+        evaluateInput("syntax_bare(x)=sqrt x+1", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluate("syntax_bare(9)", signatureError) == 4 && signatureError.empty());
+        assert(formatPrintString("typed_mix([1,2],3)", signatureError) == "[" + fmtNum(4) + ", " + fmtNum(5) + "]" && signatureError.empty());
+        assert(formatPrintString("\"result={typed_mix([1,2],3)}\"", signatureError) == "result=[" + fmtNum(4) + ", " + fmtNum(5) + "]" && signatureError.empty());
+        evaluateInput("typed_index_shadow(a,b)=sum(a,1,3,a*b)+len(a)", signatureError, signatureDefinition);
+        assert(signatureDefinition && signatureError.empty());
+        assert(evaluateLiteralAst("typed_index_shadow([5,6],2)") == 14 && signatureError.empty());
+        engineState().user_consts.push_back({"typed_const_param", 100});
+        runScript("fn typed_const_shadow(typed_const_param,b) { typed_const_param[1]=typed_const_param[1]+b; return typed_const_param }; fn typed_const_scalar(typed_const_param,b) { typed_const_param=typed_const_param+b; return typed_const_param }");
+        assert(evaluateArrayAst("typed_const_shadow([1,2],3)") && typedArray == std::vector<double>({4,2}) && signatureError.empty());
+        assert(evaluate("typed_const_param", signatureError) == 100 && signatureError.empty());
+        assert(evaluateLiteralAst("typed_const_scalar(2,3)") == 5 && signatureError.empty());
+        assert(evaluate("typed_const_param", signatureError) == 100 && signatureError.empty());
+        runScript("fn typed_const_failure(typed_const_param,b) { typed_const_param[1]=b; return 1/0 }");
+        evaluate("typed_const_failure(typed_input,9)", signatureError);
+        assert(signatureError == "Division by Zero");
+        assert(engineState().user_arrays.at("typed_input") == std::vector<double>({1,2}));
+        assert(evaluate("typed_const_param", signatureError) == 100 && signatureError.empty());
+        assert(evaluateArrayAst("if(1,[1,2],[3,4])") && typedArray == std::vector<double>({1,2}) && signatureError.empty());
+        assert(evaluateArrayAst("if(0,[1/0],[])") && typedArray && typedArray->empty() && signatureError.empty());
+        assert(evaluateArrayAst("iff(0,[1/0],1,[5,6],[])") && typedArray == std::vector<double>({5,6}) && signatureError.empty());
+        assert(evaluateArrayAst("if(1,ast_statistics,[])") && typedArray == std::vector<double>({1,2,2,5}) && signatureError.empty());
+        assert(engineState().user_arrays.at("ast_statistics") == std::vector<double>({1,2,2,5}));
+        assert(evaluateLiteralAst("sum(if(1,if(0,[1/0],[2,3]),[]))") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("len(if(0,[1/0],[2,3])+1)") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("sum(sqrt(if(1,[1,4],[1/0])))") == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateArrayAst("if(1,[ast_print_once(1)],[ast_print_once(2)])") && typedArray == std::vector<double>({1}) && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluateLiteralAst("sum(sqrt([1,4,9]))") == 6 && signatureError.empty());
+        assert(evaluateLiteralAst("len(script_map_formula([2,3]))") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("if(1,sum(sqrt([1,4])),sum(sqrt([-1])))") == 3 && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateArrayAst("ast_print_once([1,2,3])") && typedArray == std::vector<double>({1,2,3}) && signatureError.empty());
+        assert(engineState().script_console_output.size() == 3);
+        runScript("map_error_preserved=[7]; map_error_preserved=sqrt([1,-1,4])");
+        assert(engineState().user_arrays.at("map_error_preserved") == std::vector<double>({7}));
+        runScript("typed_ast_assignment=[ast_print_once(1),2]+[3,4]");
+        assert(engineState().user_arrays.at("typed_ast_assignment") == std::vector<double>({4,6}));
+        assert(engineState().script_console_output.size() == 1);
+        assert(evaluateLiteralAst("[1,2+3,7][2]") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("([1,2,3])[2]!") == 2 && signatureError.empty());
+        assert(evaluateLiteralAst("(ast_statistics)[4]") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("sum([[1,2][2],3])") == 5 && signatureError.empty());
+        assert(evaluateLiteralAst("if(0,[1/0][1],7)") == 7 && signatureError.empty());
+        assert(evaluateLiteralAst("-[2,3][1]") == -2 && signatureError.empty());
+        for (const auto& source : {"[1,2][0]", "[1,2][3]", "[1,2][1.5]", "[][1]"}) {
+            const auto result = evaluateLiteralAst(source);
+            assert(result && std::isnan(*result));
+            assert(signatureError.find("Invalid or out of bounds index") != std::string::npos);
+        }
+        engineState().script_console_output.clear();
+        assert(evaluateLiteralAst("[1,ast_print_once(2)][ast_script_call(1)]") == 2 && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        bool astArrayBridge = false;
+        engineState().script_console_output.clear();
+        assert(parseArrayExpr("ast_print_once(3)", astArrayBridge, signatureError) == std::vector<double>({3}));
+        assert(!astArrayBridge && signatureError.empty() && engineState().script_console_output.size() == 1);
+        assert(parseArrayExpr("ast_script_pair(4)", astArrayBridge, signatureError) == std::vector<double>({4,5}));
+        assert(astArrayBridge && signatureError.empty());
+        assert(parseArrayExpr("ast_script_empty()", astArrayBridge, signatureError).empty() && astArrayBridge && signatureError.empty());
+        engineState().script_console_output.clear();
+        assert(evaluateArrayAst("ast_print_once(3)*[2,4]") && typedArray == std::vector<double>({6,12}));
+        assert(signatureError.empty() && engineState().script_console_output.size() == 1);
+        bool typedReturnArray = false;
+        engineState().script_console_output.clear();
+        auto typedReturnValues = evaluateScriptReturnValues("ast_print_once(3)", typedReturnArray, signatureError);
+        assert(typedReturnValues == std::vector<double>({3}) && !typedReturnArray && signatureError.empty());
+        assert(engineState().script_console_output.size() == 1);
+        engineState().script_console_output.clear();
+        typedReturnValues = evaluateScriptReturnValues("ast_script_pair(4)", typedReturnArray, signatureError);
+        assert(typedReturnValues == std::vector<double>({4,5}) && typedReturnArray && signatureError.empty());
+        typedReturnValues = evaluateScriptReturnValues("ast_script_empty()", typedReturnArray, signatureError);
+        assert(typedReturnValues.empty() && typedReturnArray && signatureError.empty());
+        evaluateScriptReturnValues("ast_print_once(3),", typedReturnArray, signatureError);
+        assert(!signatureError.empty() && engineState().script_console_output.empty());
+        evaluateScriptReturnValues("ast_script_pair(4),2", typedReturnArray, signatureError);
+        assert(signatureError == "Return tuple element must be scalar");
+        runScript("fn invalid_return_tuple() { return [1,2],3 }; tuple_probe_a=3; tuple_probe_b=0; tuple_probe_a,tuple_probe_b=invalid_return_tuple()");
+        assert(evaluate("tuple_probe_a+tuple_probe_b", signatureError) == 3 && signatureError.empty());
+        runScript("tuple_probe_a,tuple_probe_b=1,");
+        assert(evaluate("tuple_probe_a", signatureError) == 3 && signatureError.empty());
+        assert(evaluate("tuple_probe_b", signatureError) == 0 && signatureError.empty());
+        runScript("for(invalid-loop-name=0; 0; i++) {}");
+        assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& arg) { return arg.name == "invalid-loop-name"; }));
+        runScript("invalid-increment-name++");
+        assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& arg) { return arg.name == "invalid-increment-name"; }));
+        runScript("tuple_preserved=7; tuple_preserved,tuple_preserved=1,2");
+        std::string tupleError;
+        assert(evaluate("tuple_preserved", tupleError) == 7 && tupleError.empty());
+        engineState().user_consts.push_back({"loop_constant_test", 7});
+        runScript("for(loop_constant_test=0; 0; i++) {}");
+        assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& arg) { return arg.name == "loop_constant_test"; }));
+        runScript("loop_constant_test++");
+        assert(std::none_of(engineState().user_args.begin(), engineState().user_args.end(),
+            [](const UserArg& arg) { return arg.name == "loop_constant_test"; }));
+        runScript("for_array=[0]; for(i=0; i<2; for_array[1]=for_array[1]+1) { i++ }");
+        assert(engineState().user_arrays.at("for_array")[0] == 2);
+        runScript("loop_type_test=[1,2]; for(loop_type_test=3; 0; i++) {}");
+        assert(engineState().user_arrays.count("loop_type_test") == 0);
+        std::string loopTypeError;
+        assert(evaluate("loop_type_test", loopTypeError) == 3 && loopTypeError.empty());
+        runScript("prefix_test=5; ++prefix_test; --prefix_test; ++prefix_test");
+        std::string prefixError;
+        assert(evaluate("prefix_test", prefixError) == 6 && prefixError.empty());
+        runScript("fn empty_argument_test(x) { return x }");
+        std::string emptyArgumentError;
+        evaluate("empty_argument_test(,1)", emptyArgumentError);
+        assert(!emptyArgumentError.empty());
+        assert(expression::callOffset("\"f(1)\" + f(2)", "f") == 9);
+        const std::string spacedCall = "\"f (1)\" + f \t(2)";
+        const auto callSite = expression::findCall(spacedCall, "f");
+        assert(callSite && callSite->nameOffset == spacedCall.find("f \t") && callSite->openOffset == spacedCall.rfind('('));
+        assert(!expression::findCall("different_f (2)", "f"));
+        assert(expression::matchingGroupEnd("f(\")\", [1,2])", 1) == 12);
+        runScript("return 1, unknown_return_value");
+        assert(std::any_of(engineState().script_console_output.begin(), engineState().script_console_output.end(),
+            [](const std::string& line) { return line.find("L:1 Err:") != std::string::npos; }));
+        runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1)");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("Arg Count Mismatch") != std::string::npos);
+        runScript("fn pair_test(x,y) { return x,y }; a,b = pair_test(1,unknown_value)");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("Err:") != std::string::npos);
+        runScript("fn recursive_script(x) { return recursive_script(x) }; recursive_script(1)");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back().find("recursion limit") != std::string::npos);
+        runScript("for (i=0; i<5; i+=1) { if(i==1) { continue }; if(i==3) { break }; print(i) }");
+        assert(engineState().script_console_output.size() == 2 && engineState().script_console_output[0] == "0" && engineState().script_console_output[1] == "2");
+        runScript("counter=0; for (i=0; i<4000; i+=1) { counter=counter+1; counter=counter+1; counter=counter+1 }; print(counter)");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.back() == "12000");
+        engineState().user_consts.push_back({"constant_test", 8});
+        runScript("constant_test, b = [1,2]");
+        assert(engineState().user_consts.back().val == 8 && !engineState().script_console_output.empty());
+        engineState().user_consts.clear();
+        engineState().user_script_funcs.clear();
+        engineState().user_args.clear(); engineState().user_arrays.clear();
+    }
+    engineState().fmt_mode = 4; engineState().fmt_precision = 2;
+    assert(fmtNum(999.999) == "1.00e+03");
+    engineState().fmt_mode = 0; engineState().fmt_precision = 6;
+    for (const auto& expression : {"gcd(1e30,2)", "lcm(4000000000,4000000001)", "sum(i,-5e18,5e18,1)", "sum(i,1,400,sum(j,1,400,1))"}) {
+        std::string error;
+        evaluate(expression, error);
+        if (error.empty()) { std::cerr << "Expected error: " << expression << std::endl; assert(false); }
+    }
+    {
+        std::string error; bool isArray = false;
+        parseArrayExpr("0:1:1e10", isArray, error);
+        assert(!error.empty());
+        bool isDefinition = false;
+        evaluateInput("oversized=[0:1:1e10]", error, isDefinition); assert(!error.empty());
+        evaluateInput("a=[1,2,3]", error, isDefinition); assert(error.empty());
+        evaluateInput("f(x)=x^2", error, isDefinition); assert(error.empty());
+        auto values = parseArrayExpr("f(a)", isArray, error);
+        assert(error.empty() && isArray && values.size() == 3 && values[1] == 4);
+        evaluateInput("b=f(a)", error, isDefinition); assert(error.empty());
+        expectNumber("b[2]", 4);
+        std::string longArrayExpression = "a";
+        for (int i = 0; i < 30; ++i) longArrayExpression += "+a";
+        evaluateInput("many=" + longArrayExpression, error, isDefinition); assert(error.empty());
+        expectNumber("many[2]", 62);
+        parseArrayExpr("foo(a)", isArray, error); assert(!error.empty());
+        engineState().user_arrays.clear(); engineState().user_funcs.clear();
+        for (const auto& expression : {"pi=3", "sin=2", "sqrt(x)=5", "pow=3", "f(pi)=2"}) {
+            evaluateInput(expression, error, isDefinition); assert(!error.empty());
+        }
+        runScript("for (sin=1; sin<2; sin++) { print(sin) }");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front().find("Reserved name") != std::string::npos);
+        runScript("print(\"sin=2\")");
+        assert(!engineState().script_console_output.empty() && engineState().script_console_output.front().find("Reserved name") == std::string::npos);
+        evaluateInput("g(x)=x*2", error, isDefinition); assert(error.empty());
+        expectNumber("log(100)", 2);
+        evaluateInput("n(x)=x+1", error, isDefinition); assert(error.empty());
+        expectNumber("sin(0)", 0);
+        evaluateInput("d(x,y)=x-y", error, isDefinition); assert(error.empty());
+        engineState().user_args.push_back({"x",2}); engineState().user_args.push_back({"y",5});
+        expectNumber("d(y,x)", 3);
+        expectNumber("g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)+g(1)", 22);
+        engineState().user_args.clear(); engineState().user_funcs.clear();
+    }
+
+    for (const auto& tc : std::vector<std::pair<std::string, double>>{
+             {"3!+4!", 30}, {"(2+1)!*2!", 12}, {"3!!", 720},
+             {"3! != 4!", 1}, {"2 xor 3", 0}, {"1 xor 1", 0},
+             {"0 xor 0", 0}, {"0 xor 3", 1}, {"1 xor 0 and 0", 1}}) {
+        std::string testError;
+        double actual = evaluate(tc.first, testError);
+        if (!testError.empty() || actual != tc.second) {
+            std::cerr << "Expression failed: " << tc.first << " = " << actual << " " << testError << std::endl;
+            assert(false);
+        }
+    }
+
     // 3. Units adapter test (conversion to explicit target unit)
     //    The path is resolved relative to the binary's working dir.
     std::string units_dat = std::string(UNITS_DAT_PATH);
@@ -46,6 +1106,20 @@ int main() {
     assert(c1.success);
     assert(std::abs(c1.value - 8.04672) < 0.0001);
     assert(c1.unitStr == "km");
+
+    // GNU Units 2.27 loads definitions from adjacent included data files.
+    assert(bridge_init(units_dat.c_str()) == 0);
+    double included_value = 0.0;
+    char included_unit[256] = {}, included_error[256] = {};
+    assert(bridge_convert(1.0, "BTC", "bitcoin", &included_value,
+                          included_unit, sizeof(included_unit), included_error,
+                          sizeof(included_error)) == 0);
+    assert(std::abs(included_value - 1.0) < 1e-9);
+    std::string long_unit(256, 'm');
+    assert(bridge_convert(1.0, long_unit.c_str(), "m", &included_value,
+                          included_unit, sizeof(included_unit), included_error,
+                          sizeof(included_error)) != 0);
+    assert(std::string(included_error).find("too long") != std::string::npos);
 
     // 4. Units adapter test (conversion to SI base units)
     //    Note: GNU Units uses "hr" for hour, "h" means hectare.
@@ -179,11 +1253,11 @@ int main() {
     assert(c_eia_f.success && std::abs(c_eia_f.value - 10000000.0) < 0.001);
 
     // 7. Format tests (NORM, FLT, FIX, SCI, ENG, digit grouping for int & frac)
-    use_thousands_sep = true;
+    engineState().use_thousands_sep = true;
 
     // NORM mode (Mode 0)
-    fmt_mode = 0;
-    fmt_precision = 6;
+    engineState().fmt_mode = 0;
+    engineState().fmt_precision = 6;
     std::string s_norm_std = fmtNum(1234.567);
     std::cout << "NORM std: " << s_norm_std << std::endl;
     assert(s_norm_std == "1 234.57");
@@ -193,8 +1267,8 @@ int main() {
     assert(s_norm_large.find("e+") != std::string::npos);
 
     // FLT mode (Mode 1: Pure float, no exponent, strips trailing zeros)
-    fmt_mode = 1;
-    fmt_precision = 6;
+    engineState().fmt_mode = 1;
+    engineState().fmt_precision = 6;
     std::string s_flt = fmtNum(1234.500);
     std::cout << "FLT 6dp + spaces: " << s_flt << std::endl;
     assert(s_flt == "1 234.5");
@@ -204,8 +1278,8 @@ int main() {
     assert(s_flt_small == "0.000 001");
 
     // FIX mode (Mode 2: Fixed point, preserves trailing zeros)
-    fmt_mode = 2;
-    fmt_precision = 6;
+    engineState().fmt_mode = 2;
+    engineState().fmt_precision = 6;
     std::string s_fix = fmtNum(1234567.8901234);
     std::cout << "FIX 6dp + spaces: " << s_fix << std::endl;
     assert(s_fix == "1 234 567.890 123");
@@ -219,15 +1293,15 @@ int main() {
     assert(s_frac == "0.000 001");
 
     // SCI mode (Mode 3: Scientific)
-    fmt_mode = 3;
-    fmt_precision = 4;
+    engineState().fmt_mode = 3;
+    engineState().fmt_precision = 4;
     std::string s_sci = fmtNum(0.0000012345);
     std::cout << "SCI 4dp + spaces: " << s_sci << std::endl;
     assert(s_sci == "1.234 5e-06");
 
     // ENG mode (Mode 4: Engineering exponent multiple of 3)
-    fmt_mode = 4;
-    fmt_precision = 3;
+    engineState().fmt_mode = 4;
+    engineState().fmt_precision = 3;
     std::string s_eng1 = fmtNum(123456.789);
     std::cout << "ENG 3dp + spaces (123k): " << s_eng1 << std::endl;
     assert(s_eng1 == "123.457e+03");
@@ -237,9 +1311,9 @@ int main() {
     assert(s_eng2 == "1.235e-06");
 
     // Test without digit grouping
-    use_thousands_sep = false;
-    fmt_mode = 2; // FIX
-    fmt_precision = 6;
+    engineState().use_thousands_sep = false;
+    engineState().fmt_mode = 2; // FIX
+    engineState().fmt_precision = 6;
     std::string s_nogroup = fmtNum(0.0000012345);
     std::cout << "FIX 6dp no spaces: " << s_nogroup << std::endl;
     assert(s_nogroup == "0.000001");
@@ -253,7 +1327,7 @@ int main() {
 
     // Test Case 1: Prefix 'p' cycling with auto_brackets = true
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr1 = "p";
     int cursor1 = 1;
 
@@ -346,12 +1420,15 @@ int main() {
     std::cout << "Test 4.7 [C -> C()]: " << expr4_cap << " cursor=" << cursor4_cap << std::endl;
     assert(expr4_cap == "C()" && cursor4_cap == 2);
 
+    engineState().user_script_funcs.clear();
+    engineState().autocomplete_words.erase(std::remove(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), "pair_test("), engineState().autocomplete_words.end());
+
     // Test Case 5: User variable & constant priority (cycling "para" -> "power")
     reset_tab();
-    user_args.clear();
-    user_consts.clear();
-    user_consts.push_back({"para", 3.14});
-    user_args.push_back({"power", 42.0});
+    engineState().user_args.clear();
+    engineState().user_consts.clear();
+    engineState().user_consts.push_back({"para", 3.14});
+    engineState().user_args.push_back({"power", 42.0});
 
     std::string expr5 = "pa";
     int cursor5 = 2;
@@ -364,12 +1441,12 @@ int main() {
     assert(expr5 == "para" && cursor5 == 4);
 
     // Clear user variables for clean subsequent tests
-    user_args.clear();
-    user_consts.clear();
+    engineState().user_args.clear();
+    engineState().user_consts.clear();
 
     // Test Case 6: Autocomplete with auto_brackets = false
     reset_tab();
-    auto_brackets = false;
+    engineState().auto_brackets = false;
     std::string expr6 = "p";
     int cursor6 = 1;
     handleTabCompletion(expr6, cursor6);
@@ -386,7 +1463,7 @@ int main() {
 
     // Test Case 6b: de -> deg2rad() / def , deg2 -> deg2rad(), d2 -> d2r()
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr_deg2 = "deg2";
     int cursor_deg2 = 4;
     handleTabCompletion(expr_deg2, cursor_deg2);
@@ -411,17 +1488,26 @@ int main() {
     double plot_res = 0.0;
     std::string plot_err = "";
     bool handled = handlePlotCommands("plot.xlim([-5, 5])", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -5.0 && plot_xlim_max == 5.0);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_xlim_min == -5.0 && engineState().plot_xlim_max == 5.0);
+    assert(engineState().plot_manual_x && !engineState().plot_manual_y);
+
+    handled = handlePlotCommands("plot.ylim(5, 5)", plot_err, plot_res);
+    assert(handled && !plot_err.empty() && !engineState().plot_manual_y);
+    plot_err.clear();
+    handled = handlePlotCommands("plot.xlim(5, -5)", plot_err, plot_res);
+    assert(handled && !plot_err.empty() && engineState().plot_xlim_min == -5.0 && engineState().plot_xlim_max == 5.0);
+    plot_err.clear();
 
     handled = handlePlotCommands("plot.ylim([-10 10])", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_ylim_min == -10.0 && plot_ylim_max == 10.0);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_ylim_min == -10.0 && engineState().plot_ylim_max == 10.0);
+    assert(engineState().plot_manual_x && engineState().plot_manual_y);
 
     handled = handlePlotCommands("plot.xlim(-2, 2)", plot_err, plot_res);
-    assert(handled && plot_err.empty() && plot_manual_limits && plot_xlim_min == -2.0 && plot_xlim_max == 2.0);
+    assert(handled && plot_err.empty() && engineState().plot_manual_limits && engineState().plot_xlim_min == -2.0 && engineState().plot_xlim_max == 2.0);
 
     // Test Case 8: conv(...) units autocomplete (mm, mmHg, mm^2, mm2, std_mm2)
     reset_tab();
-    auto_brackets = true;
+    engineState().auto_brackets = true;
     std::string expr8 = "conv(10, mm";
     int cursor8 = 11;
     handleTabCompletion(expr8, cursor8);
@@ -477,7 +1563,7 @@ int main() {
     assert(c_mmhg_low.success && std::abs(c_mmhg_low.value - 1.0) < 0.001);
 
     // Test Case 10: Trigonometric & Hyperbolic functions test suite
-    degreesMode = true;
+    engineState().degreesMode = true;
     double t_sin = evaluate("sin(30)", err);
     assert(err.empty() && std::abs(t_sin - 0.5) < 1e-6);
 
@@ -519,7 +1605,7 @@ int main() {
     assert(err == "Domain Error: acos(x) requires -1 <= x <= 1");
 
     // Trig in Radians Mode
-    degreesMode = false;
+    engineState().degreesMode = false;
     double t_sin_rad = evaluate("sin(pi / 6)", err);
     assert(err.empty() && std::abs(t_sin_rad - 0.5) < 1e-6);
 
@@ -528,7 +1614,7 @@ int main() {
 
     double t_atan2_rad = evaluate("atan2(1, 1)", err);
     assert(err.empty() && std::abs(t_atan2_rad - M_PI / 4.0) < 1e-6);
-    degreesMode = true;
+    engineState().degreesMode = true;
 
     // Hyperbolic & Inverse Hyperbolic
     double t_sinh0 = evaluate("sinh(0)", err);
@@ -679,7 +1765,7 @@ int main() {
     assert(err == "Domain Error: acsch(x) requires x != 0");
 
     // Singularity domain errors (degrees mode)
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluate("tan(90)", err);
     assert(err == "Domain Error: tan(x) undefined when cos(x) = 0");
 
@@ -707,9 +1793,41 @@ int main() {
 
     ConvResult c_acc3 = handleConv(9.80665, "m/s^2", "g", units_dat);
     assert(c_acc3.success && std::abs(c_acc3.value - 1.0) < 1e-3);
+    auto grams = handleConv(1, "g", "kg", units_dat);
+    assert(grams.success && std::abs(grams.value - 0.001) < 1e-9);
+    auto fps2 = handleConv(1, "fps2", "m/s^2", units_dat);
+    assert(fps2.success && std::abs(fps2.value - 0.3048) < 1e-9);
+    assert(handleConv(1, "mps", "km/hr", units_dat).success);
+    assert(handleConv(1, "psf", "Pa", units_dat).success);
+    assert(handleConv(1, "gpa", "Pa", units_dat).success);
+    auto knots = handleConv(1, "kt", "m/s", units_dat);
+    assert(knots.success && std::abs(knots.value - 1852.0 / 3600.0) < 1e-9);
+    auto milesPerHour = handleConv(1, "mi/h", "m/s", units_dat);
+    assert(milesPerHour.success && std::abs(milesPerHour.value - 0.44704) < 1e-9);
 
-    ConvResult c_acc4 = handleConv(100, "gal", "m/s^2", units_dat);
+    ConvResult c_acc4 = handleConv(100, "Gal", "m/s^2", units_dat);
     assert(c_acc4.success && std::abs(c_acc4.value - 1.0) < 1e-3);
+
+    for (const auto& tc : std::vector<std::tuple<double, std::string, std::string, double>>{
+             {1, "Mm", "m", 1e6}, {1, "Mg", "kg", 1000}, {1, "Ms", "s", 1e6},
+             {1, "mPa", "Pa", .001}, {5, "MW", "dBm", 96.989700043},
+             {1, "MV", "dBmV", 180}, {0, "dBm", "W", .001},
+             {10, "dBW", "mW", 10000}, {1, "gal", "in^3", 231}, {1, "ton", "lb", 2000}}) {
+        auto result = handleConv(std::get<0>(tc), std::get<1>(tc), std::get<2>(tc), units_dat);
+        if (!result.success || std::abs(result.value - std::get<3>(tc)) > std::max(1e-6, std::abs(std::get<3>(tc)) * 1e-6)) {
+            std::cerr << "Conversion failed: " << std::get<1>(tc) << " -> " << std::get<2>(tc) << ": " << result.value << " " << result.errorMsg << std::endl;
+            assert(false);
+        }
+    }
+    for (const auto& tc : std::vector<std::tuple<double, std::string, std::string>>{
+             {9.96, "smd3", "100"}, {.04, "smd3", "R04"}, {47, "smd4", "47R0"}, {99.999, "smd4", "1000"}}) {
+        auto result = handleConv(std::get<0>(tc), std::get<1>(tc), "", units_dat);
+        if (!result.success || result.unitStr != std::get<2>(tc)) std::cerr << "Code failed: " << std::get<0>(tc) << " -> " << std::get<1>(tc) << ": " << result.unitStr << " " << result.errorMsg << std::endl;
+        assert(result.success && result.unitStr == std::get<2>(tc));
+    }
+    assert(!handleConv(1e9, "eia96", "", units_dat).success);
+    assert(!handleConv(9.99e10, "smd3", "", units_dat).success);
+    assert(!handleConv(9.999e11, "smd4", "", units_dat).success);
 
     ConvResult c_acc5 = handleConv(1, "gravity", "ft/s^2", units_dat);
     assert(c_acc5.success && std::abs(c_acc5.value - 32.174) < 0.05);
@@ -722,34 +1840,34 @@ int main() {
     assert(expr_acc == "conv(10, \"m/s^2\", cm/s^2" && cursor_acc == 24);
 
     // Test Case 13: Angle operations and output formatting
-    degreesMode = true;
+    engineState().degreesMode = true;
     double val_asin = evaluateInput("asin(0.5)", err, isDef);
     assert(err.empty() && std::abs(val_asin - 30.0) < 1e-6);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
-    degreesMode = false;
+    engineState().degreesMode = false;
     double val_asin_rad = evaluateInput("asin(0.5)", err, isDef);
     assert(err.empty() && std::abs(val_asin_rad - 0.5235987) < 1e-5);
-    assert(g_last_result_angle == AngleUnit::RAD);
+    assert(engineState().g_last_result_angle == AngleUnit::RAD);
 
     // Variable assignment x = asin(0.5)
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluateInput("x_angle = asin(0.5)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
     // Conversions deg2rad and rad2deg
     evaluateInput("r_angle = deg2rad(180)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::RAD);
+    assert(engineState().g_last_result_angle == AngleUnit::RAD);
 
     evaluateInput("d_angle = rad2deg(pi)", err, isDef);
     assert(err.empty() && isDef);
-    assert(g_last_result_angle == AngleUnit::DEG);
+    assert(engineState().g_last_result_angle == AngleUnit::DEG);
 
     // Non-angle trig operations must reset g_last_result_angle to NONE
     evaluateInput("sin(30)", err, isDef);
-    assert(g_last_result_angle == AngleUnit::NONE);
+    assert(engineState().g_last_result_angle == AngleUnit::NONE);
 
     // Test Case 14: Tab completion caching verification
     reset_tab();
@@ -827,7 +1945,7 @@ int main() {
 
     // Test Case 18: Vector & Array operations, inline indexing, domain errors in arrays
     evaluateInput("arr = [10, 20, 30, 40]", err, isDef);
-    assert(err.empty() && isDef && user_arrays.count("arr") && user_arrays["arr"].size() == 4);
+    assert(err.empty() && isDef && engineState().user_arrays.count("arr") && engineState().user_arrays["arr"].size() == 4);
     double v_arr_idx = evaluateInput("arr[2]", err, isDef);
     assert(err.empty() && std::abs(v_arr_idx - 20.0) < 1e-6);
     double v_arr_sum = evaluateInput("sum(arr)", err, isDef);
@@ -850,10 +1968,10 @@ int main() {
     assert(err.empty() && std::abs(v_dot - 32.0) < 1e-6);
 
     // Vectorized function evaluation & domain error propagation
-    degreesMode = true;
+    engineState().degreesMode = true;
     evaluateInput("sin([0, 30, 90])", err, isDef);
-    assert(err.empty() && g_last_eval_is_array && g_last_eval_array.size() == 3);
-    assert(std::abs(g_last_eval_array[1] - 0.5) < 1e-6 && std::abs(g_last_eval_array[2] - 1.0) < 1e-6);
+    assert(err.empty() && engineState().g_last_eval_is_array && engineState().g_last_eval_array.size() == 3);
+    assert(std::abs(engineState().g_last_eval_array[1] - 0.5) < 1e-6 && std::abs(engineState().g_last_eval_array[2] - 1.0) < 1e-6);
 
     evaluateInput("asec([0.5, 2])", err, isDef);
     assert(err == "Domain Error: asec(x) requires |x| >= 1");
@@ -876,8 +1994,8 @@ int main() {
     assert(c_temp3.success && std::abs(c_temp3.value - 0.0) < 1e-4);
 
     // Test Case 20: Script engine - session variable preservation, loops, conditionals, recursion
-    user_args.clear();
-    user_arrays.clear();
+    engineState().user_args.clear();
+    engineState().user_arrays.clear();
     evaluateInput("session_var = 100", err, isDef);
     assert(err.empty());
 
@@ -896,7 +2014,7 @@ int main() {
         "print(total + r)\n";
     runScript(script_code);
     std::string script_out;
-    for (const auto& line : script_console_output) script_out += line + "\n";
+    for (const auto& line : engineState().script_console_output) script_out += line + "\n";
     std::cout << "Script output: " << script_out;
     // session_var(100) + sum(1..5)(15) + fact_rec(5)(120) = 235
     assert(script_out.find("235") != std::string::npos);
@@ -907,6 +2025,57 @@ int main() {
     // Test Case 21: getConvUnitMatches dimension filtering
     auto len_units = getConvUnitMatches("mm", "k");
     assert(!len_units.empty() && len_units[0] == "km");
+
+    // Only the latest 128 history values are registered with the expression parser.
+    engineState().history.clear();
+    for (int i = 1; i <= 130; ++i) engineState().history.push_back(static_cast<double>(i));
+    err.clear();
+    assert(evaluate("e3", err) == 3.0 && err.empty());
+    err.clear();
+    assert(evaluate("e130", err) == 130.0 && err.empty());
+    err.clear();
+    evaluate("e2", err);
+    assert(!err.empty());
+
+    const auto split_args = expression::splitArguments("max(1,2), [3,4], \"x,y\"");
+    assert(split_args.size() == 3 && split_args[0] == "max(1,2)" &&
+           split_args[1] == "[3,4]" && split_args[2] == "\"x,y\"");
+    const auto escaped_args = expression::splitArguments("\"a\\\",b\",c");
+    assert(escaped_args.size() == 2 && escaped_args[1] == "c");
+    clearHistory();
+    for (int i = 1; i <= 130; ++i) assert(appendHistory(i) == static_cast<size_t>(i));
+    assert(engineState().history.size() == 128 && engineState().history_first_number == 3);
+    err.clear(); assert(evaluate("e3", err) == 3.0 && err.empty());
+    err.clear(); assert(evaluate("e130", err) == 130.0 && err.empty());
+    err.clear(); evaluate("e2", err); assert(!err.empty());
+    err.clear(); evaluateInput("e3=99", err, isDef); assert(!err.empty());
+    runScript("e3++");
+    assert(!engineState().script_console_output.empty() && engineState().script_console_output[0].find("read-only") != std::string::npos);
+    runScript("print(\"e3=1\")");
+    assert(!engineState().script_console_output.empty() && engineState().script_console_output[0] == "e3=1");
+    clearHistory();
+    assert(appendHistory(42) == 1);
+    double ratio = 0;
+    char si_unit[64] = {}, conversion_error[128] = {};
+    assert(bridge_convert(1, "cm", "m", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) == 0);
+    assert(std::abs(ratio - 0.01) < 1e-12);
+    for (int i = 0; i < 100; ++i)
+        assert(bridge_convert(1, "meter", "second", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
+
+    std::atomic<bool> conversions_ok{true};
+    std::vector<std::thread> workers;
+    for (int worker = 0; worker < 4; ++worker) workers.emplace_back([&] {
+        for (int i = 0; i < 100; ++i) {
+            double converted = 0;
+            char unit[64] = {}, error[128] = {};
+            if (bridge_convert(1, "cm", "m", &converted, unit, sizeof(unit), error, sizeof(error)) != 0 ||
+                std::abs(converted - 0.01) > 1e-12) conversions_ok = false;
+        }
+    });
+    for (auto& worker : workers) worker.join();
+    assert(conversions_ok);
+    assert(bridge_test_fatal() == 1);
+    assert(bridge_convert(1, "cm", "m", &ratio, si_unit, sizeof(si_unit), conversion_error, sizeof(conversion_error)) != 0);
 
     std::cout << "[Droidulator Native Test] ALL TESTS PASSED SUCCESSFULLY!" << std::endl;
     return 0;

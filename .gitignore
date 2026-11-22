@@ -3,8 +3,17 @@
 /local.properties
 /.idea/
 .DS_Store
+# Build directories
 /build
 /app/build
+/macrobenchmark/build
+/performance-artifacts/
+/build-test/
+/build_native/
 /captures
 .externalNativeBuild
 .cxx
+/PROBLEM.md
+
+# Legacy checkout retained locally when migrating the GNU Units submodule.
+/app/src/main/cpp/gnu-units/

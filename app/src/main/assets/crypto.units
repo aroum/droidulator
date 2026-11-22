@@ -1,0 +1,69 @@
+# From https://api.coingecko.com/api/v3/coins/markets
+
+!message Crypto prices from coingecko.com on 2026-04-01  
+
+BTC                     bitcoin
+ETH                     ethereum
+USDT                    tether
+BNB                     bnb
+XRP                     xrp
+USDC                    usdc
+SOL                     solana
+TRX                     tron
+DOGE                    dogecoin
+ADA                     cardano
+BCH                     bitcoin_cash
+LINK                    chainlink
+XMR                     monero
+XLM                     stellar
+DAI                     dai
+LTC                     litecoin
+AVAX                    avalanche
+HBAR                    hedera
+SHIB                    shiba_inu
+UNI                     uniswap
+DOT                     polkadot
+AAVE                    aave
+ETC                     ethereum_classic
+POL                     pol
+ALGO                    algorand
+ATOM                    cosmos_hub
+APT                     aptos
+FIL                     filecoin
+ARB                     arbitrum
+OP                      optimism
+MKR                     maker
+
+# Selected crypto values with market capitalization
+
+bitcoin                 68324 US$           # $1367 billion
+ethereum                 2155.27 US$        # $260 billion
+tether                      0.999798 US$    # $184 billion
+bnb                       613.99 US$        # $83.7 billion
+xrp                         1.35 US$        # $83.1 billion
+usdc                        0.999745 US$    # $77.2 billion
+solana                     81.79 US$        # $46.9 billion
+tron                        0.315821 US$    # $29.9 billion
+dogecoin                    0.092984 US$    # $14.3 billion
+cardano                     0.249355 US$    # $9.19 billion
+bitcoin_cash              454.34 US$        # $9.09 billion
+chainlink                   8.99 US$        # $6.37 billion
+monero                    335.71 US$        # $6.19 billion
+stellar                     0.170974 US$    # $5.65 billion
+dai                         0.999535 US$    # $4.43 billion
+litecoin                   54.28 US$        # $4.18 billion
+avalanche                   9.17 US$        # $3.96 billion
+hedera                      0.089781 US$    # $3.89 billion
+shiba_inu                   6.02e-06 US$    # $3.55 billion
+uniswap                     3.62 US$        # $2.3 billion
+polkadot                    1.26 US$        # $2.12 billion
+aave                       98.96 US$        # $1.5 billion
+ethereum_classic            8.23 US$        # $1.29 billion
+pol                         0.093211 US$    # $990 million
+algorand                    0.102859 US$    # $914 million
+cosmos_hub                  1.68 US$        # $844 million
+aptos                       0.899476 US$    # $714 million
+filecoin                    0.843981 US$    # $648 million
+arbitrum                    0.094844 US$    # $573 million
+optimism                    0.111315 US$    # $238 million
+maker                    1789.14 US$        # $0.0    

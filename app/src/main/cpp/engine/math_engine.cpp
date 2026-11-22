@@ -1,3 +1,6 @@
+#include "arithmetic_expression.h"
+#include <charconv>
+#include <tuple>
 #include "math_engine.h"
 #include "script_engine.h"
 #include "tinyexpr.h"
@@ -5,427 +8,70 @@
 #include <iomanip>
 
 std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err);
-std::string preprocessLen(const std::string& s);
-std::string preprocessVectorStats(const std::string& s);
 
-inline std::vector<UserFunc> getParsedUserFuncs() {
-    std::vector<UserFunc> res;
-    for (const auto& f_str : user_funcs) {
-        size_t eq = f_str.find('=');
-        if (eq == std::string::npos) continue;
-        std::string lhs = f_str.substr(0, eq);
-        std::string rhs = f_str.substr(eq + 1);
-        
-        lhs.erase(0, lhs.find_first_not_of(" \t"));
-        lhs.erase(lhs.find_last_not_of(" \t") + 1);
-        rhs.erase(0, rhs.find_first_not_of(" \t"));
-        rhs.erase(rhs.find_last_not_of(" \t") + 1);
-        
-        size_t paren_open = lhs.find('(');
-        size_t paren_close = lhs.find(')');
-        if (paren_open == std::string::npos || paren_close == std::string::npos || paren_close < paren_open) continue;
-        
-        std::string name = lhs.substr(0, paren_open);
-        name.erase(0, name.find_first_not_of(" \t"));
-        name.erase(name.find_last_not_of(" \t") + 1);
-        
-        std::string params_str = lhs.substr(paren_open + 1, paren_close - paren_open - 1);
-        std::vector<std::string> params;
-        std::stringstream ss(params_str);
-        std::string p;
-        while (std::getline(ss, p, ',')) {
-            p.erase(0, p.find_first_not_of(" \t"));
-            p.erase(p.find_last_not_of(" \t") + 1);
-            if (!p.empty()) params.push_back(p);
-        }
-        res.push_back({name, params, rhs});
+static thread_local size_t loopEvaluationDepth = 0;
+static thread_local size_t loopIterationsRemaining = 100000;
+// Formula parameters and reduction indices are local to the active evaluation.
+static thread_local std::vector<std::vector<UserArg>> scalarBindings;
+static thread_local std::vector<std::map<std::string, std::vector<double>>> arrayBindings;
+
+class ScalarBindingScope {
+public:
+    explicit ScalarBindingScope(std::vector<UserArg> values, std::map<std::string, std::vector<double>> arrays = {}) {
+        scalarBindings.push_back(std::move(values));
+        arrayBindings.push_back(std::move(arrays));
     }
-    return res;
+    ~ScalarBindingScope() { arrayBindings.pop_back(); scalarBindings.pop_back(); }
+    ScalarBindingScope(const ScalarBindingScope&) = delete;
+    ScalarBindingScope& operator=(const ScalarBindingScope&) = delete;
+};
+
+static const std::vector<double>* scopedArray(std::string_view name) {
+    if (arrayBindings.empty()) return nullptr;
+    const auto found = arrayBindings.back().find(std::string(name));
+    return found == arrayBindings.back().end() ? nullptr : &found->second;
 }
 
-inline double executeScriptFunc(const std::string& name, const std::vector<double>& arg_vals, std::string& err) {
-    auto it = std::find_if(user_script_funcs.begin(), user_script_funcs.end(), [&](const CustomScriptFunc& f) {
-        return f.name == name;
-    });
-    if (it == user_script_funcs.end()) {
-        err = "Func Not Found";
-        return std::numeric_limits<double>::quiet_NaN();
+static std::optional<double> scopedScalar(std::string_view name) {
+    if (!scalarBindings.empty()) {
+        for (const auto& argument : scalarBindings.back())
+            if (argument.name == name) return argument.val;
     }
-    
-    const auto& func = *it;
-    if (arg_vals.size() != func.params.size()) {
-        err = "Arg Count Mismatch";
-        return std::numeric_limits<double>::quiet_NaN();
-    }
+    return std::nullopt;
+}
 
-    auto orig_args = user_args;
-    auto orig_arrays = user_arrays;
-
-    for (size_t i = 0; i < func.params.size(); ++i) {
-        user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
-            return a.name == func.params[i];
-        }), user_args.end());
-        user_args.push_back({func.params[i], arg_vals[i]});
-    }
-
-    double ret_val = 0.0;
-    bool has_returned = false;
-    int step_count = 0;
-    int max_steps = 1000;
-    
-    auto lines = func.statements;
-    size_t ip = 0;
-    struct FnBlock {
-        std::string type;
-        bool condition_met;
-        size_t start_ip;
-        size_t end_ip;
-        std::string cond_str;
+static std::optional<UserFunc> parseUserFunctionDefinition(std::string_view source) {
+    const size_t equals = expression::assignmentOffset(source);
+    if (equals == std::string_view::npos) return std::nullopt;
+    const auto lhs = expression::trim(source.substr(0, equals));
+    const auto rhs = expression::trim(source.substr(equals + 1));
+    const size_t open = lhs.find('(');
+    const size_t close = open == std::string_view::npos ? std::string_view::npos : expression::matchingGroupEnd(lhs, open);
+    if (close == std::string_view::npos) return std::nullopt;
+    return UserFunc{
+        std::string(expression::trim(lhs.substr(0, open))),
+        expression::splitArguments(lhs.substr(open + 1, close - open - 1)),
+        std::string(rhs)
     };
-    std::vector<FnBlock> blocks;
-
-    while (ip < lines.size() && step_count < max_steps) {
-        if (has_returned) break;
-        step_count++;
-        std::string line = lines[ip];
-        line.erase(0, line.find_first_not_of(" \t\r"));
-        line.erase(line.find_last_not_of(" \t\r") + 1);
-        if (line.empty() || line[0] == '#' || line.rfind("//", 0) == 0) { ip++; continue; }
-
-        if (line.rfind("return ", 0) == 0 || line == "return") {
-            std::string ret_expr = (line.size() > 7) ? line.substr(7) : "0";
-            ret_expr.erase(0, ret_expr.find_first_not_of(" \t"));
-            ret_expr.erase(ret_expr.find_last_not_of(" \t") + 1);
-            if (ret_expr.empty()) ret_expr = "0";
-            ret_val = evaluate(ret_expr, err);
-            has_returned = true;
-            break;
-        }
-
-        if ((line.rfind("if (", 0) == 0 || line.rfind("if(", 0) == 0) && line.back() == '{') {
-            size_t open_p = line.find('(');
-            size_t close_p = line.rfind(')');
-            size_t end_ip = findMatchingBlockEnd(lines, ip);
-            if (open_p != std::string::npos && close_p != std::string::npos && end_ip != std::string::npos) {
-                std::string cond_str = line.substr(open_p + 1, close_p - open_p - 1);
-                double cv = evaluate(cond_str, err);
-                if (!err.empty()) break;
-                bool cond_ok = (!std::isnan(cv) && cv != 0.0);
-                if (cond_ok) {
-                    blocks.push_back({"if", true, ip, end_ip, ""});
-                    ip++;
-                } else {
-                    blocks.push_back({"if", false, ip, end_ip, ""});
-                    size_t next_b = findMatchingBlockEnd(lines, ip, true);
-                    ip = (next_b != std::string::npos) ? next_b : end_ip;
-                }
-                continue;
-            }
-        } else if (line == "} else {" || line == "else {") {
-            if (!blocks.empty() && blocks.back().type == "if") {
-                if (blocks.back().condition_met) {
-                    ip = blocks.back().end_ip;
-                } else {
-                    blocks.back().condition_met = true;
-                    ip++;
-                }
-                continue;
-            }
-        } else if (isBlockEnd(line)) {
-            if (!blocks.empty()) {
-                blocks.pop_back();
-            }
-            ip++;
-            continue;
-        }
-
-        if (line.find('=') != std::string::npos) {
-            bool isDef = false;
-            evaluateInput(line, err, isDef);
-            if (!err.empty()) break;
-        } else {
-            bool isDef = false;
-            evaluateInput(line, err, isDef);
-            if (!err.empty()) break;
-        }
-        ip++;
-    }
-
-    user_args = orig_args;
-    user_arrays = orig_arrays;
-
-    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
-    return ret_val;
 }
 
-inline std::string substituteUserFuncs(std::string expr, std::string& err) {
-    if (!user_script_funcs.empty()) {
-        for (const auto& sf : user_script_funcs) {
-            std::string search = sf.name + "(";
-            size_t pos = 0;
-            while ((pos = expr.find(search, pos)) != std::string::npos) {
-                bool prev_ok = (pos == 0 || (!std::isalnum(expr[pos - 1]) && expr[pos - 1] != '_'));
-                if (!prev_ok) { pos += search.size(); continue; }
-                
-                size_t start = pos + search.size();
-                int depth = 1;
-                size_t end = start;
-                while (end < expr.size() && depth > 0) {
-                    if (expr[end] == '(') depth++;
-                    else if (expr[end] == ')') depth--;
-                    if (depth > 0) end++;
-                }
-                if (depth > 0) { err = "Mismatched Brackets"; return expr; }
-                
-                std::string args_str = expr.substr(start, end - start);
-                std::vector<std::string> args;
-                int arg_depth = 0;
-                std::string current_arg = "";
-                for (char c : args_str) {
-                    if (c == '(') arg_depth++;
-                    else if (c == ')') arg_depth--;
-                    if (c == ',' && arg_depth == 0) {
-                        args.push_back(current_arg);
-                        current_arg = "";
-                    } else {
-                        current_arg += c;
-                    }
-                }
-                if (!current_arg.empty() || args_str.empty()) args.push_back(current_arg);
-                
-                std::vector<double> arg_vals;
-                for (auto& a_str : args) {
-                    a_str.erase(0, a_str.find_first_not_of(" \t"));
-                    a_str.erase(a_str.find_last_not_of(" \t") + 1);
-                    if (a_str.empty()) continue;
-                    std::string eval_err;
-                    double val = evaluate(a_str, eval_err);
-                    if (!eval_err.empty() || std::isnan(val)) {
-                        err = eval_err.empty() ? "Arg Eval Error" : eval_err;
-                        return expr;
-                    }
-                    arg_vals.push_back(val);
-                }
-                
-                double func_res = executeScriptFunc(sf.name, arg_vals, err);
-                if (!err.empty()) return expr;
-                
-                std::ostringstream oss;
-                oss << std::setprecision(15) << func_res;
-                std::string res_str = (func_res < 0.0) ? ("(" + oss.str() + ")") : oss.str();
-                expr.replace(pos, (end + 1) - pos, res_str);
-                pos += res_str.size();
-            }
-        }
+std::vector<UserFunc> getParsedUserFuncs() {
+    std::vector<UserFunc> result;
+    result.reserve(engineState().user_funcs.size());
+    for (const auto& definition : engineState().user_funcs) {
+        if (auto parsed = parseUserFunctionDefinition(definition)) result.push_back(std::move(*parsed));
     }
-
-    if (user_funcs.empty()) return expr;
-    auto funcs = getParsedUserFuncs();
-    bool changed = true;
-    int limit = 10;
-    while (changed && limit-- > 0) {
-        changed = false;
-        for (const auto& f : funcs) {
-            std::string search = f.name + "(";
-            size_t pos = 0;
-            while ((pos = expr.find(search, pos)) != std::string::npos) {
-                size_t start = pos + search.size();
-                int depth = 1;
-                size_t end = start;
-                while (end < expr.size() && depth > 0) {
-                    if (expr[end] == '(') depth++;
-                    else if (expr[end] == ')') depth--;
-                    if (depth > 0) end++;
-                }
-                if (depth > 0) {
-                    err = "Mismatched Brackets";
-                    return expr;
-                }
-                
-                std::string args_str = expr.substr(start, end - start);
-                std::vector<std::string> args;
-                int arg_depth = 0;
-                std::string current_arg = "";
-                for (char c : args_str) {
-                    if (c == '(') arg_depth++;
-                    else if (c == ')') arg_depth--;
-                    
-                    if (c == ',' && arg_depth == 0) {
-                        args.push_back(current_arg);
-                        current_arg = "";
-                    } else {
-                        current_arg += c;
-                    }
-                }
-                if (!current_arg.empty() || args_str.empty()) {
-                    args.push_back(current_arg);
-                }
-                
-                for (auto& arg : args) {
-                    arg.erase(0, arg.find_first_not_of(" \t"));
-                    arg.erase(arg.find_last_not_of(" \t") + 1);
-                }
-                
-                if (args.size() != f.params.size()) {
-                    err = "Arg Count Mismatch";
-                    return expr;
-                }
-                
-                std::string body_subbed = f.body;
-                for (size_t i = 0; i < f.params.size(); ++i) {
-                    std::string param = f.params[i];
-                    std::string arg_val = "(" + args[i] + ")";
-                    size_t p_pos = 0;
-                    while ((p_pos = body_subbed.find(param, p_pos)) != std::string::npos) {
-                        bool prev_ok = (p_pos == 0 || (!std::isalnum(body_subbed[p_pos - 1]) && body_subbed[p_pos - 1] != '_'));
-                        bool next_ok = (p_pos + param.size() == body_subbed.size() || (!std::isalnum(body_subbed[p_pos + param.size()]) && body_subbed[p_pos + param.size()] != '_'));
-                        if (prev_ok && next_ok) {
-                            body_subbed.replace(p_pos, param.size(), arg_val);
-                            p_pos += arg_val.size();
-                        } else {
-                            p_pos += param.size();
-                        }
-                    }
-                }
-                
-                expr.replace(pos, (end + 1) - pos, "(" + body_subbed + ")");
-                changed = true;
-                break;
-            }
-        }
-    }
-    return expr;
-}
-
-inline std::string preprocessExpression(const std::string& s) {
-    std::string s_clean = "";
-    s_clean.reserve(s.size());
-    for (char c : s) {
-        if (c != ' ') {
-            s_clean += c;
-        }
-    }
-    std::string res = "";
-    res.reserve(s_clean.size());
-    int n = s_clean.size();
-    for (int i = 0; i < n; ) {
-        if (std::isdigit(s_clean[i]) || s_clean[i] == '.') {
-            std::string num = "";
-            while (i < n && (std::isdigit(s_clean[i]) || s_clean[i] == '.')) {
-                num += s_clean[i++];
-            }
-            res += num;
-            
-            if (i < n) {
-                if (i + 1 < n && s_clean[i] == 'd' && s_clean[i+1] == 'a') {
-                    res += " * 1e1";
-                    i += 2;
-                    continue;
-                }
-                char c = s_clean[i];
-                if (c == 'e' || c == 'E') {
-                    int j = i + 1;
-                    bool is_exp = false;
-                    if (j < n && (s_clean[j] == '+' || s_clean[j] == '-')) j++;
-                    if (j < n && std::isdigit(s_clean[j])) {
-                        // Ensure it's not e1, e2 history variable (e.g. 5*e1 or 2+e1 is handled separately, but 5e1 vs e1 after num)
-                        // If it's e followed by digits with no +/- sign and no more digits after, check if e is part of history variable
-                        is_exp = true;
-                    }
-                    if (is_exp) {
-                        res += " * 10^(";
-                        if (s_clean[i+1] == '+' || s_clean[i+1] == '-') {
-                            res += s_clean[i+1];
-                            i += 2;
-                        } else {
-                            i++;
-                        }
-                        while (i < n && std::isdigit(s_clean[i])) {
-                            res += s_clean[i++];
-                        }
-                        res += ")";
-                        continue;
-                    }
-                }
-                
-                std::string mult = "";
-                switch (c) {
-                    case 'h': mult = "1e2"; break;
-                    case 'k': mult = "1e3"; break;
-                    case 'M': mult = "1e6"; break;
-                    case 'G': mult = "1e9"; break;
-                    case 'T': mult = "1e12"; break;
-                    case 'P': mult = "1e15"; break;
-                    case 'E': mult = "1e18"; break;
-                    case 'Z': mult = "1e21"; break;
-                    case 'Y': mult = "1e24"; break;
-                    
-                    case 'd': mult = "1e-1"; break;
-                    case 'c': mult = "1e-2"; break;
-                    case 'm': mult = "1e-3"; break;
-                    case 'u': mult = "1e-6"; break;
-                    case 'n': mult = "1e-9"; break;
-                    case 'p': mult = "1e-12"; break;
-                    case 'f': mult = "1e-15"; break;
-                    case 'a': mult = "1e-18"; break;
-                    case 'z': mult = "1e-21"; break;
-                    case 'y': mult = "1e-24"; break;
-                }
-                if (!mult.empty()) {
-                    int prev_pos = (int)res.size() - (int)num.size();
-                    bool prev_is_ident = (prev_pos > 0 && (std::isalpha((unsigned char)res[prev_pos - 1]) || res[prev_pos - 1] == '_'));
-                    bool is_ident = prev_is_ident || (i + 1 < n && (std::isalpha((unsigned char)s_clean[i+1]) || s_clean[i+1] == '_'));
-                    if (!is_ident) {
-                        i++;
-                        std::string dec_part = "";
-                        if (i < n && std::isdigit((unsigned char)s_clean[i])) {
-                            while (i < n && std::isdigit((unsigned char)s_clean[i])) {
-                                dec_part += s_clean[i++];
-                            }
-                        }
-                        if (c == 'k' && dec_part.size() == 2) {
-                            double base_val = std::atof(num.c_str());
-                            double dec_val = std::atof(dec_part.c_str());
-                            double total = base_val * 1000.0 + dec_val;
-                            res.erase(res.size() - num.size());
-                            std::ostringstream oss;
-                            oss << total;
-                            res += oss.str();
-                        } else {
-                            if (!dec_part.empty()) {
-                                res += "." + dec_part;
-                            }
-                            res += " * " + mult;
-                        }
-                        continue;
-                    }
-                }
-            }
-        } else {
-            res += s_clean[i++];
-        }
-    }
-    return res;
+    return result;
 }
 
 inline bool checkParentheses(const std::string& expr, std::string& err) {
     std::vector<char> stack;
-    for (char c : expr) {
-        if (c == '(' || c == '{' || c == '[') {
-            stack.push_back(c);
-        } else if (c == ')' || c == '}' || c == ']') {
-            if (stack.empty()) {
-                err = "Brackets Error";
-                return false;
-            }
-            char open = stack.back();
-            if ((c == ')' && open != '(') ||
-                (c == '}' && open != '{') ||
-                (c == ']' && open != '[')) {
-                err = "Brackets Error";
-                return false;
-            }
-            stack.pop_back();
+    for (const auto& token : expression::tokenize(expr)) {
+        if (token.kind == expression::Kind::Open) stack.push_back(token.text.front());
+        else if (token.kind == expression::Kind::Close &&
+                 !expression::closeGroup(stack, token.text.front())) {
+            err = "Brackets Error";
+            return false;
         }
     }
     if (!stack.empty()) {
@@ -435,727 +81,419 @@ inline bool checkParentheses(const std::string& expr, std::string& err) {
     return true;
 }
 
-inline std::string preprocessPercentage(const std::string& s) {
-    if (s.find('%') == std::string::npos) return s;
-    std::string res = s;
-    while (true) {
-        size_t pct_pos = std::string::npos;
-        for (size_t i = 0; i < res.size(); ++i) {
-            if (res[i] == '%') {
-                size_t j = i + 1;
-                while (j < res.size() && (res[j] == ' ' || res[j] == '\t')) j++;
-                bool is_postfix = true;
-                if (j < res.size()) {
-                    char next_c = res[j];
-                    if (std::isalnum(next_c) || next_c == '(' || next_c == '[' || next_c == '_' || next_c == '.') {
-                        is_postfix = false;
-                    }
-                }
-                if (is_postfix) {
-                    pct_pos = i;
-                    break;
-                }
-            }
-        }
-        
-        if (pct_pos == std::string::npos) break;
-        
-        int depth = 0;
-        size_t op_pos = std::string::npos;
-        for (int i = (int)pct_pos - 1; i >= 0; --i) {
-            if (res[i] == ')' || res[i] == ']' || res[i] == '}') depth++;
-            else if (res[i] == '(' || res[i] == '[' || res[i] == '{') depth--;
-            else if (depth == 0 && (res[i] == '+' || res[i] == '-')) {
-                op_pos = i;
-                break;
-            }
-        }
-        
-        if (op_pos != std::string::npos) {
-            int lhs_start = 0;
-            int lhs_depth = 0;
-            for (int i = (int)op_pos - 1; i >= 0; --i) {
-                if (res[i] == ')' || res[i] == ']' || res[i] == '}') lhs_depth++;
-                else if (res[i] == '(' || res[i] == '[' || res[i] == '{') {
-                    lhs_depth--;
-                    if (lhs_depth < 0) {
-                        lhs_start = i + 1;
-                        break;
-                    }
-                }
-            }
-            
-            std::string lhs = res.substr(lhs_start, op_pos - lhs_start);
-            char op = res[op_pos];
-            std::string rhs = res.substr(op_pos + 1, pct_pos - op_pos - 1);
-            
-            auto trim = [](std::string& str) {
-                str.erase(0, str.find_first_not_of(" \t"));
-                str.erase(str.find_last_not_of(" \t") + 1);
-            };
-            trim(lhs);
-            trim(rhs);
-            
-            std::string replacement = "((" + lhs + ") " + op + " (" + lhs + ") * (" + rhs + ") * 0.01)";
-            res = res.substr(0, lhs_start) + replacement + res.substr(pct_pos + 1);
-        } else {
-            int x_start = 0;
-            int x_depth = 0;
-            for (int i = (int)pct_pos - 1; i >= 0; --i) {
-                if (res[i] == ')' || res[i] == ']' || res[i] == '}') x_depth++;
-                else if (res[i] == '(' || res[i] == '[' || res[i] == '{') {
-                    x_depth--;
-                    if (x_depth < 0) {
-                        x_start = i + 1;
-                        break;
-                    }
-                }
-            }
-            std::string x_val = res.substr(x_start, pct_pos - x_start);
-            res = res.substr(0, x_start) + "((" + x_val + ") * 0.01)" + res.substr(pct_pos + 1);
-        }
-    }
-    return res;
-}
-
-inline std::string preprocessFactorial(const std::string& s) {
-    if (s.find('!') == std::string::npos) return s;
-    std::string res = "";
-    res.reserve(s.size());
-    int n = s.size();
-    for (int i = 0; i < n; i++) {
-        if (s[i] == '!') {
-            bool is_postfix = false;
-            if (i > 0) {
-                char prev = s[i - 1];
-                if (std::isalnum(prev) || prev == ')' || prev == ']' || prev == '}') {
-                    is_postfix = true;
-                }
-            }
-            if (is_postfix) {
-                int j = i - 1;
-                if (s[j] == ')' || s[j] == ']' || s[j] == '}') {
-                    char close = s[j];
-                    char open = (close == ')') ? '(' : ((close == ']') ? '[' : '{');
-                    int depth = 1;
-                    j--;
-                    while (j >= 0 && depth > 0) {
-                        if (s[j] == close) depth++;
-                        else if (s[j] == open) depth--;
-                        j--;
-                    }
-                    j++;
-                } else {
-                    while (j >= 0 && (std::isalnum(s[j]) || s[j] == '_')) {
-                        j--;
-                    }
-                    j++;
-                }
-                std::string operand = s.substr(j, i - j);
-                res = res.substr(0, j) + "fact(" + operand + ")";
-            } else {
-                res += s[i];
-            }
-        } else {
-            res += s[i];
-        }
-    }
-    return res;
-}
-
-inline std::string replaceLogicalWords(const std::string& s) {
-    // Fast path: check if any of the logical keywords could be present
-    if (s.find("and") == std::string::npos &&
-        s.find("or") == std::string::npos &&
-        s.find("not") == std::string::npos &&
-        s.find("xor") == std::string::npos) {
-        return s;
-    }
-    std::string res;
-    res.reserve(s.size() + 8);
-    const size_t n = s.size();
-    for (size_t i = 0; i < n; ) {
-        if (s[i] == '"' || s[i] == '\'') {
-            char q = s[i];
-            res += s[i++];
-            while (i < n && s[i] != q) {
-                res += s[i++];
-            }
-            if (i < n) res += s[i++];
-            continue;
-        }
-        
-        auto is_word_char = [](char c) {
-            return std::isalnum(c) || c == '_';
-        };
-        
-        bool boundary_left = (i == 0 || !is_word_char(s[i - 1]));
-        
-        if (boundary_left) {
-            if (i + 3 <= n && s.substr(i, 3) == "and" && (i + 3 == n || !is_word_char(s[i + 3]))) {
-                res += "&&";
-                i += 3;
-                continue;
-            }
-            if (i + 2 <= n && s.substr(i, 2) == "or" && (i + 2 == n || !is_word_char(s[i + 2]))) {
-                res += "||";
-                i += 2;
-                continue;
-            }
-            if (i + 3 <= n && s.substr(i, 3) == "not" && (i + 3 == n || !is_word_char(s[i + 3]))) {
-                res += "!";
-                i += 3;
-                continue;
-            }
-            if (i + 3 <= n && s.substr(i, 3) == "xor" && (i + 3 == n || !is_word_char(s[i + 3]))) {
-                res += "!=";
-                i += 3;
-                continue;
-            }
-        }
-        res += s[i++];
-    }
-    return res;
-}
-
-// Forward declaration: preprocessLen is defined below evaluateRelational
-inline std::string preprocessLen(const std::string& s);
-
-inline double evaluateRelational(const std::string& expr, std::string& err) {
-    auto findOp = [&](const std::string& op) -> size_t {
-        int p = 0, b = 0;
-        bool q = false;
-        if (expr.size() < op.size()) return std::string::npos;
-        for (size_t i = 0; i <= expr.size() - op.size(); ++i) {
-            char c = expr[i];
-            if (c == '"' || c == '\'') {
-                if (!q) { q = true; } else { q = false; }
-            } else if (!q) {
-                if (c == '(') p++;
-                else if (c == ')') p--;
-                else if (c == '[') b++;
-                else if (c == ']') b--;
-                else if (p == 0 && b == 0) {
-                    if (expr.substr(i, op.size()) == op) {
-                        if (op == "<" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == ">" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == "=" && i + 1 < expr.size() && expr[i+1] == '=') continue;
-                        if (op == "=" && i > 0 && expr[i-1] == '=') continue;
-                        return i;
-                    }
-                }
-            }
-        }
-        return std::string::npos;
-    };
-    
-    // Check ||
-    size_t pos = findOp("||");
-    if (pos == std::string::npos) pos = findOp(" or ");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + (expr[pos] == '|' ? 2 : 4));
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessArrayLookups(lhs, err_l), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessArrayLookups(rhs, err_r), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != 0.0 || rval != 0.0) ? 1.0 : 0.0;
-    }
-    
-    // Check &&
-    pos = findOp("&&");
-    if (pos == std::string::npos) pos = findOp(" and ");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + (expr[pos] == '&' ? 2 : 5));
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != 0.0 && rval != 0.0) ? 1.0 : 0.0;
-    }
-    
-    // Check ==
-    pos = findOp("==");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval == rval) ? 1.0 : 0.0;
-    }
-    
-    // Check !=
-    pos = findOp("!=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval != rval) ? 1.0 : 0.0;
-    }
-    
-    // Check <=
-    pos = findOp("<=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval <= rval) ? 1.0 : 0.0;
-    }
-    
-    // Check >=
-    pos = findOp(">=");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 2);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval >= rval) ? 1.0 : 0.0;
-    }
-    
-    // Check <
-    pos = findOp("<");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 1);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval < rval) ? 1.0 : 0.0;
-    }
-    
-    // Check >
-    pos = findOp(">");
-    if (pos != std::string::npos) {
-        std::string lhs = expr.substr(0, pos);
-        std::string rhs = expr.substr(pos + 1);
-        std::string err_l, err_r;
-        double lval = evaluate(preprocessLen(preprocessArrayLookups(lhs, err_l)), err_l);
-        if (!err_l.empty()) { err = err_l; return 0.0; }
-        double rval = evaluate(preprocessLen(preprocessArrayLookups(rhs, err_r)), err_r);
-        if (!err_r.empty()) { err = err_r; return 0.0; }
-        return (lval > rval) ? 1.0 : 0.0;
-    }
-    
-    return std::numeric_limits<double>::quiet_NaN();
-}
-
-static std::string fmtInternal(double val) {
-    std::ostringstream oss;
-    oss << std::setprecision(15) << val;
-    std::string s = oss.str();
-    return (val < 0.0) ? ("(" + s + ")") : s;
-}
-
-inline std::string preprocessLen(const std::string& s) {
-    if (s.find("len(") == std::string::npos) return s;
-    std::string res = s;
-    size_t pos = 0;
-    while ((pos = res.find("len(", pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-        if (!prev_ok) { pos += 4; continue; }
-        int depth = 1;
-        size_t close = pos + 4;
-        while (close < res.size() && depth > 0) {
-            if (res[close] == '(') depth++;
-            else if (res[close] == ')') depth--;
-            if (depth > 0) close++;
-        }
-        if (depth > 0) break;
-        std::string arg = res.substr(pos + 4, close - pos - 4);
-        arg.erase(0, arg.find_first_not_of(" \t"));
-        arg.erase(arg.find_last_not_of(" \t") + 1);
-        
-        int size_val = 0;
-        bool found = false;
-        bool is_scalar = false;
-        for (const auto& ua : user_args) {
-            if (ua.name == arg) {
-                is_scalar = true;
-                break;
-            }
-        }
-        if (!is_scalar) {
-            if (user_arrays.find(arg) != user_arrays.end()) {
-                size_val = (int)user_arrays[arg].size();
-                found = true;
-            } else {
-                bool is_arr = false;
-                std::string parse_err;
-                auto vec = parseArrayExpr(arg, is_arr, parse_err);
-                if (is_arr && parse_err.empty()) {
-                    size_val = (int)vec.size();
-                    found = true;
-                }
-            }
-        }
-        if (found) {
-            res.replace(pos, close - pos + 1, std::to_string(size_val));
-            pos += std::to_string(size_val).size();
-        } else {
-            pos += 4;
-        }
-    }
-    return res;
-}
-
-static std::vector<std::string> splitTopLevelArgs(const std::string& inside) {
-    std::vector<std::string> args;
-    int p_depth = 0, b_depth = 0;
-    bool in_q = false;
-    std::string cur;
-    for (char c : inside) {
-        if (c == '"') in_q = !in_q;
-        else if (!in_q) {
-            if (c == '(') p_depth++;
-            else if (c == ')') p_depth--;
-            else if (c == '[') b_depth++;
-            else if (c == ']') b_depth--;
-            else if (c == ',' && p_depth == 0 && b_depth == 0) {
-                size_t f = cur.find_first_not_of(" \t");
-                size_t l = cur.find_last_not_of(" \t");
-                args.push_back(f == std::string::npos ? "" : cur.substr(f, l - f + 1));
-                cur.clear();
-                continue;
-            }
-        }
-        cur += c;
-    }
-    size_t f = cur.find_first_not_of(" \t");
-    size_t l = cur.find_last_not_of(" \t");
-    args.push_back(f == std::string::npos ? "" : cur.substr(f, l - f + 1));
-    return args;
-}
-
-static bool isValidLoopIdent(const std::string& s) {
-    if (s.empty() || s == "pi" || s == "e" || s == "phi") return false;
-    if (!std::isalpha((unsigned char)s[0]) && s[0] != '_') return false;
-    for (char c : s) {
-        if (!std::isalnum((unsigned char)c) && c != '_') return false;
-    }
-    return true;
+static bool isValidLoopIdent(const std::string& name) {
+    return name != "pi" && name != "e" && name != "phi" && expression::isIdentifier(name);
 }
 
 static bool isDefinedScalarName(const std::string& s) {
-    for (const auto& ua : user_args) if (ua.name == s) return true;
-    for (const auto& uc : user_consts) if (uc.name == s) return true;
+    if (scopedScalar(s)) return true;
+    for (const auto& ua : engineState().user_args) if (ua.name == s) return true;
+    for (const auto& uc : engineState().user_consts) if (uc.name == s) return true;
     return false;
 }
 
 static bool exprReferencesIdent(const std::string& expr, const std::string& ident) {
-    size_t pos = 0;
-    while ((pos = expr.find(ident, pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)expr[pos - 1]) && expr[pos - 1] != '_'));
-        bool next_ok = (pos + ident.size() == expr.size() || (!std::isalnum((unsigned char)expr[pos + ident.size()]) && expr[pos + ident.size()] != '_'));
-        if (prev_ok && next_ok) return true;
-        pos += ident.size();
+    const auto tokens = expression::tokenize(expr);
+    return std::any_of(tokens.begin(), tokens.end(), [&](const auto& token) {
+        return token.kind == expression::Kind::Word && token.text == ident;
+    });
+}
+
+static std::optional<double> evaluateAst(const std::string& source, std::string& error,
+    expression::ArithmeticExpression::PreparedExpression* prepared = nullptr);
+
+static double evaluateIndexedReduction(std::string_view name, const std::string& index,
+        double start, double end, const std::string& body, std::string& err) {
+    const double int64Limit = std::ldexp(1.0, 63);
+    if (!std::isfinite(start) || !std::isfinite(end) || start < -int64Limit || start >= int64Limit || end < -int64Limit || end >= int64Limit) {
+        err = "Overflow Error: invalid loop bounds"; return std::numeric_limits<double>::quiet_NaN();
     }
+    int64_t i_start = static_cast<int64_t>(std::llround(start));
+    int64_t i_end = static_cast<int64_t>(std::llround(end));
+    const long double count = i_end < i_start ? 0 : static_cast<long double>(i_end) - static_cast<long double>(i_start) + 1;
+    if (count > loopIterationsRemaining) {
+        err = "Overflow Error: loop limit exceeded";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    auto arguments = scalarBindings.empty() ? std::vector<UserArg>{} : scalarBindings.back();
+    size_t var_idx = 0;
+    while (var_idx < arguments.size() && arguments[var_idx].name != index) ++var_idx;
+    if (var_idx == arguments.size()) arguments.push_back({index, 0.0});
+    auto arrays = arrayBindings.empty() ? std::map<std::string, std::vector<double>>{} : arrayBindings.back();
+    arrays.erase(index);
+    ScalarBindingScope scope(std::move(arguments), std::move(arrays));
+
+    double acc = 0.0;
+    if (name == "prod") acc = 1.0;
+    else if (name == "min") acc = std::numeric_limits<double>::infinity();
+    else if (name == "max") acc = -std::numeric_limits<double>::infinity();
+
+    expression::ArithmeticExpression::PreparedExpression preparedBody;
+    for (int64_t idx = i_start; idx <= i_end;) {
+        if (loopIterationsRemaining == 0) { err = "Overflow Error: loop limit exceeded"; return std::numeric_limits<double>::quiet_NaN(); }
+        --loopIterationsRemaining;
+        scalarBindings.back()[var_idx].val = static_cast<double>(idx);
+        const auto astValue = evaluateAst(body, err, &preparedBody);
+        if (!astValue && err.empty()) err = "Math Error";
+        const double step_v = astValue ? *astValue : std::numeric_limits<double>::quiet_NaN();
+        if (err.empty() && engineState().g_last_eval_is_array) err = "Loop body must be scalar";
+        if (!err.empty()) {
+            return std::numeric_limits<double>::quiet_NaN();
+        }
+        if (name == "sum") acc += step_v;
+        else if (name == "prod") acc *= step_v;
+        else if (name == "min") { if (step_v < acc) acc = step_v; }
+        else if (name == "max") { if (step_v > acc) acc = step_v; }
+        if (idx == i_end) break;
+        ++idx;
+    }
+    if (i_start > i_end && (name == "min" || name == "max")) acc = 0.0;
+    return acc;
+}
+
+static bool acceptsBareUnary(std::string_view name);
+
+static const expression::ArithmeticExpression::IndexedReduction indexedReduction{
+    [](std::string_view index, std::string_view body) {
+        const std::string name(index);
+        return isValidLoopIdent(name) && (!isDefinedScalarName(name) || exprReferencesIdent(std::string(body), name));
+    },
+    [](std::string_view name, std::string_view index, double start, double end, std::string_view body, std::string& error) {
+        return evaluateIndexedReduction(name, std::string(index), start, end, std::string(body), error);
+    }, acceptsBareUnary
+};
+
+using UnaryFunction = double (*)(double);
+static const std::map<std::string, UnaryFunction>& unaryFunctions() {
+    static const std::map<std::string, UnaryFunction> functions = {
+        {"print", +[](double value) { return value; }},
+        {"sin", custom_sin},
+        {"cos", custom_cos},
+        {"tan", custom_tan},
+        {"tg", custom_tan},
+        {"cot", custom_cot},
+        {"ctg", custom_cot},
+        {"ctan", custom_ctan},
+        {"sec", custom_sec},
+        {"csc", custom_csc},
+        {"cosec", custom_csc},
+        {"asin", custom_asin},
+        {"arcsin", custom_asin},
+        {"acos", custom_acos},
+        {"arccos", custom_acos},
+        {"atan", custom_atan},
+        {"arctan", custom_atan},
+        {"atg", custom_atan},
+        {"arctg", custom_atan},
+        {"acot", custom_acot},
+        {"arccot", custom_acot},
+        {"actg", custom_acot},
+        {"arcctg", custom_acot},
+        {"actan", custom_acot},
+        {"arcctan", custom_acot},
+        {"asec", custom_asec},
+        {"arcsec", custom_asec},
+        {"acsc", custom_acsc},
+        {"arccsc", custom_acsc},
+        {"acosec", custom_acsc},
+        {"arccosec", custom_acsc},
+        {"sinh", custom_sinh},
+        {"sh", custom_sinh},
+        {"cosh", custom_cosh},
+        {"ch", custom_cosh},
+        {"tanh", custom_tanh},
+        {"th", custom_tanh},
+        {"coth", custom_coth},
+        {"cth", custom_coth},
+        {"ctgh", custom_coth},
+        {"ctanh", custom_coth},
+        {"sech", custom_sech},
+        {"sch", custom_sech},
+        {"csch", custom_csch},
+        {"cosech", custom_csch},
+        {"asinh", custom_asinh},
+        {"ahsin", custom_asinh},
+        {"arcsinh", custom_asinh},
+        {"arsinh", custom_asinh},
+        {"arsh", custom_asinh},
+        {"acosh", custom_acosh},
+        {"ahcos", custom_acosh},
+        {"arccosh", custom_acosh},
+        {"arcosh", custom_acosh},
+        {"arch", custom_acosh},
+        {"atanh", custom_atanh},
+        {"ahtan", custom_atanh},
+        {"arctanh", custom_atanh},
+        {"artanh", custom_atanh},
+        {"arth", custom_atanh},
+        {"artg", custom_atanh},
+        {"arctgh", custom_atanh},
+        {"acoth", custom_acoth},
+        {"ahcot", custom_acoth},
+        {"arccoth", custom_acoth},
+        {"arcoth", custom_acoth},
+        {"arcth", custom_acoth},
+        {"ahcoth", custom_acoth},
+        {"asech", custom_asech},
+        {"ahsec", custom_asech},
+        {"arcsech", custom_asech},
+        {"arsech", custom_asech},
+        {"ahsech", custom_asech},
+        {"acsch", custom_acsch},
+        {"ahcsc", custom_acsch},
+        {"arccsch", custom_acsch},
+        {"arcsch", custom_acsch},
+        {"acosech", custom_acsch},
+        {"arccosech", custom_acsch},
+        {"ahcsch", custom_acsch},
+        {"deg2rad", custom_deg2rad},
+        {"d2r", custom_deg2rad},
+        {"rad2deg", custom_rad2deg},
+        {"r2d", custom_rad2deg},
+        {"sqrt", custom_sqrt},
+        {"ln", custom_ln},
+        {"log", custom_log10},
+        {"log10", custom_log10},
+        {"log2", custom_log2},
+        {"sgn", custom_sgn},
+        {"trunc", custom_trunc},
+        {"fact", custom_fact},
+        {"fib", custom_fib},
+        {"abs", custom_abs},
+        {"cbrt", [](double value) { return std::cbrt(value); }},
+        {"exp", [](double value) { return std::exp(value); }},
+        {"floor", [](double value) { return std::floor(value); }},
+        {"ceil", [](double value) { return std::ceil(value); }},
+    };
+    return functions;
+}
+
+
+using BinaryFunction = expression::ArithmeticExpression::BinaryFunction;
+static const std::map<std::string, BinaryFunction>& binaryFunctions() {
+    static const std::map<std::string, BinaryFunction> functions = {
+        {"atan2", custom_atan2}, {"logb", custom_logb}, {"mod", custom_mod},
+        {"C", custom_C}, {"Cnk", custom_C}, {"P", custom_P},
+        {"rUni", custom_rUni}, {"rNor", custom_rNor}, {"dot", custom_dot},
+    };
+    return functions;
+}
+
+struct VariadicBuiltin {
+    expression::ArithmeticExpression::VariadicFunction evaluate;
+};
+
+template<te_fun24 Function>
+static constexpr VariadicBuiltin variadicBuiltin{
+    [](const expression::ArithmeticExpression::Arguments& args) {
+        return std::apply(Function, args);
+    }
+};
+
+static const std::map<std::string, VariadicBuiltin>& variadicFunctions() {
+    static const std::map<std::string, VariadicBuiltin> functions = {
+        {"gcd", variadicBuiltin<variadic_gcd>},
+        {"lcm", variadicBuiltin<variadic_lcm>},
+        {"mean", variadicBuiltin<variadic_mean>},
+        {"median", variadicBuiltin<variadic_median>},
+        {"mode", variadicBuiltin<variadic_mode>},
+        {"var", variadicBuiltin<variadic_var>},
+        {"std", variadicBuiltin<variadic_std>},
+        {"sum", variadicBuiltin<variadic_sum>},
+        {"prod", variadicBuiltin<variadic_prod>},
+        {"min", variadicBuiltin<variadic_min>},
+        {"max", variadicBuiltin<variadic_max>},
+    };
+    return functions;
+}
+
+static bool shadowsBuiltin(std::string_view name) {
+    if (scopedScalar(name)) return true;
+    const auto& state = engineState();
+    for (const auto& variable : state.user_args)
+        if (variable.name == name) return true;
+    for (const auto& constant : state.user_consts)
+        if (constant.name == name) return true;
+    for (const auto& function : state.user_script_funcs)
+        if (function.name == name) return true;
+    for (const auto& definition : state.user_funcs)
+        if (expression::trim(std::string_view(definition).substr(0, definition.find('('))) == name)
+            return true;
     return false;
 }
 
-static std::string preprocessInlineConditionalsAndLoops(const std::string& s, std::string& err) {
-    std::string res = s;
-
-    // 1. Handle iff(...) and if(...)
-    static const std::vector<std::string> cond_funcs = {"iff", "if"};
-    for (const auto& fname : cond_funcs) {
-        std::string target = fname + "(";
-        size_t pos = 0;
-        while ((pos = res.find(target, pos)) != std::string::npos) {
-            bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-            if (!prev_ok) { pos += target.size(); continue; }
-            int depth = 1;
-            int b_depth = 0;
-            size_t close = pos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') b_depth++;
-                else if (res[close] == ']') b_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
-
-            std::string inside = res.substr(pos + target.size(), close - pos - target.size());
-            auto args = splitTopLevelArgs(inside);
-            if (fname == "if") {
-                if (args.size() != 3) {
-                    err = "if() requires 3 arguments";
-                    return res;
-                }
-                double cond_v = evaluate(args[0], err);
-                if (!err.empty()) return res;
-                const std::string& branch = (std::abs(cond_v) > 1e-12) ? args[1] : args[2];
-                double val = evaluate(branch, err);
-                if (!err.empty()) return res;
-                std::string rep = fmtInternal(val);
-                res.replace(pos, close - pos + 1, rep);
-                pos += rep.size();
-            } else {
-                if (args.size() < 3 || args.size() % 2 == 0) {
-                    err = "iff() requires odd number of arguments >= 3";
-                    return res;
-                }
-                double val = 0.0;
-                bool matched = false;
-                for (size_t k = 0; k + 1 < args.size(); k += 2) {
-                    double cond_v = evaluate(args[k], err);
-                    if (!err.empty()) return res;
-                    if (std::abs(cond_v) > 1e-12) {
-                        val = evaluate(args[k + 1], err);
-                        if (!err.empty()) return res;
-                        matched = true;
-                        break;
-                    }
-                }
-                if (!matched) {
-                    val = evaluate(args.back(), err);
-                    if (!err.empty()) return res;
-                }
-                std::string rep = fmtInternal(val);
-                res.replace(pos, close - pos + 1, rep);
-                pos += rep.size();
-            }
-        }
-    }
-
-    // 2. Handle 4-argument inline loops: sum(i, a, b, expr), prod(i, a, b, expr), min(i, a, b, expr), max(i, a, b, expr)
-    static const std::vector<std::string> loop_funcs = {"sum", "prod", "min", "max"};
-    for (const auto& fname : loop_funcs) {
-        std::string target = fname + "(";
-        size_t pos = 0;
-        while ((pos = res.find(target, pos)) != std::string::npos) {
-            bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-            if (!prev_ok) { pos += target.size(); continue; }
-            int depth = 1;
-            int b_depth = 0;
-            size_t close = pos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') b_depth++;
-                else if (res[close] == ']') b_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
-
-            std::string inside = res.substr(pos + target.size(), close - pos - target.size());
-            auto args = splitTopLevelArgs(inside);
-            if (args.size() == 4 && isValidLoopIdent(args[0]) && (!isDefinedScalarName(args[0]) || exprReferencesIdent(args[3], args[0]))) {
-                double start_d = evaluate(args[1], err);
-                if (!err.empty()) return res;
-                double end_d = evaluate(args[2], err);
-                if (!err.empty()) return res;
-                int64_t i_start = static_cast<int64_t>(std::llround(start_d));
-                int64_t i_end = static_cast<int64_t>(std::llround(end_d));
-                if (i_end - i_start > 100000) {
-                    err = "Overflow Error: loop limit exceeded";
-                    return res;
-                }
-                auto old_args = user_args;
-                size_t var_idx = user_args.size();
-                for (size_t ui = 0; ui < user_args.size(); ++ui) {
-                    if (user_args[ui].name == args[0]) { var_idx = ui; break; }
-                }
-                if (var_idx == user_args.size()) {
-                    user_args.push_back({args[0], 0.0});
-                }
-
-                double acc = 0.0;
-                if (fname == "prod") acc = 1.0;
-                else if (fname == "min") acc = std::numeric_limits<double>::infinity();
-                else if (fname == "max") acc = -std::numeric_limits<double>::infinity();
-
-                for (int64_t idx = i_start; idx <= i_end; ++idx) {
-                    user_args[var_idx].val = static_cast<double>(idx);
-                    double step_v = evaluate(args[3], err);
-                    if (!err.empty()) {
-                        user_args = old_args;
-                        return res;
-                    }
-                    if (fname == "sum") acc += step_v;
-                    else if (fname == "prod") acc *= step_v;
-                    else if (fname == "min") { if (step_v < acc) acc = step_v; }
-                    else if (fname == "max") { if (step_v > acc) acc = step_v; }
-                }
-                user_args = old_args;
-                if (i_start > i_end && (fname == "min" || fname == "max")) acc = 0.0;
-                std::string rep = fmtInternal(acc);
-                res.replace(pos, close - pos + 1, rep);
-                pos += rep.size();
-            } else {
-                pos += target.size();
-            }
-        }
-    }
-
-    return res;
+static BinaryFunction lookupBinary(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
+    const auto found = binaryFunctions().find(std::string(name));
+    return found == binaryFunctions().end() ? nullptr : found->second;
 }
 
-std::string preprocessVectorStats(const std::string& s) {
-    static const std::vector<std::string> funcs = {"mean", "median", "mode", "var", "std", "sum", "prod", "min", "max"};
-    std::string res = s;
-
-    // 1. Process 2-argument vector function: dot(A, B)
-    size_t pos = 0;
-    while ((pos = res.find("dot(", pos)) != std::string::npos) {
-        bool prev_ok = (pos == 0 || (!std::isalnum((unsigned char)res[pos - 1]) && res[pos - 1] != '_'));
-        if (!prev_ok) { pos += 4; continue; }
-        
-        int depth = 1;
-        int bracket_depth = 0;
-        size_t close = pos + 4;
-        size_t comma = std::string::npos;
-        while (close < res.size() && depth > 0) {
-            if (res[close] == '(') depth++;
-            else if (res[close] == ')') depth--;
-            else if (res[close] == '[') bracket_depth++;
-            else if (res[close] == ']') bracket_depth--;
-            else if (res[close] == ',' && depth == 1 && bracket_depth == 0) comma = close;
-            if (depth > 0) close++;
-        }
-        if (depth > 0 || comma == std::string::npos) break;
-
-        std::string arg1_str = res.substr(pos + 4, comma - pos - 4);
-        std::string arg2_str = res.substr(comma + 1, close - comma - 1);
-        
-        bool is1_arr = false, is2_arr = false;
-        std::string err1, err2;
-        auto vec1 = parseArrayExpr(arg1_str, is1_arr, err1);
-        auto vec2 = parseArrayExpr(arg2_str, is2_arr, err2);
-
-        if (is1_arr && is2_arr && err1.empty() && err2.empty() && vec1.size() == vec2.size() && !vec1.empty()) {
-            double dot_val = 0.0;
-            for (size_t i = 0; i < vec1.size(); ++i) {
-                dot_val += vec1[i] * vec2[i];
-            }
-            std::string rep = fmtInternal(dot_val);
-            res.replace(pos, close - pos + 1, rep);
-            pos += rep.size();
-        } else {
-            pos += 4;
-        }
-    }
-
-    // 2. Process 1-argument vector stats functions (mean, median, mode, var, std, sum, prod, min, max)
-    for (const auto& fname : funcs) {
-        std::string target = fname + "(";
-        size_t fpos = 0;
-        while ((fpos = res.find(target, fpos)) != std::string::npos) {
-            bool prev_ok = (fpos == 0 || (!std::isalnum((unsigned char)res[fpos - 1]) && res[fpos - 1] != '_'));
-            if (!prev_ok) { fpos += target.size(); continue; }
-
-            int depth = 1;
-            int bracket_depth = 0;
-            size_t close = fpos + target.size();
-            while (close < res.size() && depth > 0) {
-                if (res[close] == '(') depth++;
-                else if (res[close] == ')') depth--;
-                else if (res[close] == '[') bracket_depth++;
-                else if (res[close] == ']') bracket_depth--;
-                if (depth > 0) close++;
-            }
-            if (depth > 0) break;
-
-            std::string arg = res.substr(fpos + target.size(), close - fpos - target.size());
-            arg.erase(0, arg.find_first_not_of(" \t"));
-            arg.erase(arg.find_last_not_of(" \t") + 1);
-
-            bool is_arr = false;
-            std::string parse_err;
-            auto vec = parseArrayExpr(arg, is_arr, parse_err);
-
-            if (is_arr && parse_err.empty() && !vec.empty()) {
-                double computed_val = 0.0;
-                if (fname == "mean") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    computed_val = sum / vec.size();
-                } else if (fname == "sum") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    computed_val = sum;
-                } else if (fname == "prod") {
-                    double prod = 1.0;
-                    for (double v : vec) prod *= v;
-                    computed_val = prod;
-                } else if (fname == "min") {
-                    double m = vec[0];
-                    for (double v : vec) if (v < m) m = v;
-                    computed_val = m;
-                } else if (fname == "max") {
-                    double m = vec[0];
-                    for (double v : vec) if (v > m) m = v;
-                    computed_val = m;
-                } else if (fname == "median") {
-                    std::vector<double> sorted = vec;
-                    std::sort(sorted.begin(), sorted.end());
-                    size_t sz = sorted.size();
-                    if (sz % 2 == 0) computed_val = (sorted[sz/2 - 1] + sorted[sz/2]) / 2.0;
-                    else computed_val = sorted[sz/2];
-                } else if (fname == "mode") {
-                    std::map<double, int> counts;
-                    for (double v : vec) counts[v]++;
-                    double bval = vec[0];
-                    int maxc = 0;
-                    for (const auto& kv : counts) {
-                        if (kv.second > maxc) { maxc = kv.second; bval = kv.first; }
-                    }
-                    computed_val = bval;
-                } else if (fname == "var") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    double m = sum / vec.size();
-                    double vsum = 0.0;
-                    for (double v : vec) vsum += (v - m) * (v - m);
-                    computed_val = (vec.size() > 1) ? vsum / (vec.size() - 1) : 0.0;
-                } else if (fname == "std") {
-                    double sum = 0.0;
-                    for (double v : vec) sum += v;
-                    double m = sum / vec.size();
-                    double vsum = 0.0;
-                    for (double v : vec) vsum += (v - m) * (v - m);
-                    double var_v = (vec.size() > 1) ? vsum / (vec.size() - 1) : 0.0;
-                    computed_val = std::sqrt(var_v);
-                }
-
-                std::string rep = fmtInternal(computed_val);
-                res.replace(fpos, close - fpos + 1, rep);
-                fpos += rep.size();
-            } else {
-                fpos += target.size();
-            }
-        }
-    }
-
-    return res;
+static UnaryFunction lookupUnary(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
+    const auto found = unaryFunctions().find(std::string(name));
+    return found == unaryFunctions().end() ? nullptr : found->second;
 }
 
-static bool s_in_array_fallback = false;
+static expression::ArithmeticExpression::VariadicFunction lookupVariadic(std::string_view name) {
+    if (shadowsBuiltin(name)) return nullptr;
+    const auto found = variadicFunctions().find(std::string(name));
+    return found == variadicFunctions().end() ? nullptr : found->second.evaluate;
+}
+
+static const std::vector<double>* lookupArray(std::string_view name) {
+    if (const auto array = scopedArray(name)) return array;
+    if (scopedScalar(name)) return nullptr;
+    const auto& arrays = engineState().user_arrays;
+    const auto found = arrays.find(std::string(name));
+    return found == arrays.end() ? nullptr : &found->second;
+}
+
+static std::optional<double> lookupScalar(std::string_view name) {
+    if (scopedArray(name)) return std::nullopt;
+    if (const auto argument = scopedScalar(name)) return argument;
+    const auto& state = engineState();
+    if (name.size() > 1 && name.front() == 'e') {
+        size_t number = 0;
+        const auto end = name.data() + name.size();
+        const auto parsed = std::from_chars(name.data() + 1, end, number);
+        if (parsed.ec == std::errc{} && parsed.ptr == end &&
+            number >= state.history_first_number &&
+            number - state.history_first_number < state.history.size() &&
+            state.history.size() - (number - state.history_first_number) <= MAX_HISTORY_VALUES &&
+            name[1] != '0') {
+            return state.history[number - state.history_first_number];
+        }
+    }
+    for (auto it = state.user_consts.rbegin(); it != state.user_consts.rend(); ++it)
+        if (it->name == name) return it->val;
+    for (auto it = state.user_args.rbegin(); it != state.user_args.rend(); ++it)
+        if (it->name == name) return it->val;
+    if (name == "pi") return std::acos(-1.0);
+    if (name == "e") return std::exp(1.0);
+    if (state.user_arrays.contains(std::string(name)) || shadowsBuiltin(name)) return std::nullopt;
+    const auto& builtins = te_parser::builtin_functions();
+    const auto builtin = builtins.find(te_variable{std::string(name), 0.0});
+    if (builtin != builtins.end()) {
+        if (const auto function = std::get_if<te_fun0>(&builtin->m_value)) return (*function)();
+    }
+    return std::nullopt;
+}
+
+static bool acceptsBareUnary(std::string_view name) {
+    if (shadowsBuiltin(name) || scopedArray(name)) return false;
+    if (name == "round" || lookupUnary(name)) return true;
+    const auto& builtins = te_parser::builtin_functions();
+    const auto found = builtins.find(te_variable{std::string(name), 0.0});
+    return found != builtins.end() && std::holds_alternative<te_fun1>(found->m_value);
+}
+
+static expression::ArithmeticExpression::CustomFunction lookupInheritedBuiltin(std::string_view name) {
+    if (unaryFunctions().contains(std::string(name)) || binaryFunctions().contains(std::string(name)) ||
+        variadicFunctions().contains(std::string(name))) return {};
+    const auto& functions = te_parser::builtin_functions();
+    const auto found = functions.find(te_variable{std::string(name), 0.0});
+    if (found == functions.end()) return {};
+    return std::visit([&](const auto function) -> expression::ArithmeticExpression::CustomFunction {
+        using Function = std::decay_t<decltype(function)>;
+        if constexpr (te_is_function_v<Function>) {
+            constexpr size_t arity = te_function_arity<Function>;
+            expression::ArithmeticExpression::CustomFunction result{arity,
+                [function](const std::vector<double>& values, std::string& error) {
+                    std::array<double, arity> arguments;
+                    arguments.fill(std::numeric_limits<double>::quiet_NaN());
+                    std::copy(values.begin(), values.end(), arguments.begin());
+                    try { return std::apply(function, arguments); }
+                    catch (const std::exception& failure) {
+                        error = failure.what();
+                        return std::numeric_limits<double>::quiet_NaN();
+                    }
+                }};
+            result.variadic = (found->m_type & TE_VARIADIC) != 0;
+            result.acceptsNonFinite = true;
+            return result;
+        } else return {};
+    }, found->m_value);
+}
+
+static expression::ArithmeticExpression::CustomFunction lookupCustomFunction(std::string_view name) {
+    if (scopedScalar(name) || scopedArray(name)) return {};
+    for (const auto& function : engineState().user_script_funcs) {
+        if (function.name != name) continue;
+        expression::ArithmeticExpression::CustomFunction result;
+        result.arity = function.params.size();
+        result.invokeArguments = [name = std::string(name)](const std::vector<expression::ArithmeticExpression::Argument>& arguments,
+                std::string& error, std::optional<std::vector<double>>& array) {
+            std::vector<double> values;
+            std::vector<std::optional<std::vector<double>>> arrays;
+            for (const auto& argument : arguments) { values.push_back(argument.scalar); arrays.push_back(argument.array); }
+            // Script functions use their own parameters and session variables.
+            ScalarBindingScope scope(std::vector<UserArg>{});
+            return executeScriptFunc(name, values, error, nullptr, &array, &arrays);
+        };
+        return result;
+    }
+    for (const auto& definition : engineState().user_funcs) {
+        const auto source = std::string_view(definition);
+        if (expression::trim(source.substr(0, source.find('('))) != name) continue;
+        auto parsed = parseUserFunctionDefinition(source);
+        if (!parsed) continue;
+        expression::ArithmeticExpression::CustomFunction result;
+        result.arity = parsed->params.size();
+        result.invokeArguments = [function = std::move(*parsed)](const std::vector<expression::ArithmeticExpression::Argument>& values,
+                std::string& error, std::optional<std::vector<double>>& array) {
+            static thread_local unsigned depth = 0;
+            if (depth >= 64) {
+                error = "Function recursion limit exceeded";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            struct CallDepth {
+                unsigned& value;
+                explicit CallDepth(unsigned& current) : value(current) { ++value; }
+                ~CallDepth() { --value; }
+            } callDepth(depth);
+            std::vector<UserArg> arguments;
+            std::map<std::string, std::vector<double>> arrays;
+            for (size_t i = 0; i < values.size(); ++i) {
+                if (values[i].array) arrays.emplace(function.params[i], *values[i].array);
+                else arguments.push_back({function.params[i], values[i].scalar});
+            }
+            ScalarBindingScope scope(std::move(arguments), std::move(arrays));
+            const double result = evaluate(function.body, error);
+            if (error.empty() && engineState().g_last_eval_is_array) array = engineState().g_last_eval_array;
+            return result;
+        };
+        return result;
+    }
+    return lookupInheritedBuiltin(name);
+}
+
+static std::optional<double> evaluateAst(const std::string& source, std::string& error,
+        expression::ArithmeticExpression::PreparedExpression* prepared) {
+    auto& state = engineState();
+    state.g_math_domain_err.clear();
+    state.g_last_result_angle = AngleUnit::NONE;
+    state.g_last_eval_is_array = false;
+    std::optional<std::vector<double>> array;
+    const auto result = expression::ArithmeticExpression::evaluate(source, error, lookupScalar,
+        lookupUnary, lookupArray, lookupBinary, lookupVariadic, lookupCustomFunction, &array, &indexedReduction, prepared);
+    if (!result) return std::nullopt;
+    if (!state.g_math_domain_err.empty()) error = state.g_math_domain_err;
+    state.g_last_eval_is_array = array.has_value();
+    if (array) {
+        state.g_last_eval_array = std::move(*array);
+    }
+    return result;
+}
 
 double evaluate(const std::string& expr_str, std::string& err) {
+    struct LoopBudgetScope {
+        LoopBudgetScope() { if (loopEvaluationDepth++ == 0) loopIterationsRemaining = 100000; }
+        ~LoopBudgetScope() { --loopEvaluationDepth; }
+    } loopBudgetScope;
     err = "";
-    g_math_domain_err = "";
-    g_last_result_angle = AngleUnit::NONE;
-    g_last_eval_is_array = false;
+    engineState().g_math_domain_err = "";
+    engineState().g_last_result_angle = AngleUnit::NONE;
+    engineState().g_last_eval_is_array = false;
     std::string help_str;
     if (preprocessHelp(expr_str, help_str)) {
         err = help_str;
@@ -1166,285 +504,77 @@ double evaluate(const std::string& expr_str, std::string& err) {
         return std::numeric_limits<double>::quiet_NaN();
     }
     
-    std::string subbed = substituteUserFuncs(expr_str, err);
-    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
+    if (const auto arithmetic = evaluateAst(expr_str, err)) return *arithmetic;
 
-    subbed = preprocessArrayLookups(subbed, err);
-    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
-
-    subbed = preprocessInlineConditionalsAndLoops(subbed, err);
-    if (!err.empty()) return std::numeric_limits<double>::quiet_NaN();
-    
-    std::string preprocessed = preprocessExpression(subbed);
-    preprocessed = preprocessPercentage(preprocessed);
-    preprocessed = preprocessFactorial(preprocessed);
-    preprocessed = replaceLogicalWords(preprocessed);
-    preprocessed = preprocessLen(preprocessed);
-    preprocessed = preprocessVectorStats(preprocessed);
-
-    std::string rel_err;
-    double rel_val = evaluateRelational(preprocessed, rel_err);
-    if (rel_err.empty() && !std::isnan(rel_val)) {
-        return rel_val;
-    }
-    if (!rel_err.empty()) {
-        err = rel_err;
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    static te_parser s_tep;
-    static bool s_tep_initialized = false;
-    if (!s_tep_initialized) {
-        s_tep.add_variable_or_function(te_variable{"sin", custom_sin});
-        s_tep.add_variable_or_function(te_variable{"cos", custom_cos});
-        s_tep.add_variable_or_function(te_variable{"tan", custom_tan});
-        s_tep.add_variable_or_function(te_variable{"tg", custom_tan});
-        s_tep.add_variable_or_function(te_variable{"cot", custom_cot});
-        s_tep.add_variable_or_function(te_variable{"ctg", custom_cot});
-        s_tep.add_variable_or_function(te_variable{"ctan", custom_ctan});
-        s_tep.add_variable_or_function(te_variable{"sec", custom_sec});
-        s_tep.add_variable_or_function(te_variable{"csc", custom_csc});
-        s_tep.add_variable_or_function(te_variable{"cosec", custom_csc});
-
-        s_tep.add_variable_or_function(te_variable{"asin", custom_asin});
-        s_tep.add_variable_or_function(te_variable{"arcsin", custom_asin});
-        s_tep.add_variable_or_function(te_variable{"acos", custom_acos});
-        s_tep.add_variable_or_function(te_variable{"arccos", custom_acos});
-        s_tep.add_variable_or_function(te_variable{"atan", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"arctan", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"atg", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"arctg", custom_atan});
-        s_tep.add_variable_or_function(te_variable{"atan2", custom_atan2});
-        s_tep.add_variable_or_function(te_variable{"acot", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arccot", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"actg", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arcctg", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"actan", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"arcctan", custom_acot});
-        s_tep.add_variable_or_function(te_variable{"asec", custom_asec});
-        s_tep.add_variable_or_function(te_variable{"arcsec", custom_asec});
-        s_tep.add_variable_or_function(te_variable{"acsc", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"arccsc", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"acosec", custom_acsc});
-        s_tep.add_variable_or_function(te_variable{"arccosec", custom_acsc});
-
-        s_tep.add_variable_or_function(te_variable{"sinh", custom_sinh});
-        s_tep.add_variable_or_function(te_variable{"sh", custom_sinh});
-        s_tep.add_variable_or_function(te_variable{"cosh", custom_cosh});
-        s_tep.add_variable_or_function(te_variable{"ch", custom_cosh});
-        s_tep.add_variable_or_function(te_variable{"tanh", custom_tanh});
-        s_tep.add_variable_or_function(te_variable{"th", custom_tanh});
-        s_tep.add_variable_or_function(te_variable{"coth", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"cth", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"ctgh", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"ctanh", custom_coth});
-        s_tep.add_variable_or_function(te_variable{"sech", custom_sech});
-        s_tep.add_variable_or_function(te_variable{"sch", custom_sech});
-        s_tep.add_variable_or_function(te_variable{"csch", custom_csch});
-        s_tep.add_variable_or_function(te_variable{"cosech", custom_csch});
-
-        s_tep.add_variable_or_function(te_variable{"asinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"ahsin", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arcsinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arsinh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"arsh", custom_asinh});
-        s_tep.add_variable_or_function(te_variable{"acosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"ahcos", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arccosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arcosh", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"arch", custom_acosh});
-        s_tep.add_variable_or_function(te_variable{"atanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"ahtan", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arctanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"artanh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arth", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"artg", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"arctgh", custom_atanh});
-        s_tep.add_variable_or_function(te_variable{"acoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"ahcot", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arccoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arcoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"arcth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"ahcoth", custom_acoth});
-        s_tep.add_variable_or_function(te_variable{"asech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"ahsec", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"arcsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"arsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"ahsech", custom_asech});
-        s_tep.add_variable_or_function(te_variable{"acsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"ahcsc", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arccsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arcsch", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"acosech", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"arccosech", custom_acsch});
-        s_tep.add_variable_or_function(te_variable{"ahcsch", custom_acsch});
-        
-        s_tep.add_variable_or_function(te_variable{"deg2rad", custom_deg2rad});
-        s_tep.add_variable_or_function(te_variable{"d2r", custom_deg2rad});
-        s_tep.add_variable_or_function(te_variable{"rad2deg", custom_rad2deg});
-        s_tep.add_variable_or_function(te_variable{"r2d", custom_rad2deg});
-        
-        s_tep.add_variable_or_function(te_variable{"sqrt", custom_sqrt});
-        s_tep.add_variable_or_function(te_variable{"ln", custom_ln});
-        s_tep.add_variable_or_function(te_variable{"log", custom_log10});
-        s_tep.add_variable_or_function(te_variable{"log10", custom_log10});
-        s_tep.add_variable_or_function(te_variable{"log2", custom_log2});
-        s_tep.add_variable_or_function(te_variable{"logb", custom_logb});
-        s_tep.add_variable_or_function(te_variable{"mod", custom_mod});
-        s_tep.add_variable_or_function(te_variable{"sgn", custom_sgn});
-        s_tep.add_variable_or_function(te_variable{"trunc", custom_trunc});
-        s_tep.add_variable_or_function(te_variable{"fact", custom_fact});
-        s_tep.add_variable_or_function(te_variable{"C", custom_C});
-        s_tep.add_variable_or_function(te_variable{"Cnk", custom_C});
-        s_tep.add_variable_or_function(te_variable{"P", custom_P});
-        s_tep.add_variable_or_function(te_variable{"gcd", variadic_gcd, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"lcm", variadic_lcm, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"fib", custom_fib});
-        s_tep.add_variable_or_function(te_variable{"rUni", custom_rUni});
-        s_tep.add_variable_or_function(te_variable{"rNor", custom_rNor});
-        s_tep.add_variable_or_function(te_variable{"abs", custom_abs});
-        s_tep.add_variable_or_function(te_variable{"dot", custom_dot});
-        s_tep.add_variable_or_function(te_variable{"print", [](double x) { return x; }});
-        
-        s_tep.add_variable_or_function(te_variable{"mean", variadic_mean, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"median", variadic_median, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"mode", variadic_mode, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"var", variadic_var, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"std", variadic_std, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"sum", variadic_sum, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"prod", variadic_prod, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"min", variadic_min, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep.add_variable_or_function(te_variable{"max", variadic_max, static_cast<te_variable_flags>(TE_PURE | TE_VARIADIC)});
-        s_tep_initialized = true;
-    }
-
-    auto& var_set = s_tep.get_variables_and_functions();
-    std::vector<te_variable> shadowed_builtins;
-    std::vector<te_variable> added_vars;
-
-    auto add_dyn_var = [&](const std::string& name, const double* ptr) {
-        te_variable v{name, ptr};
-        auto it = var_set.find(v);
-        if (it != var_set.end()) {
-            shadowed_builtins.push_back(*it);
-            var_set.erase(it);
-        }
-        var_set.insert(v);
-        added_vars.push_back(v);
-    };
-
-    // 1. Register user defined variables
-    for (size_t i = 0; i < user_args.size(); ++i) {
-        add_dyn_var(user_args[i].name, &user_args[i].val);
-    }
-    
-    // 2. Register user defined constants
-    for (size_t i = 0; i < user_consts.size(); ++i) {
-        add_dyn_var(user_consts[i].name, &user_consts[i].val);
-    }
-    
-    // 3. Register history variables (e1, e2, e3...)
-    if (!history.empty() && preprocessed.find('e') != std::string::npos) {
-        size_t start_h = (history.size() > 30) ? (history.size() - 30) : 0;
-        for (size_t i = start_h; i < history.size(); ++i) {
-            add_dyn_var("e" + std::to_string(i + 1), &history[i]);
-        }
-    }
-    
-    double val = s_tep.evaluate(preprocessed);
-    bool tep_ok = s_tep.success();
-    std::string tep_err_msg = tep_ok ? "" : s_tep.get_last_error_message();
-    int64_t tep_err_pos = tep_ok ? -1 : s_tep.get_last_error_position();
-
-    for (const auto& v : added_vars) {
-        var_set.erase(v);
-    }
-    for (auto it = shadowed_builtins.rbegin(); it != shadowed_builtins.rend(); ++it) {
-        var_set.insert(*it);
-    }
-    
-    if (!tep_ok) {
-        if (!g_math_domain_err.empty()) {
-            err = g_math_domain_err;
-            return std::numeric_limits<double>::quiet_NaN();
-        }
-        if (!s_in_array_fallback) {
-            s_in_array_fallback = true;
-            bool is_arr = false;
-            std::string arr_err;
-            std::vector<double> arr_res = parseArrayExpr(subbed, is_arr, arr_err);
-            s_in_array_fallback = false;
-            if (!arr_err.empty()) {
-                err = arr_err;
-                return std::numeric_limits<double>::quiet_NaN();
-            }
-            if (is_arr) {
-                g_last_eval_is_array = true;
-                g_last_eval_array = arr_res;
-                return arr_res.empty() ? 0.0 : arr_res[0];
-            }
-            if (!arr_res.empty()) {
-                return arr_res[0];
-            }
-        }
-        if (tep_err_msg.find("zero") != std::string::npos) {
-            err = "Division by Zero";
-        } else if (tep_err_msg.find("bracket") != std::string::npos || tep_err_msg.find("parenthes") != std::string::npos) {
-            err = "Mismatched Brackets";
-        } else if (tep_err_msg.find("unknown") != std::string::npos || tep_err_msg.find("token") != std::string::npos || tep_err_msg.find("symbol") != std::string::npos) {
-            if (tep_err_pos >= 0 && (size_t)tep_err_pos < preprocessed.size()) {
-                size_t end = tep_err_pos;
-                while (end < preprocessed.size() && (std::isalnum((unsigned char)preprocessed[end]) || preprocessed[end] == '_')) {
-                    end++;
-                }
-                std::string token = preprocessed.substr(tep_err_pos, end - tep_err_pos);
-                if (!token.empty()) {
-                    err = "Unknown Token: '" + token + "'";
-                } else {
-                    err = "Unknown Token";
-                }
-            } else {
-                err = "Unknown Token";
-            }
-        } else {
-            err = "Math Error";
-        }
-        return std::numeric_limits<double>::quiet_NaN();
-    }
-    
-    if (!g_math_domain_err.empty()) {
-        err = g_math_domain_err;
-    } else if (std::isinf(val)) {
-        if (preprocessed.find('/') != std::string::npos) {
-            err = "Division by Zero";
-        } else {
-            err = "Overflow Error";
-        }
-    } else if (std::isnan(val)) {
-        err = "Math Error";
-    }
-    
-    return val;
+    err = "Math Error";
+    return std::numeric_limits<double>::quiet_NaN();
 }
 
 double evaluateWithoutHistory(const std::string& expr_str, std::string& err) {
-    auto orig_history = history;
-    double val = evaluate(expr_str, err);
-    history = orig_history;
-    return val;
+    // evaluate() does not append or remove history entries.
+    return evaluate(expr_str, err);
+}
+
+size_t findAssignmentOperator(const std::string& text) {
+    return expression::assignmentOffset(text);
+}
+
+double assignArrayElement(const std::string& name, const std::string& index,
+                          const std::string& value, std::string& error) {
+    auto& arrays = engineState().user_arrays;
+    const auto failure = std::numeric_limits<double>::quiet_NaN();
+    if (arrays.find(name) == arrays.end()) {
+        error = "Array " + name + " not defined";
+        return failure;
+    }
+
+    const auto position = evaluateScalar(index, error, "Array index");
+    if (!error.empty()) return failure;
+    auto validate = [&]() {
+        const auto target = arrays.find(name);
+        if (target == arrays.end()) {
+            error = "Array " + name + " not defined";
+        } else if (!std::isfinite(position) || std::trunc(position) != position || position < 1 ||
+                   position > static_cast<double>(target->second.size())) {
+            error = "Invalid or out of bounds index for array " + name +
+                " (size " + std::to_string(target->second.size()) + ")";
+        }
+        return target;
+    };
+    validate();
+    if (!error.empty()) return failure;
+    const auto result = evaluateScalar(value, error, "Array element");
+    if (!error.empty()) return failure;
+
+    // Evaluation may call a script that replaces the target array.
+    const auto target = validate();
+    if (!error.empty()) return failure;
+    target->second[static_cast<size_t>(position) - 1] = result;
+    return result;
+}
+
+double evaluateScalar(const std::string& source, std::string& error, const char* context) {
+    const double value = evaluate(source, error);
+    if (error.empty() && engineState().g_last_eval_is_array) {
+        error = std::string(context) + " must be scalar";
+        return std::numeric_limits<double>::quiet_NaN();
+    }
+    return value;
 }
 
 double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefinition) {
     err = "";
     isDefinition = false;
-    g_last_result_angle = AngleUnit::NONE;
+    engineState().g_last_result_angle = AngleUnit::NONE;
     
-    size_t eq_pos = expr_str.find('=');
-    if (eq_pos != std::string::npos && 
-        expr_str.find("==") == std::string::npos && 
-        expr_str.find(">=") == std::string::npos && 
-        expr_str.find("<=") == std::string::npos && 
-        expr_str.find("!=") == std::string::npos) {
+    if (std::string name, index, value; parseArrayElementAssignment(expr_str, name, index, value)) {
+        const auto result = assignArrayElement(name, index, value, err);
+        isDefinition = err.empty();
+        return result;
+    }
+
+    size_t eq_pos = findAssignmentOperator(expr_str);
+    if (eq_pos != std::string::npos) {
         
         std::string lhs = expr_str.substr(0, eq_pos);
         std::string rhs = expr_str.substr(eq_pos + 1);
@@ -1465,13 +595,23 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             err = "Invalid Name";
             return std::numeric_limits<double>::quiet_NaN();
         }
+        std::string definitionName = lhs.substr(0, lhs.find('('));
+        definitionName.erase(definitionName.find_last_not_of(" \t") + 1);
+        if (isReservedName(definitionName)) {
+            err = "Reserved name: " + definitionName;
+            return std::numeric_limits<double>::quiet_NaN();
+        }
         if (lhs.find('(') == std::string::npos) {
-            if (!std::isalpha(lhs[0]) && lhs[0] != '_') {
+            if (isHistoryName(lhs)) {
+                err = "History variables are read-only";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            if (!std::isalpha(static_cast<unsigned char>(lhs[0])) && lhs[0] != '_') {
                 err = "Invalid Name";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             for (char c : lhs) {
-                if (!std::isalnum(c) && c != '_') {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
                     err = "Invalid Name";
                     return std::numeric_limits<double>::quiet_NaN();
                 }
@@ -1481,12 +621,12 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
             std::string func_name = lhs.substr(0, paren);
             func_name.erase(0, func_name.find_first_not_of(" \t"));
             func_name.erase(func_name.find_last_not_of(" \t") + 1);
-            if (func_name.empty() || (!std::isalpha(func_name[0]) && func_name[0] != '_')) {
+            if (func_name.empty() || (!std::isalpha(static_cast<unsigned char>(func_name[0])) && func_name[0] != '_')) {
                 err = "Invalid Name";
                 return std::numeric_limits<double>::quiet_NaN();
             }
             for (char c : func_name) {
-                if (!std::isalnum(c) && c != '_') {
+                if (!std::isalnum(static_cast<unsigned char>(c)) && c != '_') {
                     err = "Invalid Name";
                     return std::numeric_limits<double>::quiet_NaN();
                 }
@@ -1494,7 +634,7 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
         }
         
         if (!isConstDef) {
-            for (const auto& cn : user_consts) {
+            for (const auto& cn : engineState().user_consts) {
                 if (cn.name == lhs) {
                     err = "Const Error";
                     return std::numeric_limits<double>::quiet_NaN();
@@ -1505,43 +645,66 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
         isDefinition = true;
         
         if (lhs.find('(') != std::string::npos && lhs.find(')') != std::string::npos) {
+            if (rhs.empty()) { err = "Func Def Error: empty body"; return std::numeric_limits<double>::quiet_NaN(); }
             size_t open_p = lhs.find('(');
             std::string target_fname = lhs.substr(0, open_p);
             target_fname.erase(0, target_fname.find_first_not_of(" \t"));
             target_fname.erase(target_fname.find_last_not_of(" \t") + 1);
-
-            // If a function with the same name exists, remove it first so editing updates it in-place
-            user_funcs.erase(std::remove_if(user_funcs.begin(), user_funcs.end(), [&](const std::string& fn) {
-                size_t open = fn.find('(');
-                std::string fname = (open != std::string::npos) ? fn.substr(0, open) : fn;
-                fname.erase(0, fname.find_first_not_of(" \t"));
-                fname.erase(fname.find_last_not_of(" \t") + 1);
-                return fname == target_fname;
-            }), user_funcs.end());
-
-            user_funcs.push_back(expr_str);
-            std::string test_err = "";
-            substituteUserFuncs(lhs, test_err);
-            if (!test_err.empty()) {
-                user_funcs.pop_back();
-                err = "Func Def Error";
+            const size_t close_p = expression::matchingGroupEnd(lhs, open_p);
+            if (close_p == std::string::npos) {
+                err = "Func Def Error: mismatched parameters";
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            
+            if (!expression::trim(std::string_view(lhs).substr(close_p + 1)).empty()) {
+                err = "Func Def Error: unexpected text after parameters";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            if (!expression::isIdentifier(target_fname)) {
+                err = "Func Def Error: invalid function name";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            const auto parameterText = lhs.substr(open_p + 1, close_p - open_p - 1);
+            const auto parameters = expression::splitArguments(parameterText);
+            if (!expression::trim(parameterText).empty() && parameters.empty()) {
+                err = "Func Def Error: invalid parameter list";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            std::set<std::string> parameterNames;
+            for (const auto& parameter : parameters) {
+                if (!expression::isIdentifier(parameter) || !parameterNames.insert(parameter).second) {
+                    err = "Func Def Error: invalid or duplicate parameter";
+                    return std::numeric_limits<double>::quiet_NaN();
+                }
+                if (isReservedName(parameter)) { err = "Reserved parameter: " + parameter; return std::numeric_limits<double>::quiet_NaN(); }
+            }
+
+            // Validate grammar before changing the catalogue. Definitions may
+            // reference forward or recursive calls; no value is evaluated here.
+            if (!expression::ArithmeticExpression::validateSyntax(rhs, &indexedReduction)) {
+                err = "Func Def Error: invalid expression syntax";
+                return std::numeric_limits<double>::quiet_NaN();
+            }
+            engineState().user_funcs.erase(std::remove_if(engineState().user_funcs.begin(), engineState().user_funcs.end(),
+                [&](const std::string& definition) {
+                    const auto parsed = parseUserFunctionDefinition(definition);
+                    return parsed && parsed->name == target_fname;
+                }), engineState().user_funcs.end());
+            engineState().user_funcs.push_back(expr_str);
+
             std::string fname_auto = target_fname + "(";
-            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), fname_auto) == autocomplete_words.end()) {
-                autocomplete_words.push_back(fname_auto);
+            if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), fname_auto) == engineState().autocomplete_words.end()) {
+                engineState().autocomplete_words.push_back(fname_auto);
             }
             return 1.0;
         } else if (isConstDef) {
             double val = evaluate(rhs, err);
             if (err.empty() && !std::isnan(val)) {
-                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                     return a.name == lhs;
-                }), user_args.end());
+                }), engineState().user_args.end());
 
                 bool updated = false;
-                for (auto& cn : user_consts) {
+                for (auto& cn : engineState().user_consts) {
                     if (cn.name == lhs) {
                         cn.val = val;
                         updated = true;
@@ -1549,11 +712,11 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                     }
                 }
                 if (!updated) {
-                    user_consts.push_back({lhs, val});
+                    engineState().user_consts.push_back({lhs, val});
                 }
                 
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return val;
             } else {
@@ -1561,77 +724,42 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                 return std::numeric_limits<double>::quiet_NaN();
             }
         } else {
-            std::string op1, op, op2;
-            if (parseBinaryOp(rhs, op1, op, op2)) {
-                auto trim = [](std::string& s) {
-                    s.erase(0, s.find_first_not_of(" \t"));
-                    s.erase(s.find_last_not_of(" \t") + 1);
-                };
-                trim(op1); trim(op2);
-                bool is1_arr = false, is2_arr = false;
-                std::string dummy_err;
-                std::vector<double> a1 = parseArrayExpr(op1, is1_arr, dummy_err);
-                std::vector<double> a2 = parseArrayExpr(op2, is2_arr, dummy_err);
-                if (op == ".*" || op == "./" || (!a1.empty() && is1_arr) || (!a2.empty() && is2_arr) || (user_arrays.find(op1) != user_arrays.end() && !user_arrays[op1].empty()) || (user_arrays.find(op2) != user_arrays.end() && !user_arrays[op2].empty())) {
-                    bool is_scalar = false;
-                    double scalar_res = 0;
-                    std::vector<double> res = evaluateArrayBinaryOp(op1, op, op2, is_scalar, scalar_res, err);
-                    if (err.empty()) {
-                        if (is_scalar) {
-                            user_arrays.erase(lhs);
-                            user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
-                                return a.name == lhs;
-                            }), user_args.end());
-                            user_args.push_back({lhs, scalar_res});
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
-                            }
-                            return scalar_res;
-                        } else {
-                            user_arrays[lhs] = res;
-                            user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
-                                return a.name == lhs;
-                            }), user_args.end());
-                            if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                                autocomplete_words.push_back(lhs);
-                            }
-                            return 1.0;
-                        }
-                    }
-                    return std::numeric_limits<double>::quiet_NaN();
-                }
-            }
-
             bool is_arr = false;
-            std::vector<double> arr = parseArrayExpr(rhs, is_arr, err);
+            auto arr = parseArrayExpr(rhs, is_arr, err);
             if (err.empty() && is_arr) {
-                user_arrays[lhs] = arr;
-                user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                engineState().user_arrays[lhs] = arr;
+                engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                     return a.name == lhs;
-                }), user_args.end());
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                }), engineState().user_args.end());
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return 1.0;
             }
             if (!err.empty()) {
                 return std::numeric_limits<double>::quiet_NaN();
             }
-            double val = evaluate(rhs, err);
+            double val;
+            if (!arr.empty()) {
+                val = arr.front();
+                engineState().g_last_eval_is_array = false;
+            } else {
+                val = evaluate(rhs, err);
+            }
             if (err.empty() && !std::isnan(val)) {
-                if (g_last_eval_is_array) {
-                    user_arrays[lhs] = g_last_eval_array;
-                    user_args.erase(std::remove_if(user_args.begin(), user_args.end(), [&](const UserArg& a) {
+                if (engineState().g_last_eval_is_array) {
+                    engineState().user_arrays[lhs] = engineState().g_last_eval_array;
+                    engineState().user_args.erase(std::remove_if(engineState().user_args.begin(), engineState().user_args.end(), [&](const UserArg& a) {
                         return a.name == lhs;
-                    }), user_args.end());
-                    if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                        autocomplete_words.push_back(lhs);
+                    }), engineState().user_args.end());
+                    if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                        engineState().autocomplete_words.push_back(lhs);
                     }
                     return 1.0;
                 }
-                user_arrays.erase(lhs);
+                engineState().user_arrays.erase(lhs);
                 bool found = false;
-                for (auto& arg : user_args) {
+                for (auto& arg : engineState().user_args) {
                     if (arg.name == lhs) {
                         arg.val = val;
                         found = true;
@@ -1639,11 +767,11 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
                     }
                 }
                 if (!found) {
-                    user_args.push_back({lhs, val});
+                    engineState().user_args.push_back({lhs, val});
                 }
                 
-                if (std::find(autocomplete_words.begin(), autocomplete_words.end(), lhs) == autocomplete_words.end()) {
-                    autocomplete_words.push_back(lhs);
+                if (std::find(engineState().autocomplete_words.begin(), engineState().autocomplete_words.end(), lhs) == engineState().autocomplete_words.end()) {
+                    engineState().autocomplete_words.push_back(lhs);
                 }
                 return val;
             } else {
@@ -1656,11 +784,6 @@ double evaluateInput(const std::string& expr_str, std::string& err, bool& isDefi
     return evaluate(expr_str, err);
 }
 
-static std::string g_tab_orig_prefix = "";
-static size_t g_tab_comp_start = 0;
-static int g_tab_match_idx = -1;
-static std::string g_tab_last_inserted = "";
-static std::vector<std::string> g_tab_cached_matches;
 
 enum UnitDimension : uint32_t {
     DIM_NONE         = 0,
@@ -1693,7 +816,7 @@ static uint32_t get_unit_dimension_mask(const std::string& raw_unit) {
     if (first == std::string::npos) return DIM_NONE;
     size_t last = u.find_last_not_of(" \t\"'");
     u = u.substr(first, last - first + 1);
-    std::transform(u.begin(), u.end(), u.begin(), ::tolower);
+    std::transform(u.begin(), u.end(), u.begin(), [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
 
     uint32_t dims = DIM_NONE;
     auto in_set = [&](const std::initializer_list<const char*>& items) {
@@ -1718,7 +841,7 @@ static uint32_t get_unit_dimension_mask(const std::string& raw_unit) {
     if (in_set({"ohm", "ohms", "mohm", "kohm", "smd3", "smd4", "eia96"})) {
         dims |= DIM_RESISTANCE;
     } else if (!u.empty()) {
-        bool all_digits = std::all_of(u.begin(), u.end(), ::isdigit);
+        bool all_digits = std::all_of(u.begin(), u.end(), [](unsigned char c) { return std::isdigit(c); });
         if ((u.size() == 3 || u.size() == 4) && all_digits) {
             dims |= DIM_RESISTANCE;
         } else if (u.find('r') != std::string::npos || u.find('k') != std::string::npos) {
@@ -1875,11 +998,11 @@ std::vector<std::string> getConvUnitMatches(const std::string& from_unit, const 
 }
 
 void resetTabState() {
-    g_tab_orig_prefix = "";
-    g_tab_last_inserted = "";
-    g_tab_comp_start = 0;
-    g_tab_match_idx = -1;
-    g_tab_cached_matches.clear();
+    engineState().g_tab_orig_prefix = "";
+    engineState().g_tab_last_inserted = "";
+    engineState().g_tab_comp_start = 0;
+    engineState().g_tab_match_idx = -1;
+    engineState().g_tab_cached_matches.clear();
 }
 
 void handleTabCompletion(std::string& expression, int& cursor_pos) {
@@ -1889,39 +1012,39 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     }
 
     bool is_continuation = false;
-    if (!g_tab_orig_prefix.empty() && !g_tab_last_inserted.empty() && g_tab_comp_start <= expression.size()) {
-        if (g_tab_comp_start + g_tab_last_inserted.size() <= expression.size() &&
-            expression.substr(g_tab_comp_start, g_tab_last_inserted.size()) == g_tab_last_inserted) {
-            if (cursor_pos >= (int)g_tab_comp_start && cursor_pos <= (int)(g_tab_comp_start + g_tab_last_inserted.size())) {
+    if (!engineState().g_tab_orig_prefix.empty() && !engineState().g_tab_last_inserted.empty() && engineState().g_tab_comp_start <= expression.size()) {
+        if (engineState().g_tab_comp_start + engineState().g_tab_last_inserted.size() <= expression.size() &&
+            expression.substr(engineState().g_tab_comp_start, engineState().g_tab_last_inserted.size()) == engineState().g_tab_last_inserted) {
+            if (cursor_pos >= (int)engineState().g_tab_comp_start && cursor_pos <= (int)(engineState().g_tab_comp_start + engineState().g_tab_last_inserted.size())) {
                 is_continuation = true;
             }
         }
     }
 
-    if (is_continuation && !g_tab_cached_matches.empty()) {
-        g_tab_match_idx = ((g_tab_match_idx + 1) % (int)g_tab_cached_matches.size() + (int)g_tab_cached_matches.size()) % (int)g_tab_cached_matches.size();
-        std::string matched_word = g_tab_cached_matches[g_tab_match_idx];
+    if (is_continuation && !engineState().g_tab_cached_matches.empty()) {
+        engineState().g_tab_match_idx = ((engineState().g_tab_match_idx + 1) % (int)engineState().g_tab_cached_matches.size() + (int)engineState().g_tab_cached_matches.size()) % (int)engineState().g_tab_cached_matches.size();
+        std::string matched_word = engineState().g_tab_cached_matches[engineState().g_tab_match_idx];
 
         std::string new_inserted;
-        if (auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
+        if (engineState().auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
             new_inserted = matched_word + ")";
-            cursor_pos = g_tab_comp_start + matched_word.size();
+            cursor_pos = engineState().g_tab_comp_start + matched_word.size();
         } else {
             new_inserted = matched_word;
-            cursor_pos = g_tab_comp_start + new_inserted.size();
+            cursor_pos = engineState().g_tab_comp_start + new_inserted.size();
         }
 
-        size_t current_len = g_tab_last_inserted.size();
-        if (g_tab_comp_start + current_len > expression.size()) {
-            current_len = expression.size() - g_tab_comp_start;
+        size_t current_len = engineState().g_tab_last_inserted.size();
+        if (engineState().g_tab_comp_start + current_len > expression.size()) {
+            current_len = expression.size() - engineState().g_tab_comp_start;
         }
-        expression.replace(g_tab_comp_start, current_len, new_inserted);
-        g_tab_last_inserted = new_inserted;
+        expression.replace(engineState().g_tab_comp_start, current_len, new_inserted);
+        engineState().g_tab_last_inserted = new_inserted;
         return;
     }
 
     if (!is_continuation) {
-        g_tab_cached_matches.clear();
+        engineState().g_tab_cached_matches.clear();
         if (cursor_pos < 0 || cursor_pos > (int)expression.size()) cursor_pos = expression.size();
         size_t start = cursor_pos;
         while (start > 0 && (std::isalnum((unsigned char)expression[start - 1]) || expression[start - 1] == '_')) {
@@ -1933,18 +1056,18 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
             return;
         }
 
-        g_tab_orig_prefix = prefix;
-        g_tab_comp_start = start;
-        g_tab_match_idx = 0;
+        engineState().g_tab_orig_prefix = prefix;
+        engineState().g_tab_comp_start = start;
+        engineState().g_tab_match_idx = 0;
     } else {
-        g_tab_match_idx++;
+        engineState().g_tab_match_idx++;
     }
 
     std::vector<std::string> matches;
     matches.reserve(16);
 
     auto check_candidate = [&](const std::string& word) {
-        if (word.rfind(g_tab_orig_prefix, 0) == 0) {
+        if (word.rfind(engineState().g_tab_orig_prefix, 0) == 0) {
             if (std::find(matches.begin(), matches.end(), word) == matches.end()) {
                 matches.push_back(word);
             }
@@ -1954,7 +1077,7 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     // Check if inside conv(...) and specifically in a unit argument position (after comma)
     bool is_in_conv = false;
     std::string from_unit = "";
-    std::string left_ctx = expression.substr(0, g_tab_comp_start);
+    std::string left_ctx = expression.substr(0, engineState().g_tab_comp_start);
     size_t last_conv = left_ctx.rfind("conv(");
     if (last_conv != std::string::npos) {
         std::string after_conv = left_ctx.substr(last_conv + 5);
@@ -1994,32 +1117,32 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
     }
 
     if (is_in_conv && left_ctx.substr(last_conv + 5).find(',') != std::string::npos) {
-        matches = getConvUnitMatches(from_unit, g_tab_orig_prefix);
+        matches = getConvUnitMatches(from_unit, engineState().g_tab_orig_prefix);
     }
 
     if (matches.empty()) {
         // 1. Built-in constants (pi, e, phi) & User variables/constants first
-        for (const auto& w : autocomplete_words) {
+        for (const auto& w : engineState().autocomplete_words) {
             if (w == "pi" || w == "e" || w == "phi") check_candidate(w);
         }
-        for (const auto& arg : user_args) check_candidate(arg.name);
-        for (const auto& cn : user_consts) check_candidate(cn.name);
+        for (const auto& arg : engineState().user_args) check_candidate(arg.name);
+        for (const auto& cn : engineState().user_consts) check_candidate(cn.name);
 
         // 2. Built-in math functions & history variables (e1, e2, e3...)
-        for (const auto& w : autocomplete_words) {
+        for (const auto& w : engineState().autocomplete_words) {
             if (w != "pi" && w != "e" && w != "phi") check_candidate(w);
         }
-        for (size_t i = 0; i < history.size(); ++i) check_candidate("e" + std::to_string(i + 1));
+        for (size_t i = 0; i < engineState().history.size(); ++i) check_candidate("e" + std::to_string(engineState().history_first_number + i));
 
         // 3. User formulas & scripts
-        for (const auto& func : user_funcs) {
+        for (const auto& func : engineState().user_funcs) {
             size_t paren = func.find('(');
             if (paren != std::string::npos) {
                 std::string fname = func.substr(0, paren + 1);
                 if (!fname.empty()) check_candidate(fname);
             }
         }
-        for (const auto& sf : user_script_funcs) {
+        for (const auto& sf : engineState().user_script_funcs) {
             check_candidate(sf.name + "(");
         }
     }
@@ -2029,562 +1152,60 @@ void handleTabCompletion(std::string& expression, int& cursor_pos) {
         return;
     }
 
-    g_tab_cached_matches = matches;
-    g_tab_match_idx = ((g_tab_match_idx % (int)matches.size()) + (int)matches.size()) % (int)matches.size();
-    std::string matched_word = matches[g_tab_match_idx];
+    engineState().g_tab_cached_matches = matches;
+    engineState().g_tab_match_idx = ((engineState().g_tab_match_idx % (int)matches.size()) + (int)matches.size()) % (int)matches.size();
+    std::string matched_word = matches[engineState().g_tab_match_idx];
 
     std::string new_inserted;
-    if (auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
+    if (engineState().auto_brackets && !matched_word.empty() && matched_word.back() == '(') {
         new_inserted = matched_word + ")";
-        cursor_pos = g_tab_comp_start + matched_word.size();
+        cursor_pos = engineState().g_tab_comp_start + matched_word.size();
     } else {
         new_inserted = matched_word;
-        cursor_pos = g_tab_comp_start + new_inserted.size();
+        cursor_pos = engineState().g_tab_comp_start + new_inserted.size();
     }
 
     if (is_continuation) {
-        size_t current_len = g_tab_last_inserted.size();
-        if (g_tab_comp_start + current_len > expression.size()) {
-            current_len = expression.size() - g_tab_comp_start;
+        size_t current_len = engineState().g_tab_last_inserted.size();
+        if (engineState().g_tab_comp_start + current_len > expression.size()) {
+            current_len = expression.size() - engineState().g_tab_comp_start;
         }
-        expression.replace(g_tab_comp_start, current_len, new_inserted);
+        expression.replace(engineState().g_tab_comp_start, current_len, new_inserted);
     } else {
-        expression.replace(g_tab_comp_start, g_tab_orig_prefix.size(), new_inserted);
+        expression.replace(engineState().g_tab_comp_start, engineState().g_tab_orig_prefix.size(), new_inserted);
     }
-    g_tab_last_inserted = new_inserted;
+    engineState().g_tab_last_inserted = new_inserted;
 }
 
-std::string preprocessArrayLookups(const std::string& expr, std::string& err) {
-    std::string res = expr;
-    bool replaced_any = true;
-    while (replaced_any) {
-        replaced_any = false;
-        size_t close_bracket = std::string::npos;
-        size_t open_bracket = std::string::npos;
-        size_t id_start = std::string::npos;
-        std::string array_name = "";
-        std::string inline_arr_expr = "";
-        
-        for (size_t i = 0; i < res.size(); ++i) {
-            if (res[i] == '[') {
-                open_bracket = i;
-            } else if (res[i] == ']' && open_bracket != std::string::npos) {
-                close_bracket = i;
-                if (open_bracket > 0 && (res[open_bracket - 1] == ')' || res[open_bracket - 1] == ']')) {
-                    char close_c = res[open_bracket - 1];
-                    char open_c = (close_c == ')') ? '(' : '[';
-                    int depth = 1;
-                    size_t j = open_bracket - 1;
-                    while (j > 0 && depth > 0) {
-                        j--;
-                        if (res[j] == close_c) depth++;
-                        else if (res[j] == open_c) depth--;
-                    }
-                    if (depth == 0) {
-                        id_start = j;
-                        inline_arr_expr = res.substr(id_start, open_bracket - id_start);
-                        break;
-                    }
-                }
-                size_t temp_start = open_bracket;
-                while (temp_start > 0 && (std::isalnum((unsigned char)res[temp_start - 1]) || res[temp_start - 1] == '_')) {
-                    temp_start--;
-                }
-                if (temp_start < open_bracket) {
-                    id_start = temp_start;
-                    array_name = res.substr(id_start, open_bracket - id_start);
-                    break;
-                }
-                open_bracket = std::string::npos;
-            }
-        }
-        
-        if (id_start != std::string::npos && open_bracket != std::string::npos && close_bracket != std::string::npos) {
-            std::string index_expr = res.substr(open_bracket + 1, close_bracket - open_bracket - 1);
-            std::vector<double> temp_arr;
-            const std::vector<double>* arr_ptr = nullptr;
-            std::string disp_name = array_name;
-
-            if (!inline_arr_expr.empty()) {
-                bool is_arr = false;
-                temp_arr = parseArrayExpr(inline_arr_expr, is_arr, err);
-                if (!err.empty()) return expr;
-                if (!is_arr) {
-                    err = "Expression is not an array";
-                    return expr;
-                }
-                arr_ptr = &temp_arr;
-                disp_name = inline_arr_expr;
-            } else {
-                if (user_arrays.find(array_name) == user_arrays.end()) {
-                    err = "Array " + array_name + " not defined";
-                    return expr;
-                }
-                arr_ptr = &user_arrays[array_name];
-            }
-
-            double idx_val = evaluate(index_expr, err);
-            if (!err.empty()) {
-                return expr;
-            }
-            int idx = (int)std::round(idx_val);
-            const auto& arr = *arr_ptr;
-            if (idx < 1 || idx > (int)arr.size()) {
-                err = "Index " + std::to_string(idx) + " out of bounds for array " + disp_name + " (size " + std::to_string(arr.size()) + ")";
-                return expr;
-            }
-            double element_val = arr[idx - 1];
-            res.replace(id_start, (close_bracket - id_start + 1), fmtInternal(element_val));
-            replaced_any = true;
-        }
-    }
-    return res;
-}
-
-std::vector<double> parseArrayExpr(const std::string& rhs, bool& is_array, std::string& err) {
-    is_array = false;
-    std::string trimmed = rhs;
-    trimmed.erase(0, trimmed.find_first_not_of(" \t"));
-    trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
-    
-    if (trimmed.empty()) return {};
-
-    while (trimmed.size() >= 2 && trimmed.front() == '(' && trimmed.back() == ')') {
-        int nesting = 0;
-        bool valid = true;
-        for (size_t i = 0; i < trimmed.size() - 1; ++i) {
-            if (trimmed[i] == '(') nesting++;
-            else if (trimmed[i] == ')') nesting--;
-            if (nesting == 0) { valid = false; break; }
-        }
-        if (valid) {
-            trimmed = trimmed.substr(1, trimmed.size() - 2);
-            trimmed.erase(0, trimmed.find_first_not_of(" \t"));
-            trimmed.erase(trimmed.find_last_not_of(" \t") + 1);
-        } else {
-            break;
-        }
-    }
-    
-    bool is_scalar_var = false;
-    for (const auto& ua : user_args) {
-        if (ua.name == trimmed) { is_scalar_var = true; break; }
-    }
-    
-    if (!is_scalar_var && user_arrays.find(trimmed) != user_arrays.end()) {
-        is_array = true;
-        return user_arrays[trimmed];
-    }
-
-    // Binary operations on arrays: e.g. 3 * t or px .* px or 5 * sin(3*t)
-    std::string b_op1, b_op, b_op2;
-    if (parseBinaryOp(trimmed, b_op1, b_op, b_op2)) {
-        bool is1_arr = false, is2_arr = false;
-        std::string err1, err2;
-        std::vector<double> a1 = parseArrayExpr(b_op1, is1_arr, err1);
-        std::vector<double> a2 = parseArrayExpr(b_op2, is2_arr, err2);
-        if (b_op == ".*" || b_op == "./" || is1_arr || is2_arr || !err1.empty() || !err2.empty()) {
-            bool is_scalar = false;
-            double scalar_res = 0;
-            std::string bin_err;
-            std::vector<double> res = evaluateArrayBinaryOp(b_op1, b_op, b_op2, is_scalar, scalar_res, bin_err);
-            if (!bin_err.empty()) {
-                if (is1_arr || is2_arr || b_op == ".*" || b_op == "./" || !err1.empty() || !err2.empty()) {
-                    err = bin_err;
-                    return {};
-                }
-            } else if (!res.empty() || is_scalar) {
-                if (is_scalar) {
-                    return {scalar_res};
-                } else {
-                    is_array = true;
-                    return res;
-                }
-            }
-        }
-    }
-    
-    // Parentheses unwrapping: (expr)
-    if (trimmed.front() == '(' && trimmed.back() == ')') {
-        int depth = 0;
-        bool matching = true;
-        for (size_t i = 0; i < trimmed.size() - 1; ++i) {
-            if (trimmed[i] == '(') depth++;
-            else if (trimmed[i] == ')') depth--;
-            if (depth == 0) { matching = false; break; }
-        }
-        if (matching) {
-            std::string inner = trimmed.substr(1, trimmed.size() - 2);
-            return parseArrayExpr(inner, is_array, err);
-        }
-    }
-
-    // Unary functions on arrays: func(arg)
-    size_t open_p = trimmed.find('(');
-    if (open_p != std::string::npos && open_p > 0 && trimmed.back() == ')') {
-        int depth = 0;
-        bool outer = true;
-        for (size_t i = open_p; i < trimmed.size() - 1; ++i) {
-            if (trimmed[i] == '(') depth++;
-            else if (trimmed[i] == ')') depth--;
-            if (depth == 0) { outer = false; break; }
-        }
-        if (outer) {
-            std::string func_name = trimmed.substr(0, open_p);
-            func_name.erase(0, func_name.find_first_not_of(" \t"));
-            func_name.erase(func_name.find_last_not_of(" \t") + 1);
-            std::string arg_str = trimmed.substr(open_p + 1, trimmed.size() - open_p - 2);
-            
-            bool is_arg_arr = false;
-            std::string sub_err;
-            std::vector<double> arg_vec = parseArrayExpr(arg_str, is_arg_arr, sub_err);
-            if (!sub_err.empty()) {
-                err = sub_err;
-                return {};
-            }
-            if (is_arg_arr && sub_err.empty()) {
-                if (func_name == "len") {
-                    is_array = false;
-                    return {(double)arg_vec.size()};
-                } else if (func_name == "mean") {
-                    is_array = false;
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    return {arg_vec.empty() ? 0.0 : sum / arg_vec.size()};
-                } else if (func_name == "sum") {
-                    is_array = false;
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    return {sum};
-                } else if (func_name == "prod") {
-                    is_array = false;
-                    double prod = 1.0;
-                    for (double v : arg_vec) prod *= v;
-                    return {arg_vec.empty() ? 0.0 : prod};
-                } else if (func_name == "min") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double m = arg_vec[0];
-                    for (double v : arg_vec) if (v < m) m = v;
-                    return {m};
-                } else if (func_name == "max") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double m = arg_vec[0];
-                    for (double v : arg_vec) if (v > m) m = v;
-                    return {m};
-                } else if (func_name == "median") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    std::vector<double> sorted = arg_vec;
-                    std::sort(sorted.begin(), sorted.end());
-                    size_t sz = sorted.size();
-                    if (sz % 2 == 0) return {(sorted[sz/2 - 1] + sorted[sz/2]) / 2.0};
-                    else return {sorted[sz/2]};
-                } else if (func_name == "mode") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    std::map<double, int> counts;
-                    for (double v : arg_vec) counts[v]++;
-                    double bval = arg_vec[0];
-                    int maxc = 0;
-                    for (const auto& kv : counts) {
-                        if (kv.second > maxc) { maxc = kv.second; bval = kv.first; }
-                    }
-                    return {bval};
-                } else if (func_name == "std" || func_name == "var") {
-                    is_array = false;
-                    if (arg_vec.empty()) return {0.0};
-                    double sum = 0.0;
-                    for (double v : arg_vec) sum += v;
-                    double m = sum / arg_vec.size();
-                    double vsum = 0.0;
-                    for (double v : arg_vec) vsum += (v - m) * (v - m);
-                    double var_v = (arg_vec.size() > 1) ? vsum / (arg_vec.size() - 1) : 0.0;
-                    return {(func_name == "std") ? std::sqrt(var_v) : var_v};
-                }
-                is_array = true;
-                std::vector<double> res(arg_vec.size());
-                for (size_t i = 0; i < arg_vec.size(); ++i) {
-                    double val = arg_vec[i];
-                    if (func_name == "cos") res[i] = custom_cos(val);
-                    else if (func_name == "sin") res[i] = custom_sin(val);
-                    else if (func_name == "tan" || func_name == "tg") res[i] = custom_tan(val);
-                    else if (func_name == "ctan" || func_name == "cot" || func_name == "ctg") res[i] = custom_cot(val);
-                    else if (func_name == "sec") res[i] = custom_sec(val);
-                    else if (func_name == "csc" || func_name == "cosec") res[i] = custom_csc(val);
-                    else if (func_name == "asin" || func_name == "arcsin") res[i] = custom_asin(val);
-                    else if (func_name == "acos" || func_name == "arccos") res[i] = custom_acos(val);
-                    else if (func_name == "atan" || func_name == "arctan" || func_name == "atg" || func_name == "arctg") res[i] = custom_atan(val);
-                    else if (func_name == "acot" || func_name == "arccot" || func_name == "actg" || func_name == "arcctg" || func_name == "actan" || func_name == "arcctan") res[i] = custom_acot(val);
-                    else if (func_name == "asec" || func_name == "arcsec") res[i] = custom_asec(val);
-                    else if (func_name == "acsc" || func_name == "arccsc" || func_name == "acosec" || func_name == "arccosec") res[i] = custom_acsc(val);
-                    else if (func_name == "sinh" || func_name == "sh") res[i] = custom_sinh(val);
-                    else if (func_name == "cosh" || func_name == "ch") res[i] = custom_cosh(val);
-                    else if (func_name == "tanh" || func_name == "th") res[i] = custom_tanh(val);
-                    else if (func_name == "coth" || func_name == "cth" || func_name == "ctgh" || func_name == "ctanh") res[i] = custom_coth(val);
-                    else if (func_name == "sech" || func_name == "sch") res[i] = custom_sech(val);
-                    else if (func_name == "csch" || func_name == "cosech") res[i] = custom_csch(val);
-                    else if (func_name == "asinh" || func_name == "ahsin" || func_name == "arcsinh" || func_name == "arsinh" || func_name == "arsh") res[i] = custom_asinh(val);
-                    else if (func_name == "acosh" || func_name == "ahcos" || func_name == "arccosh" || func_name == "arcosh" || func_name == "arch") res[i] = custom_acosh(val);
-                    else if (func_name == "atanh" || func_name == "ahtan" || func_name == "arctanh" || func_name == "artanh" || func_name == "arth" || func_name == "artg" || func_name == "arctgh") res[i] = custom_atanh(val);
-                    else if (func_name == "acoth" || func_name == "ahcot" || func_name == "arccoth" || func_name == "arcoth" || func_name == "arcth" || func_name == "ahcoth") res[i] = custom_acoth(val);
-                    else if (func_name == "asech" || func_name == "ahsec" || func_name == "arcsech" || func_name == "arsech" || func_name == "ahsech") res[i] = custom_asech(val);
-                    else if (func_name == "acsch" || func_name == "ahcsc" || func_name == "arccsch" || func_name == "arcsch" || func_name == "acosech" || func_name == "arccosech" || func_name == "ahcsch") res[i] = custom_acsch(val);
-                    else if (func_name == "sqrt") res[i] = custom_sqrt(val);
-                    else if (func_name == "cbrt") res[i] = cbrt(val);
-                    else if (func_name == "abs") res[i] = fabs(val);
-                    else if (func_name == "exp") res[i] = exp(val);
-                    else if (func_name == "ln") res[i] = custom_ln(val);
-                    else if (func_name == "log" || func_name == "log10") res[i] = custom_log10(val);
-                    else if (func_name == "log2") res[i] = custom_log2(val);
-                    else if (func_name == "deg2rad" || func_name == "d2r") res[i] = custom_deg2rad(val);
-                    else if (func_name == "rad2deg" || func_name == "r2d") res[i] = custom_rad2deg(val);
-                    else if (func_name == "floor") res[i] = floor(val);
-                    else if (func_name == "ceil") res[i] = ceil(val);
-                    else if (func_name == "round") res[i] = round(val);
-                    else if (func_name == "trunc") res[i] = trunc(val);
-                    else if (func_name == "sgn") res[i] = (val > 0.0 ? 1.0 : (val < 0.0 ? -1.0 : 0.0));
-                    else if (func_name == "fact") res[i] = custom_fact(val);
-                    else if (func_name == "fib") res[i] = custom_fib(val);
-                    else res[i] = val;
-                    if (!g_math_domain_err.empty()) {
-                        err = g_math_domain_err;
-                        return {};
-                    }
-                }
-                return res;
-            }
-        }
-    }
-    
-    if ((trimmed.front() == '[' && trimmed.back() == ']') || (trimmed.front() == '(' && trimmed.back() == ')' && trimmed.find(',') != std::string::npos)) {
-        is_array = true;
-        std::string inner = trimmed.substr(1, trimmed.size() - 2);
-        std::vector<double> res;
-        bool in_inner_quotes = false;
-        std::string current_val_str = "";
-        
-        for (size_t i = 0; i <= inner.size(); ++i) {
-            char c = (i < inner.size()) ? inner[i] : ',';
-            if (c == '"') {
-                in_inner_quotes = !in_inner_quotes;
-            }
-            if (c == ',' && !in_inner_quotes) {
-                current_val_str.erase(0, current_val_str.find_first_not_of(" \t"));
-                current_val_str.erase(current_val_str.find_last_not_of(" \t") + 1);
-                if (!current_val_str.empty()) {
-                    std::string prep_err;
-                    std::string prep = preprocessArrayLookups(current_val_str, prep_err);
-                    if (!prep_err.empty()) {
-                        err = prep_err;
-                        return {};
-                    }
-                    double val = evaluate(prep, prep_err);
-                    if (!prep_err.empty()) {
-                        err = prep_err;
-                        return {};
-                    }
-                    res.push_back(val);
-                }
-                current_val_str = "";
-            } else {
-                current_val_str += c;
-            }
-        }
-        return res;
-    }
-    
-    if (trimmed.find(':') != std::string::npos) {
-        // Find colons that are range separators, not negative signs or other constructs
-        size_t first_col = std::string::npos;
-        size_t second_col = std::string::npos;
-        
-        // Scan for colons outside quotes/parens
-        int pdepth = 0;
-        for (size_t i = 0; i < trimmed.size(); ++i) {
-            char c = trimmed[i];
-            if (c == '(' || c == '[') pdepth++;
-            else if (c == ')' || c == ']') { if (pdepth > 0) pdepth--; }
-            else if (c == ':' && pdepth == 0) {
-                if (first_col == std::string::npos) first_col = i;
-                else if (second_col == std::string::npos) { second_col = i; break; }
-            }
-        }
-        
-        if (first_col != std::string::npos) {
-            is_array = true;
-            std::string start_str = trimmed.substr(0, first_col);
-            std::string step_str = "1";
-            std::string end_str = "";
-            if (second_col != std::string::npos) {
-                step_str = trimmed.substr(first_col + 1, second_col - first_col - 1);
-                end_str = trimmed.substr(second_col + 1);
-            } else {
-                end_str = trimmed.substr(first_col + 1);
-            }
-        
-        std::string prep_err;
-        std::string s_start = preprocessArrayLookups(start_str, prep_err);
-        double start_val = evaluate(s_start, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        prep_err.clear();
-        std::string s_step = preprocessArrayLookups(step_str, prep_err);
-        double step_val = evaluate(s_step, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        prep_err.clear();
-        std::string s_end = preprocessArrayLookups(end_str, prep_err);
-        double end_val = evaluate(s_end, prep_err);
-        if (!prep_err.empty()) { err = prep_err; return {}; }
-        
-        std::vector<double> res;
-        double eps = 1e-9;
-        if (step_val > 0) {
-            for (double v = start_val; v <= end_val + eps; v += step_val) {
-                res.push_back(v);
-            }
-        } else if (step_val < 0) {
-            for (double v = start_val; v >= end_val - eps; v += step_val) {
-                res.push_back(v);
-            }
-        }
-        return res;
-        }
-    }
-    
-    if (user_arrays.find(trimmed) != user_arrays.end()) {
-        is_array = true;
-        return user_arrays[trimmed];
-    }
-    
-    return {};
-}
-
-std::vector<double> evaluateArrayBinaryOp(const std::string& op1_str, const std::string& op_str, const std::string& op2_str, bool& is_scalar_result, double& scalar_val, std::string& err) {
-    is_scalar_result = false;
-    scalar_val = 0;
-    
-    bool is_op1_arr = false;
-    bool is_op2_arr = false;
-    std::vector<double> op1_arr = parseArrayExpr(op1_str, is_op1_arr, err);
-    if (!err.empty()) return {};
-    std::vector<double> op2_arr = parseArrayExpr(op2_str, is_op2_arr, err);
-    if (!err.empty()) return {};
-    
-    double op1_scalar = 0;
-    double op2_scalar = 0;
-    if (!is_op1_arr) {
-        op1_scalar = evaluate(preprocessArrayLookups(op1_str, err), err);
-        if (!err.empty()) return {};
-    }
-    if (!is_op2_arr) {
-        op2_scalar = evaluate(preprocessArrayLookups(op2_str, err), err);
-        if (!err.empty()) return {};
-    }
-    
-    if (is_op1_arr && is_op2_arr) {
-        if (op1_arr.size() != op2_arr.size()) {
-            err = "Array size mismatch (" + std::to_string(op1_arr.size()) + " vs " + std::to_string(op2_arr.size()) + ")";
-            return {};
-        }
-        
-        if (op_str == "*") {
-            is_scalar_result = true;
-            double sum = 0;
-            for (size_t i = 0; i < op1_arr.size(); ++i) {
-                sum += op1_arr[i] * op2_arr[i];
-            }
-            scalar_val = sum;
-            return {};
-        }
-        
-        std::vector<double> res(op1_arr.size());
-        for (size_t i = 0; i < op1_arr.size(); ++i) {
-            if (op_str == ".*") {
-                res[i] = op1_arr[i] * op2_arr[i];
-            } else if (op_str == "./") {
-                if (op2_arr[i] == 0.0) {
-                    err = "Division by zero";
-                    return {};
-                }
-                res[i] = op1_arr[i] / op2_arr[i];
-            } else if (op_str == "+") {
-                res[i] = op1_arr[i] + op2_arr[i];
-            } else if (op_str == "-") {
-                res[i] = op1_arr[i] - op2_arr[i];
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
-    }
-    else if (is_op1_arr && !is_op2_arr) {
-        std::vector<double> res(op1_arr.size());
-        for (size_t i = 0; i < op1_arr.size(); ++i) {
-            if (op_str == "*" || op_str == ".*") {
-                res[i] = op1_arr[i] * op2_scalar;
-            } else if (op_str == "/" || op_str == "./") {
-                if (op2_scalar == 0.0) {
-                    err = "Division by zero";
-                    return {};
-                }
-                res[i] = op1_arr[i] / op2_scalar;
-            } else if (op_str == "+") {
-                res[i] = op1_arr[i] + op2_scalar;
-            } else if (op_str == "-") {
-                res[i] = op1_arr[i] - op2_scalar;
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
-    }
-    else if (!is_op1_arr && is_op2_arr) {
-        std::vector<double> res(op2_arr.size());
-        for (size_t i = 0; i < op2_arr.size(); ++i) {
-            if (op_str == "*" || op_str == ".*") {
-                res[i] = op1_scalar * op2_arr[i];
-            } else if (op_str == "+") {
-                res[i] = op1_scalar + op2_arr[i];
-            } else if (op_str == "-") {
-                res[i] = op1_scalar - op2_arr[i];
-            } else {
-                err = "Invalid operator: " + op_str;
-                return {};
-            }
-        }
-        return res;
-    }
-    
-    else if (!is_op1_arr && !is_op2_arr) {
-        if (op1_str.empty() && op_str == "-") {
-            is_scalar_result = true;
-            scalar_val = -op2_scalar;
-            return {};
-        }
-        if (op_str == "+") { is_scalar_result = true; scalar_val = op1_scalar + op2_scalar; return {}; }
-        if (op_str == "-") { is_scalar_result = true; scalar_val = op1_scalar - op2_scalar; return {}; }
-        if (op_str == "*" || op_str == ".*") { is_scalar_result = true; scalar_val = op1_scalar * op2_scalar; return {}; }
-        if (op_str == "/" || op_str == "./") {
-            if (op2_scalar == 0.0) { err = "Division by zero"; return {}; }
-            is_scalar_result = true;
-            scalar_val = op1_scalar / op2_scalar;
-            return {};
-        }
-    }
-    
-    err = "No arrays in array op";
-    return {};
+std::vector<double> parseArrayExpr(const std::string& source, bool& isArray, std::string& error) {
+    const auto trimmed = expression::trim(source);
+    isArray = !trimmed.empty() && trimmed.front() == '[' && expression::matchingGroupEnd(trimmed, 0) == trimmed.size() - 1;
+    const double value = evaluate(source, error);
+    if (!error.empty()) return {};
+    isArray = engineState().g_last_eval_is_array;
+    return isArray ? engineState().g_last_eval_array : std::vector<double>{value};
 }
 
 std::string formatPrintString(const std::string& str, std::string& err) {
+    const auto formatValue = [&](const std::string& expression) {
+        const double value = evaluate(expression, err);
+        if (!err.empty()) return std::string{};
+        if (!engineState().g_last_eval_is_array) return fmtNum(value);
+        std::string output = "[";
+        const auto& values = engineState().g_last_eval_array;
+        for (size_t i = 0; i < values.size(); ++i) {
+            if (i) output += ", ";
+            output += fmtNum(values[i]);
+        }
+        return output + "]";
+    };
     if (str.size() >= 2 && str.front() == '"' && str.back() == '"') {
         std::string inner = str.substr(1, str.size() - 2);
         std::string res = "";
         size_t i = 0;
         while (i < inner.size()) {
+            if (inner[i] == '\\' && i + 1 < inner.size()) { res += inner[i + 1]; i += 2; continue; }
+            if (inner[i] == '"') { err = "Invalid string expression"; return {}; }
             if (inner[i] == '{') {
                 size_t close = inner.find('}', i);
                 if (close == std::string::npos) {
@@ -2595,36 +1216,8 @@ std::string formatPrintString(const std::string& str, std::string& err) {
                 expr.erase(0, expr.find_first_not_of(" \t"));
                 expr.erase(expr.find_last_not_of(" \t") + 1);
 
-                bool found_scalar = false;
-                for (const auto& ua : user_args) {
-                    if (ua.name == expr) {
-                        res += fmtNum(ua.val);
-                        found_scalar = true;
-                        break;
-                    }
-                }
-
-                if (!found_scalar) {
-                    if (user_arrays.find(expr) != user_arrays.end()) {
-                        const auto& arr = user_arrays[expr];
-                        std::string arr_str = "[";
-                        for (size_t k = 0; k < arr.size(); ++k) {
-                            arr_str += fmtNum(arr[k]);
-                            if (k + 1 < arr.size()) arr_str += ", ";
-                        }
-                        arr_str += "]";
-                        res += arr_str;
-                    } else {
-                        std::string eval_err;
-                        std::string prep_expr = preprocessLen(preprocessArrayLookups(expr, eval_err));
-                        if (!eval_err.empty()) return str;
-                        
-                        double val = evaluate(prep_expr, eval_err);
-                        if (!eval_err.empty()) return str;
-                        
-                        res += fmtNum(val);
-                    }
-                }
+                res += formatValue(expr);
+                if (!err.empty()) return {};
                 i = close + 1;
             } else {
                 res += inner[i++];
@@ -2632,140 +1225,28 @@ std::string formatPrintString(const std::string& str, std::string& err) {
         }
         return res;
     } else {
-        std::string trimmed_str = str;
-        trimmed_str.erase(0, trimmed_str.find_first_not_of(" \t"));
-        trimmed_str.erase(trimmed_str.find_last_not_of(" \t") + 1);
-
-        bool is_scalar = false;
-        for (const auto& ua : user_args) {
-            if (ua.name == trimmed_str) { is_scalar = true; break; }
-        }
-
-        if (!is_scalar && user_arrays.find(trimmed_str) != user_arrays.end()) {
-            const auto& arr = user_arrays[trimmed_str];
-            std::string arr_str = "[";
-            for (size_t k = 0; k < arr.size(); ++k) {
-                arr_str += fmtNum(arr[k]);
-                if (k + 1 < arr.size()) arr_str += ", ";
-            }
-            arr_str += "]";
-            return arr_str;
-        }
-
-        std::string expr = preprocessArrayLookups(str, err);
-        if (!err.empty()) return str;
-        double val = evaluate(expr, err);
-        if (!err.empty()) return str;
-        return fmtNum(val);
+        return formatValue(str);
     }
 }
 
 bool parseArrayElementAssignment(const std::string& line, std::string& name, std::string& idx_expr, std::string& val_expr) {
-    size_t open = line.find('[');
-    if (open == std::string::npos || open == 0) return false;
-    
-    for (size_t i = 0; i < open; ++i) {
-        if (!std::isalnum(line[i]) && line[i] != '_') return false;
+    const auto tokens = expression::tokenize(line);
+    using expression::Kind;
+    if (tokens.size() < 6 || tokens[0].kind != Kind::Word || tokens[1].text != "[")
+        return false;
+    std::vector<char> groups{'['};
+    for (size_t i = 2; i + 2 < tokens.size(); ++i) {
+        const auto token = tokens[i];
+        if (token.kind == Kind::Open) groups.push_back(token.text.front());
+        else if (token.kind == Kind::Close && !expression::closeGroup(groups, token.text.front()))
+            return false;
+        if (!groups.empty()) continue;
+        if (i == 2 || tokens[i + 1].text != "=") return false;
+        name = tokens[0].text;
+        const auto start = tokens[1].start + 1;
+        idx_expr = line.substr(start, token.start - start);
+        val_expr = line.substr(tokens[i + 1].start + 1);
+        return true;
     }
-    
-    size_t close = line.find(']', open);
-    if (close == std::string::npos) return false;
-    
-    size_t eq = line.find('=', close);
-    if (eq == std::string::npos) return false;
-    
-    for (size_t i = close + 1; i < eq; ++i) {
-        if (line[i] != ' ' && line[i] != '\t') return false;
-    }
-    
-    name = line.substr(0, open);
-    idx_expr = line.substr(open + 1, close - open - 1);
-    val_expr = line.substr(eq + 1);
-    return true;
-}
-
-bool parseBinaryOp(const std::string& rhs, std::string& op1, std::string& op, std::string& op2) {
-    std::string clean_rhs = rhs;
-    clean_rhs.erase(0, clean_rhs.find_first_not_of(" \t"));
-    clean_rhs.erase(clean_rhs.find_last_not_of(" \t") + 1);
-
-    while (clean_rhs.size() >= 2 && clean_rhs.front() == '(' && clean_rhs.back() == ')') {
-        int nesting = 0;
-        bool valid = true;
-        for (size_t i = 0; i < clean_rhs.size() - 1; ++i) {
-            if (clean_rhs[i] == '(') nesting++;
-            else if (clean_rhs[i] == ')') nesting--;
-            if (nesting == 0) { valid = false; break; }
-        }
-        if (valid) {
-            clean_rhs = clean_rhs.substr(1, clean_rhs.size() - 2);
-            clean_rhs.erase(0, clean_rhs.find_first_not_of(" \t"));
-            clean_rhs.erase(clean_rhs.find_last_not_of(" \t") + 1);
-        } else {
-            break;
-        }
-    }
-
-    int bracket_nesting = 0;
-    int paren_nesting = 0;
-    
-    // Pass 1: Look for lowest-precedence binary operators (+ and -) outside brackets/parens
-    for (int i = (int)clean_rhs.size() - 1; i >= 0; --i) {
-        char c = clean_rhs[i];
-        if (c == ']') bracket_nesting++;
-        else if (c == '[') bracket_nesting--;
-        else if (c == ')') paren_nesting++;
-        else if (c == '(') paren_nesting--;
-        else if (bracket_nesting == 0 && paren_nesting == 0) {
-            if (c == '+' || c == '-') {
-                if (i > 0 && clean_rhs[i-1] == '.') continue;
-                std::string left = clean_rhs.substr(0, i);
-                left.erase(0, left.find_first_not_of(" \t"));
-                if (left.empty()) continue; // Unary
-                
-                op1 = clean_rhs.substr(0, i);
-                op = std::string(1, c);
-                op2 = clean_rhs.substr(i + 1);
-                return true;
-            }
-        }
-    }
-    
-    // Pass 2: Look for higher-precedence binary operators (*, /, .*, ./)
-    bracket_nesting = 0;
-    paren_nesting = 0;
-    for (int i = (int)clean_rhs.size() - 1; i >= 0; --i) {
-        char c = clean_rhs[i];
-        if (c == ']') bracket_nesting++;
-        else if (c == '[') bracket_nesting--;
-        else if (c == ')') paren_nesting++;
-        else if (c == '(') paren_nesting--;
-        else if (bracket_nesting == 0 && paren_nesting == 0) {
-            if (i + 1 < (int)clean_rhs.size()) {
-                std::string op2c = clean_rhs.substr(i, 2);
-                if (op2c == ".*" || op2c == "./") {
-                    op1 = clean_rhs.substr(0, i);
-                    op = op2c;
-                    op2 = clean_rhs.substr(i + 2);
-                    std::string t = op1;
-                    t.erase(0, t.find_first_not_of(" \t"));
-                    if (t.empty()) continue;
-                    return true;
-                }
-            }
-            if (c == '*' || c == '/') {
-                if (i > 0 && clean_rhs[i-1] == '.') continue;
-                std::string left = clean_rhs.substr(0, i);
-                left.erase(0, left.find_first_not_of(" \t"));
-                if (left.empty()) continue;
-                
-                op1 = clean_rhs.substr(0, i);
-                op = std::string(1, c);
-                op2 = clean_rhs.substr(i + 1);
-                return true;
-            }
-        }
-    }
-    
     return false;
 }
