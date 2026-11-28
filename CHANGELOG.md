@@ -2,6 +2,22 @@
 
 All notable changes to this project will be documented in this file.  The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),  and this project adheres to [Calendar Versioning](https://calver.org/) (CalVer) with the format `YY.MM.DD`.
 
+## [26.11.28] - 2026-11-28
+
+### Highlights
+
+- Restricted Android application builds exclusively to 64-bit ARM (`arm64-v8a` / ARMv8-A).
+
+### Build and packaging
+
+- Configured `ndk.abiFilters` and ABI splits in Gradle to compile native C++ libraries and package APKs strictly for `arm64-v8a` (retaining `-PtestAbi=x86_64` override for CI emulator testing).
+- Removed `armeabi-v7a`, `x86`, `x86_64`, and universal APK build targets and upload steps from the release workflow.
+
+### Validation and downloads
+
+- Verified C++ engine and help coverage test suites via CTest.
+- Release APKs are provided exclusively for `arm64-v8a`.
+
 ## [26.11.22] - 2026-11-22
 
 ### Highlights
@@ -30,7 +46,7 @@ All notable changes to this project will be documented in this file.  The format
 
 - Added Android regression tests, native and JNI checks, sanitizer checks, conversion fuzzing, and automated performance reports with Perfetto traces.
 - Verified process restoration, upgrades with retained data, and theme, font-size, and screen combinations through device testing.
-- APKs are provided exclusively for 64-bit ARM (arm64-v8a / ARMv8-A). Deprecated and removed legacy 32-bit (armeabi-v7a, x86) and x86_64 target builds.
+- APKs are provided separately for arm64-v8a, armeabi-v7a, x86_64, and x86, plus a universal APK.
 
 ## [26.10.25] - 2026-10-25
 
