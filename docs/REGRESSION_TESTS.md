@@ -38,7 +38,7 @@ bash tools/run_android_regression.sh
 ```
 
 `-PtestAbi=x86_64` selects the CI test build and limits APK splits for the emulator.
-Normal APK/release builds retain the full ABI set. The instrumentation runner and
+Normal APK/release builds target arm64-v8a (ARMv8-A) exclusively. The instrumentation runner and
 its dependencies are confined to Android test configuration.
 
 ## Coverage limits

@@ -30,7 +30,7 @@ All notable changes to this project will be documented in this file.  The format
 
 - Added Android regression tests, native and JNI checks, sanitizer checks, conversion fuzzing, and automated performance reports with Perfetto traces.
 - Verified process restoration, upgrades with retained data, and theme, font-size, and screen combinations through device testing.
-- APKs are provided separately for arm64-v8a, armeabi-v7a, x86_64, and x86, plus a universal APK.
+- APKs are provided exclusively for 64-bit ARM (arm64-v8a / ARMv8-A). Deprecated and removed legacy 32-bit (armeabi-v7a, x86) and x86_64 target builds.
 
 ## [26.10.25] - 2026-10-25
 

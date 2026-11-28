@@ -159,21 +159,10 @@ jobs:
       - name: Prepare APK artifact names
         run: |
           cd "app/build/outputs/apk/${APK_VARIANT}"
-          for abi in arm64-v8a armeabi-v7a x86_64 x86 universal; do
-            files=( *-"${abi}"-*.apk )
-            test "${#files[@]}" -eq 1 && test -f "${files[0]}" || exit 1
-            suffix="-${abi}"
-            if [[ "$abi" == universal ]]; then suffix=""; fi
-            mv "${files[0]}" "${ARTIFACT_NAME}${suffix}.apk"
-          done
-
-      - name: Upload universal APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}-universal
-          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}.apk
-          if-no-files-found: error
-          retention-days: 3
+          files=( *-arm64-v8a-*.apk )
+          test "${#files[@]}" -eq 1 && test -f "${files[0]}" || exit 1
+          mv "${files[0]}" "${ARTIFACT_NAME}-arm64-v8a.apk"
+          cp "${ARTIFACT_NAME}-arm64-v8a.apk" "${ARTIFACT_NAME}.apk"
 
       - name: Upload arm64-v8a APK
         uses: actions/upload-artifact@v4
@@ -183,27 +172,11 @@ jobs:
           if-no-files-found: error
           retention-days: 3
 
-      - name: Upload armeabi-v7a APK
+      - name: Upload default APK
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ env.ARTIFACT_NAME }}-armeabi-v7a
-          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-armeabi-v7a.apk
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload x86_64 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}-x86_64
-          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-x86_64.apk
-          if-no-files-found: error
-          retention-days: 3
-
-      - name: Upload x86 APK
-        uses: actions/upload-artifact@v4
-        with:
-          name: ${{ env.ARTIFACT_NAME }}-x86
-          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}-x86.apk
+          name: ${{ env.ARTIFACT_NAME }}
+          path: app/build/outputs/apk/${{ env.APK_VARIANT }}/${{ env.ARTIFACT_NAME }}.apk
           if-no-files-found: error
           retention-days: 3
 

@@ -23,6 +23,10 @@ android {
         val appVersionName = System.getenv("VERSION_NAME") ?: (project.findProperty("versionName") as? String ?: "26.10.25")
         versionName = appVersionName
 
+        ndk {
+            abiFilters.addAll(testAbi?.let { setOf(it) } ?: setOf("arm64-v8a"))
+        }
+
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++20"
@@ -35,8 +39,8 @@ android {
         abi {
             isEnable = true
             reset()
-            include(*(testAbi?.let { arrayOf(it) } ?: arrayOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")))
-            isUniversalApk = true
+            include(*(testAbi?.let { arrayOf(it) } ?: arrayOf("arm64-v8a")))
+            isUniversalApk = false
         }
     }
 
