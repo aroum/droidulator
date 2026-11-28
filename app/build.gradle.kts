@@ -23,10 +23,6 @@ android {
         val appVersionName = System.getenv("VERSION_NAME") ?: (project.findProperty("versionName") as? String ?: "26.10.25")
         versionName = appVersionName
 
-        ndk {
-            abiFilters.addAll(testAbi?.let { setOf(it) } ?: setOf("arm64-v8a"))
-        }
-
         externalNativeBuild {
             cmake {
                 cppFlags += "-std=c++20"
